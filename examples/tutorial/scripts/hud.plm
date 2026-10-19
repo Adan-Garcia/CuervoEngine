@@ -1,0 +1,46 @@
+// The HUD and the game-over menu: a CanvasLayer, so it draws on top of the
+// game. The menu's layout is a scene file made of UI nodes.
+class Hud extends CanvasLayer {
+    var menu: CanvasLayer
+
+    fn ready() {
+        // Keeps updating while the game is paused, so it can unpause it.
+        always_process = true
+        layer = 10
+        menu = Scene.load("scenes/game_over.scene") as CanvasLayer
+        menu.visible = false
+        add_child(menu)
+        (menu.find("retry") as Button).pressed.connect(fn() { Game.main.start_round() })
+    }
+
+    fn update(dt: float) {
+        if Game.main.playing && Input.pressed(#pause) {
+            Scene.paused = !Scene.paused
+        }
+    }
+
+    fn show_game_over(score: int, best: int) {
+        (menu.find("score") as Label).text = "SCORE {score}   BEST {best}"
+        menu.visible = true
+        // The key that ended the round mustn't also press the button.
+        UI.consume_input()
+        (menu.find("retry") as Control).grab_focus()
+    }
+
+    fn hide_game_over() {
+        menu.visible = false
+        UI.focused = null
+    }
+
+    fn draw(g: Canvas) {
+        var game = Game.main
+        g.text(vec2(24.0, 18.0), "SCORE {game.score}", size = 28.0, color = INK)
+        g.text(vec2(24.0, 54.0), "BEST {game.best}", size = 16.0, color = INK.with_alpha(0.6))
+        for i in 0..game.lives {
+            g.circle(vec2(Screen.size.x - 30.0 - (i as float) * 28.0, 34.0), 9.0, fill = GEM_COLOR)
+        }
+        if Scene.paused {
+            g.text(Screen.size * 0.5, "PAUSED", size = 48.0, color = INK, align = #center, baseline = #middle)
+        }
+    }
+}

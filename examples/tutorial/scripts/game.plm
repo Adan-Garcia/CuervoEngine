@@ -1,0 +1,109 @@
+// Starfall: the root node. It owns the rain, the score and the lives, and
+// starts and ends rounds (docs/GUIDE.md builds it step by step).
+
+// Collision layers: the bit numbers Emitter `layer`/`hits` and
+// Collision.hitbox use.
+const LAYER_PLAYER = 0
+const LAYER_RAIN = 1
+
+var INK = Color.hex("e8ecff")
+var RAIN_COLOR = Color.hex("7fc8ff")
+var GEM_COLOR = Color.hex("ffd866")
+
+class Game extends Node {
+    static var main: Game
+
+    var score = 0
+    var best = 0
+    var lives = 3
+    var playing = false
+    var player: Player
+    var hud: Hud
+    var spawner: Task
+
+    // The rain: gameplay particles on LAYER_RAIN that hit hitboxes on
+    // LAYER_PLAYER (a hit calls the hitbox owner's on_hit).
+    var rain = Emitter(tag = #rain, layer = LAYER_RAIN, hits = 1 << LAYER_PLAYER, shape = #capsule)
+    // Sparkles for pickups and hits: particles without collision.
+    var sparks = Emitter(tag = #sparks)
+
+    fn ready() {
+        Game.main = self
+        rain.add(Module.Accelerate(by = vec2(0.0, 160.0)))
+        sparks.add(Module.Drag(k = 3.0))
+        sparks.add(Module.SizeOverLife(from = 1.0, to = 0.0))
+        hud = Hud()
+        add_child(hud)
+        start_round()
+    }
+
+    fn start_round() {
+        for c in children {
+            if c is Player || c is Gem {
+                c.queue_free()
+            }
+        }
+        rain.clear()
+        Scene.paused = false
+        score = 0
+        lives = 3
+        playing = true
+        player = Player()
+        add_child(player)
+        spawner = start(run_spawner())
+        hud.hide_game_over()
+    }
+
+    // A coroutine: a shower of rain, then a pause that gets shorter every
+    // time. It runs alongside update() until the round ends.
+    fn run_spawner() {
+        var delay = 0.7
+        loop {
+            var x = Random.range(40.0, Screen.size.x - 40.0)
+            rain.fire(Pattern.Arc(count = 4, direction = PI / 2.0, spread = 0.6), vec2(x, -20.0),
+                      Shot { speed = 140.0, speed_jitter = 40.0, life = 0.0, size = 7.0, color = RAIN_COLOR })
+            if Random.chance(0.35) {
+                var gem = Gem()
+                gem.position = vec2(Random.range(60.0, Screen.size.x - 60.0), -20.0)
+                add_child(gem)
+            }
+            await wait(delay)
+            delay = max(delay * 0.97, 0.2)
+        }
+    }
+
+    fn add_score(points: int) {
+        score += points
+        best = max(best, score)
+    }
+
+    fn burst(at: vec2, color: Color) {
+        sparks.fire(Pattern.Burst(count = 24, direction = 0.0, spread = TAU), at,
+                    Shot { speed = 160.0, speed_jitter = 60.0, life = 0.5, size = 4.0, color = color })
+    }
+
+    // Player.on_hit calls this when the rain gets through.
+    fn hurt() {
+        lives -= 1
+        Audio.play(#hurt, volume = 0.6)
+        rain.kill_near(player.position, 160.0)
+        burst(player.position, RAIN_COLOR)
+        if lives <= 0 {
+            game_over()
+        }
+    }
+
+    fn game_over() {
+        playing = false
+        spawner.cancel()
+        player.queue_free()
+        hud.show_game_over(score, best)
+    }
+
+    fn draw(g: Canvas) {
+        var ground = Screen.size.y - 8.0
+        g.line(vec2(0.0, ground), vec2(Screen.size.x, ground), color = INK.with_alpha(0.2), width = 2.0)
+        rain.draw(g)
+        sparks.draw(g)
+    }
+}

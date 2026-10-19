@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Engine test asset: fill rules (nonzero vs evenodd stars and rings),
+     self-intersecting paths, arcs with every flag combination, relative and
+     smooth curve commands, compact path syntax. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="360">
+  <!-- pentagrams: nonzero fills the center, evenodd leaves it empty -->
+  <path d="M70,20 L100,110 L25,55 L115,55 L40,110 Z" fill="#457b9d" fill-rule="nonzero"/>
+  <path d="M190,20 L220,110 L145,55 L235,55 L160,110 Z" fill="#457b9d" fill-rule="evenodd"/>
+
+  <!-- rings: same-direction inner circle (nonzero = filled, evenodd = hole),
+       opposite-direction inner circle (hole for both) -->
+  <path fill-rule="nonzero" fill="#e76f51"
+        d="M300 65 a45 45 0 1 0 90 0 a45 45 0 1 0 -90 0 M320 65 a25 25 0 1 0 50 0 a25 25 0 1 0 -50 0"/>
+  <path fill-rule="evenodd" fill="#e76f51"
+        d="M400 65 a35 35 0 1 0 70 0 a35 35 0 1 0 -70 0 M415 65 a20 20 0 1 0 40 0 a20 20 0 1 0 -40 0"/>
+  <path fill="#2a9d8f"
+        d="M300 160 a45 45 0 1 0 90 0 a45 45 0 1 0 -90 0 M320 160 a25 25 0 1 1 50 0 a25 25 0 1 1 -50 0"/>
+
+  <!-- the four arcs between two points: large-arc / sweep flags -->
+  <g fill="none" stroke-width="5">
+    <path d="M40 200 A50 35 0 0 0 120 230" stroke="#e63946"/>
+    <path d="M40 200 A50 35 0 0 1 120 230" stroke="#2a9d8f"/>
+    <path d="M40 200 A50 35 0 1 0 120 230" stroke="#f4a261"/>
+    <path d="M40 200 A50 35 0 1 1 120 230" stroke="#264653"/>
+    <!-- rotated ellipse arc, compact flags, radii too small (scaled up) -->
+    <path d="M160 300a30 15 30 1 1 60-20" stroke="#7209b7"/>
+    <path d="M160 340 A5 5 0 0 1 240 340" stroke="#06d6a0"/>
+  </g>
+
+  <!-- smooth cubic + quadratic chains, relative commands -->
+  <path d="M250 260 c20-40 60-40 80 0 s60 40 80 0 M250 320 q20 -40 40 0 t40 0 t40 0 t40 0"
+        fill="none" stroke="#1d3557" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- self-intersecting bow tie, both rules (identical) -->
+  <path d="M150,140 L230,190 L230,140 L150,190 Z" fill="#8338ec" fill-opacity="0.7"/>
+  <!-- figure-eight curve with a translucent fill -->
+  <path d="M20 130 C 20 180, 120 120, 120 170 C 120 220, 20 160, 20 130 Z" fill="#ffbe0b" fill-opacity="0.8"
+        stroke="#fb5607" stroke-width="2"/>
+</svg>

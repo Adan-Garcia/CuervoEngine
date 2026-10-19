@@ -1,0 +1,27 @@
+# Starfall: dodge the rain, catch the gems. The game docs/GUIDE.md builds
+# step by step.
+#   cuervo --game examples/tutorial
+name = "Starfall"
+main = "Game"                  # the root node's class (scripts/game.plm)
+virtual_size = [1280, 720]
+tick_rate = 60
+seed = 20261018
+clear_color = "0b1026"
+render_tier = "compatible"     # runs on Vulkan, GL and the web
+
+[scene]
+transform_hierarchy = false   # script-driven world-space scene (DESIGN.md 4.17)
+
+[input.actions]
+pause = ["Key.Escape", "Key.P", "Pad.Start"]
+# The engine UI's actions (menus, DESIGN.md 4.10)
+ui_up = ["Key.Up", "Key.W", "Pad.DpadUp", "Pad.LeftStickUp"]
+ui_down = ["Key.Down", "Key.S", "Pad.DpadDown", "Pad.LeftStickDown"]
+ui_left = ["Key.Left", "Key.A", "Pad.DpadLeft", "Pad.LeftStickLeft"]
+ui_right = ["Key.Right", "Key.D", "Pad.DpadRight", "Pad.LeftStickRight"]
+ui_accept = ["Key.Enter", "Key.Space", "Pad.South"]
+ui_cancel = ["Key.Backspace", "Pad.East"]
+ui_click = ["Mouse.Left"]
+
+[input.axes]
+move = ["Keys.Arrows", "Keys.WASD", "Pad.LeftStick", "Pad.Dpad"]

@@ -1,0 +1,1402 @@
+// Pluma standard math library (Milestone 9.2b, LANGUAGE.md 9.20 - 9.24):
+// scalar, integer and vector helpers, Rect2, Transform2D, geometry, noise and
+// seeded random streams. Plain Pluma source compiled before a game's own
+// scripts (the engine embeds it in its prelude; the language tests load it
+// with pluma::add_math_prelude).
+//
+// Determinism (DESIGN.md 4.1): every function is built only from IEEE-exact
+// float operations (+ - * / sqrt floor ceil round), integer arithmetic, and the
+// transcendental built-ins (sin, cos, exp, log, pow, atan2), which the host
+// routes through its deterministic math. So a result is the same in the VM, in
+// AOT-to-C and, in the engine, bit for bit what cuervo/math/dmath computes.
+
+// ---------------------------------------------------------------- constants
+
+// Half a turn, in radians (angles are radians everywhere, DESIGN.md 7.1).
+const PI = 3.1415927
+// A full turn, in radians.
+const TAU = 6.2831855
+// Euler's number.
+const E = 2.7182817
+// The square root of 2.
+const SQRT2 = 1.4142135
+// Positive infinity.
+const INF = 1.0 / 0.0
+// Not a number (its sign bit is unspecified; test with is_nan, never ==).
+const NAN = 0.0 / 0.0
+// The gap between 1.0 and the next float.
+const FLOAT_EPSILON = 1.1920929e-7
+// The largest and smallest `int`.
+const INT_MAX = 2147483647
+const INT_MIN = -2147483647 - 1
+
+// ------------------------------------------------------------------- scalar
+
+// `x` with its fractional part cut off (toward zero).
+fn trunc(x: float) -> float {
+    return x < 0.0 ? ceil(x) : floor(x)
+}
+
+// The part of `x` above its floor: always in [0, 1).
+fn fract(x: float) -> float {
+    return x - floor(x)
+}
+
+// `x` modulo `y` with the sign of `y` (a floored modulo: fposmod(-1, 3) is 2).
+fn fposmod(x: float, y: float) -> float {
+    return x - y * floor(x / y)
+}
+
+// sqrt(x * x + y * y) without overflow in the squares.
+fn hypot(x: float, y: float) -> float {
+    var ax = abs(x)
+    var ay = abs(y)
+    if ax == INF || ay == INF {
+        return INF
+    }
+    if ax != ax || ay != ay {
+        return NAN
+    }
+    var m = max(ax, ay)
+    if m == 0.0 {
+        return 0.0
+    }
+    var a = ax / m
+    var b = ay / m
+    return m * sqrt(a * a + b * b)
+}
+
+// The magnitude of `x` with the sign of `sign_of` (negative zero counts as negative).
+fn copysign(x: float, sign_of: float) -> float {
+    var negative = sign_of < 0.0 || sign_of == 0.0 && 1.0 / sign_of < 0.0
+    var mag = abs(x)
+    return negative ? -mag : mag
+}
+
+// `x` rounded to the nearest multiple of `increment` (0 returns `x`).
+fn snapped(x: float, increment: float) -> float {
+    return increment == 0.0 ? x : floor(x / increment + 0.5) * increment
+}
+
+// Bounces `t` back and forth between 0 and `length`.
+fn pingpong(t: float, length: float) -> float {
+    if length == 0.0 {
+        return 0.0
+    }
+    var m = fposmod(t, length * 2.0)
+    return m > length ? length * 2.0 - m : m
+}
+
+// The shortest signed angle from `from` to `to`, in [-PI, PI).
+fn angle_difference(from: float, to: float) -> float {
+    return wrap_angle(to - from)
+}
+
+// Interpolates between two angles the short way around.
+fn lerp_angle(from: float, to: float, t: float) -> float {
+    return from + angle_difference(from, to) * t
+}
+
+// Turns `from` toward `to` by at most `max_delta` radians, the short way.
+fn rotate_toward(from: float, to: float, max_delta: float) -> float {
+    var d = angle_difference(from, to)
+    if abs(d) <= max_delta {
+        return to
+    }
+    return from + (d > 0.0 ? max_delta : -max_delta)
+}
+
+fn is_nan(x: float) -> bool {
+    return x != x
+}
+
+fn is_inf(x: float) -> bool {
+    return x == INF || x == -INF
+}
+
+// Neither infinite nor NaN.
+fn is_finite(x: float) -> bool {
+    return x - x == 0.0
+}
+
+// True when `a` and `b` differ by at most `epsilon` relative to the larger
+// magnitude (absolute below 1).
+fn is_equal_approx(a: float, b: float, epsilon = 0.00001) -> bool {
+    if a == b {
+        return true
+    }
+    return abs(a - b) <= epsilon * max(1.0, max(abs(a), abs(b)))
+}
+
+// A cubic Bezier through `p0` to `p3` with control points `p1`, `p2`, at `t`.
+fn bezier(p0: float, p1: float, p2: float, p3: float, t: float) -> float {
+    var u = 1.0 - t
+    return u * u * u * p0 + 3.0 * u * u * t * p1 + 3.0 * u * t * t * p2 + t * t * t * p3
+}
+
+// A quadratic Bezier from `p0` to `p2` with control point `p1`.
+fn bezier_quad(p0: float, p1: float, p2: float, t: float) -> float {
+    var u = 1.0 - t
+    return u * u * p0 + 2.0 * u * t * p1 + t * t * p2
+}
+
+// `bezier` for points.
+fn bezier_vec2(p0: vec2, p1: vec2, p2: vec2, p3: vec2, t: float) -> vec2 {
+    var u = 1.0 - t
+    return p0 * (u * u * u) + p1 * (3.0 * u * u * t) + p2 * (3.0 * u * t * t) + p3 * (t * t * t)
+}
+
+// `bezier_quad` for points.
+fn bezier_quad_vec2(p0: vec2, p1: vec2, p2: vec2, t: float) -> vec2 {
+    var u = 1.0 - t
+    return p0 * (u * u) + p1 * (2.0 * u * t) + p2 * (t * t)
+}
+
+// Hyperbolic functions (from `exp`, so they use the host's deterministic math).
+fn sinh(x: float) -> float {
+    if abs(x) < 0.1 {
+        var x2 = x * x
+        return x * (1.0 + x2 * (1.0 / 6.0 + x2 * (1.0 / 120.0 + x2 * (1.0 / 5040.0))))
+    }
+    return (exp(x) - exp(-x)) * 0.5
+}
+
+fn cosh(x: float) -> float {
+    return (exp(x) + exp(-x)) * 0.5
+}
+
+fn tanh(x: float) -> float {
+    if abs(x) < 0.1 {
+        var x2 = x * x
+        return x * (1.0 - x2 * (1.0 / 3.0 - x2 * (2.0 / 15.0 - x2 * (17.0 / 315.0))))
+    }
+    if x > 9.0 {
+        return 1.0
+    }
+    if x < -9.0 {
+        return -1.0
+    }
+    var e2 = exp(2.0 * x)
+    return (e2 - 1.0) / (e2 + 1.0)
+}
+
+fn asinh(x: float) -> float {
+    var a = abs(x)
+    var r = log(a + sqrt(a * a + 1.0))
+    return x < 0.0 ? -r : r
+}
+
+// NaN below 1.
+fn acosh(x: float) -> float {
+    return log(x + sqrt(x * x - 1.0))
+}
+
+// NaN outside (-1, 1) except +-1, which give +-infinity.
+fn atanh(x: float) -> float {
+    return 0.5 * log((1.0 + x) / (1.0 - x))
+}
+
+// The real cube root (negative inputs give negative roots).
+fn cbrt(x: float) -> float {
+    if x == 0.0 || !is_finite(x) {
+        return x
+    }
+    var a = abs(x)
+    var y = exp(log(a) * 0.33333334)
+    y = y - (y * y * y - a) / (3.0 * y * y)
+    y = y - (y * y * y - a) / (3.0 * y * y)
+    return x < 0.0 ? -y : y
+}
+
+// ------------------------------------------------------------------- easing
+
+// The ten easing families of easings.net.
+enum Ease {
+    Sine,
+    Quad,
+    Cubic,
+    Quart,
+    Quint,
+    Expo,
+    Circ,
+    Back,
+    Elastic,
+    Bounce,
+}
+
+fn _bounce_out(t: float) -> float {
+    if t < 1.0 / 2.75 {
+        return 7.5625 * t * t
+    }
+    if t < 2.0 / 2.75 {
+        var u = t - 1.5 / 2.75
+        return 7.5625 * u * u + 0.75
+    }
+    if t < 2.5 / 2.75 {
+        var u = t - 2.25 / 2.75
+        return 7.5625 * u * u + 0.9375
+    }
+    var u = t - 2.625 / 2.75
+    return 7.5625 * u * u + 0.984375
+}
+
+// Easing that starts slow: 0 at t = 0, 1 at t = 1.
+fn ease_in(kind: Ease, t: float) -> float {
+    match kind {
+        Ease.Sine => return 1.0 - cos(t * PI * 0.5)
+        Ease.Quad => return t * t
+        Ease.Cubic => return t * t * t
+        Ease.Quart => return t * t * t * t
+        Ease.Quint => return t * t * t * t * t
+        Ease.Expo => return t == 0.0 ? 0.0 : pow(2.0, 10.0 * t - 10.0)
+        Ease.Circ => return 1.0 - sqrt(1.0 - t * t)
+        Ease.Back => return 2.70158 * t * t * t - 1.70158 * t * t
+        Ease.Elastic => {
+            if t == 0.0 {
+                return 0.0
+            }
+            if t == 1.0 {
+                return 1.0
+            }
+            return -pow(2.0, 10.0 * t - 10.0) * sin((t * 10.0 - 10.75) * (TAU / 3.0))
+        }
+        Ease.Bounce => return 1.0 - _bounce_out(1.0 - t)
+    }
+}
+
+// Easing that ends slow (`ease_in` mirrored).
+fn ease_out(kind: Ease, t: float) -> float {
+    return 1.0 - ease_in(kind, 1.0 - t)
+}
+
+// Slow at both ends.
+fn ease_in_out(kind: Ease, t: float) -> float {
+    if t < 0.5 {
+        return ease_in(kind, 2.0 * t) * 0.5
+    }
+    return 1.0 - ease_in(kind, 2.0 - 2.0 * t) * 0.5
+}
+
+// Godot-style ease: `curve` > 1 eases in, between 0 and 1 eases out, < 0
+// eases in and out; 0 returns 0. `x` is clamped to [0, 1].
+fn ease(x: float, curve: float) -> float {
+    var v = clamp(x, 0.0, 1.0)
+    if curve > 0.0 {
+        if curve < 1.0 {
+            return 1.0 - pow(1.0 - v, 1.0 / curve)
+        }
+        return pow(v, curve)
+    }
+    if curve < 0.0 {
+        if v < 0.5 {
+            return pow(v * 2.0, -curve) * 0.5
+        }
+        return (1.0 - pow(1.0 - (v - 0.5) * 2.0, -curve)) * 0.5 + 0.5
+    }
+    return 0.0
+}
+
+// ------------------------------------------------------------------ integers
+// On `int` (32-bit). Intermediate values are 64-bit, so only a result that
+// does not fit panics.
+
+// The greatest common divisor (never negative; gcd(0, 0) is 0).
+fn gcd(a: int, b: int) -> int {
+    var x = a as i64
+    var y = b as i64
+    if x < 0 {
+        x = -x
+    }
+    if y < 0 {
+        y = -y
+    }
+    while y != 0 {
+        var r = x % y
+        x = y
+        y = r
+    }
+    return x as int
+}
+
+// The least common multiple (0 when either is 0). Panics if it exceeds `int`.
+fn lcm(a: int, b: int) -> int {
+    if a == 0 || b == 0 {
+        return 0
+    }
+    var x = a as i64
+    var y = b as i64
+    if x < 0 {
+        x = -x
+    }
+    if y < 0 {
+        y = -y
+    }
+    var l = x / gcd(a, b) as i64 * y
+    if l > 2147483647i64 {
+        panic("lcm({a}, {b}) does not fit in 'int'")
+    }
+    return l as int
+}
+
+// `base` to the power `exp` (exp >= 0). Panics on overflow.
+fn ipow(base: int, exp: int) -> int {
+    if exp < 0 {
+        panic("ipow: the exponent {exp} is negative")
+    }
+    var result = 1i64
+    var b = base as i64
+    var e = exp
+    while e > 0 {
+        if e & 1 == 1 {
+            result = result * b
+            if result > 2147483647i64 || result < -2147483648i64 {
+                panic("integer overflow in 'ipow'")
+            }
+        }
+        e = e >> 1
+        if e > 0 {
+            b = b * b
+            if b > 2147483647i64 || b < -2147483648i64 {
+                panic("integer overflow in 'ipow'")
+            }
+        }
+    }
+    return result as int
+}
+
+// The integer square root: the largest r with r * r <= n. Panics if n < 0.
+fn isqrt(n: int) -> int {
+    if n < 0 {
+        panic("isqrt: {n} is negative")
+    }
+    var x = floor(sqrt(n as f64)) as i64
+    var v = n as i64
+    while x * x > v {
+        x = x - 1
+    }
+    while (x + 1) * (x + 1) <= v {
+        x = x + 1
+    }
+    return x as int
+}
+
+// Quotient and remainder together.
+struct DivMod {
+    var quot = 0
+    var rem = 0
+}
+
+// `a / b` and `a % b` (truncating, like the operators). Panics if b is 0.
+fn divmod(a: int, b: int) -> DivMod {
+    return DivMod { quot = a / b, rem = a % b }
+}
+
+// Division rounded toward negative infinity.
+fn floor_div(a: int, b: int) -> int {
+    var q = a / b
+    if a % b != 0 && a < 0 != b < 0 {
+        q = q - 1
+    }
+    return q
+}
+
+// The remainder of `floor_div`: it has the sign of `b` (floor_mod(-1, 3) is 2).
+fn floor_mod(a: int, b: int) -> int {
+    var r = a % b
+    if r != 0 && r < 0 != b < 0 {
+        r = r + b
+    }
+    return r
+}
+
+// The number of set bits of `x` (as 32 bits).
+fn popcount(x: int) -> int {
+    var u = x as u32
+    var n = 0
+    while u != 0 {
+        u = u & u - 1
+        n += 1
+    }
+    return n
+}
+
+// The number of leading zero bits of `x` (as 32 bits; 32 for 0).
+fn clz(x: int) -> int {
+    var u = x as u32
+    if u == 0 {
+        return 32
+    }
+    var n = 0
+    while u & 0x80000000u32 == 0 {
+        u = u << 1
+        n += 1
+    }
+    return n
+}
+
+// The number of trailing zero bits of `x` (32 for 0).
+fn ctz(x: int) -> int {
+    var u = x as u32
+    if u == 0 {
+        return 32
+    }
+    var n = 0
+    while u & 1 == 0 {
+        u = u >> 1
+        n += 1
+    }
+    return n
+}
+
+// ----------------------------------------------------------- integer vectors
+// `ivec2`, `ivec3` and `ivec4` are structs of `int` components (grid cells,
+// tile coordinates). Build them with `ivec2.of(x, y)`; `+ - *` and unary `-`
+// work componentwise (`*` multiplies two vectors; `scaled(k)` multiplies by an
+// int), `==` compares components. They convert to and from `vec2/3/4`.
+
+struct ivec2: Add, Sub, Mul, Neg {
+    var x = 0
+    var y = 0
+
+    static fn of(x: int, y: int) -> ivec2 {
+        return ivec2 { x = x, y = y }
+    }
+
+    // Each component rounded down.
+    static fn floor_of(v: vec2) -> ivec2 {
+        return ivec2 { x = floor(v.x) as int, y = floor(v.y) as int }
+    }
+
+    fn to_vec() -> vec2 {
+        return vec2(x as float, y as float)
+    }
+
+    fn add(o: ivec2) -> ivec2 {
+        return ivec2 { x = x + o.x, y = y + o.y }
+    }
+
+    fn sub(o: ivec2) -> ivec2 {
+        return ivec2 { x = x - o.x, y = y - o.y }
+    }
+
+    fn mul(o: ivec2) -> ivec2 {
+        return ivec2 { x = x * o.x, y = y * o.y }
+    }
+
+    fn neg() -> ivec2 {
+        return ivec2 { x = -x, y = -y }
+    }
+
+    fn scaled(k: int) -> ivec2 {
+        return ivec2 { x = x * k, y = y * k }
+    }
+
+    fn dot(o: ivec2) -> int {
+        return x * o.x + y * o.y
+    }
+
+    fn length_squared() -> int {
+        return x * x + y * y
+    }
+
+    fn abs() -> ivec2 {
+        return ivec2 { x = x < 0 ? -x : x, y = y < 0 ? -y : y }
+    }
+
+    fn min(o: ivec2) -> ivec2 {
+        return ivec2 { x = x < o.x ? x : o.x, y = y < o.y ? y : o.y }
+    }
+
+    fn max(o: ivec2) -> ivec2 {
+        return ivec2 { x = x > o.x ? x : o.x, y = y > o.y ? y : o.y }
+    }
+
+    fn clamp(lo: ivec2, hi: ivec2) -> ivec2 {
+        return ivec2 { x = x < lo.x ? lo.x : x > hi.x ? hi.x : x, y = y < lo.y ? lo.y : y > hi.y ? hi.y : y }
+    }
+}
+
+struct ivec3: Add, Sub, Mul, Neg {
+    var x = 0
+    var y = 0
+    var z = 0
+
+    static fn of(x: int, y: int, z: int) -> ivec3 {
+        return ivec3 { x = x, y = y, z = z }
+    }
+
+    static fn floor_of(v: vec3) -> ivec3 {
+        return ivec3 { x = floor(v.x) as int, y = floor(v.y) as int, z = floor(v.z) as int }
+    }
+
+    fn to_vec() -> vec3 {
+        return vec3(x as float, y as float, z as float)
+    }
+
+    fn add(o: ivec3) -> ivec3 {
+        return ivec3 { x = x + o.x, y = y + o.y, z = z + o.z }
+    }
+
+    fn sub(o: ivec3) -> ivec3 {
+        return ivec3 { x = x - o.x, y = y - o.y, z = z - o.z }
+    }
+
+    fn mul(o: ivec3) -> ivec3 {
+        return ivec3 { x = x * o.x, y = y * o.y, z = z * o.z }
+    }
+
+    fn neg() -> ivec3 {
+        return ivec3 { x = -x, y = -y, z = -z }
+    }
+
+    fn scaled(k: int) -> ivec3 {
+        return ivec3 { x = x * k, y = y * k, z = z * k }
+    }
+
+    fn dot(o: ivec3) -> int {
+        return x * o.x + y * o.y + z * o.z
+    }
+
+    fn length_squared() -> int {
+        return x * x + y * y + z * z
+    }
+
+    fn abs() -> ivec3 {
+        return ivec3 { x = x < 0 ? -x : x, y = y < 0 ? -y : y, z = z < 0 ? -z : z }
+    }
+
+    fn min(o: ivec3) -> ivec3 {
+        return ivec3 { x = x < o.x ? x : o.x, y = y < o.y ? y : o.y, z = z < o.z ? z : o.z }
+    }
+
+    fn max(o: ivec3) -> ivec3 {
+        return ivec3 { x = x > o.x ? x : o.x, y = y > o.y ? y : o.y, z = z > o.z ? z : o.z }
+    }
+
+    fn clamp(lo: ivec3, hi: ivec3) -> ivec3 {
+        return ivec3 { x = x < lo.x ? lo.x : x > hi.x ? hi.x : x, y = y < lo.y ? lo.y : y > hi.y ? hi.y : y, z = z < lo.z ? lo.z : z > hi.z ? hi.z : z }
+    }
+}
+
+struct ivec4: Add, Sub, Mul, Neg {
+    var x = 0
+    var y = 0
+    var z = 0
+    var w = 0
+
+    static fn of(x: int, y: int, z: int, w: int) -> ivec4 {
+        return ivec4 { x = x, y = y, z = z, w = w }
+    }
+
+    static fn floor_of(v: vec4) -> ivec4 {
+        return ivec4 { x = floor(v.x) as int, y = floor(v.y) as int, z = floor(v.z) as int, w = floor(v.w) as int }
+    }
+
+    fn to_vec() -> vec4 {
+        return vec4(x as float, y as float, z as float, w as float)
+    }
+
+    fn add(o: ivec4) -> ivec4 {
+        return ivec4 { x = x + o.x, y = y + o.y, z = z + o.z, w = w + o.w }
+    }
+
+    fn sub(o: ivec4) -> ivec4 {
+        return ivec4 { x = x - o.x, y = y - o.y, z = z - o.z, w = w - o.w }
+    }
+
+    fn mul(o: ivec4) -> ivec4 {
+        return ivec4 { x = x * o.x, y = y * o.y, z = z * o.z, w = w * o.w }
+    }
+
+    fn neg() -> ivec4 {
+        return ivec4 { x = -x, y = -y, z = -z, w = -w }
+    }
+
+    fn scaled(k: int) -> ivec4 {
+        return ivec4 { x = x * k, y = y * k, z = z * k, w = w * k }
+    }
+
+    fn dot(o: ivec4) -> int {
+        return x * o.x + y * o.y + z * o.z + w * o.w
+    }
+
+    fn length_squared() -> int {
+        return x * x + y * y + z * z + w * w
+    }
+
+    fn abs() -> ivec4 {
+        return ivec4 { x = x < 0 ? -x : x, y = y < 0 ? -y : y, z = z < 0 ? -z : z, w = w < 0 ? -w : w }
+    }
+
+    fn min(o: ivec4) -> ivec4 {
+        return ivec4 { x = x < o.x ? x : o.x, y = y < o.y ? y : o.y, z = z < o.z ? z : o.z, w = w < o.w ? w : o.w }
+    }
+
+    fn max(o: ivec4) -> ivec4 {
+        return ivec4 { x = x > o.x ? x : o.x, y = y > o.y ? y : o.y, z = z > o.z ? z : o.z, w = w > o.w ? w : o.w }
+    }
+
+    fn clamp(lo: ivec4, hi: ivec4) -> ivec4 {
+        return ivec4 { x = x < lo.x ? lo.x : x > hi.x ? hi.x : x, y = y < lo.y ? lo.y : y > hi.y ? hi.y : y, z = z < lo.z ? lo.z : z > hi.z ? hi.z : z, w = w < lo.w ? lo.w : w > hi.w ? hi.w : w }
+    }
+}
+
+// -------------------------------------------------------------------- Rect2
+
+// An axis-aligned rectangle: `pos` is the top-left corner (y down), `size`
+// the width and height. A rectangle with a negative size is "inverted"; use
+// `abs()` to normalize it. Edges are half-open: `pos` is inside, `end()` is not.
+struct Rect2 {
+    var pos: vec2
+    var size: vec2
+
+    static fn of(x: float, y: float, w: float, h: float) -> Rect2 {
+        return Rect2 { pos = vec2(x, y), size = vec2(w, h) }
+    }
+
+    // The rectangle spanning two opposite corners, in any order.
+    static fn from_corners(a: vec2, b: vec2) -> Rect2 {
+        var lo = a.min(b)
+        return Rect2 { pos = lo, size = a.max(b) - lo }
+    }
+
+    // The corner opposite `pos`.
+    fn end() -> vec2 {
+        return pos + size
+    }
+
+    fn center() -> vec2 {
+        return pos + size * 0.5
+    }
+
+    fn area() -> float {
+        return size.x * size.y
+    }
+
+    // True when both width and height are positive.
+    fn has_area() -> bool {
+        return size.x > 0.0 && size.y > 0.0
+    }
+
+    fn contains(p: vec2) -> bool {
+        return p.x >= pos.x && p.y >= pos.y && p.x < pos.x + size.x && p.y < pos.y + size.y
+    }
+
+    // True when `o` lies completely inside this rectangle.
+    fn encloses(o: Rect2) -> bool {
+        return o.pos.x >= pos.x && o.pos.y >= pos.y && o.pos.x + o.size.x <= pos.x + size.x && o.pos.y + o.size.y <= pos.y + size.y
+    }
+
+    // True when the rectangles overlap (touching edges do not count).
+    fn intersects(o: Rect2) -> bool {
+        return pos.x < o.pos.x + o.size.x && pos.x + size.x > o.pos.x && pos.y < o.pos.y + o.size.y && pos.y + size.y > o.pos.y
+    }
+
+    // The overlap, or an empty rectangle (size 0) when they don't overlap.
+    fn intersection(o: Rect2) -> Rect2 {
+        if !intersects(o) {
+            return Rect2 { pos = pos, size = vec2(0.0, 0.0) }
+        }
+        var lo = pos.max(o.pos)
+        var hi = end().min(o.end())
+        return Rect2 { pos = lo, size = hi - lo }
+    }
+
+    // The smallest rectangle holding both.
+    fn merge(o: Rect2) -> Rect2 {
+        var lo = pos.min(o.pos)
+        var hi = end().max(o.end())
+        return Rect2 { pos = lo, size = hi - lo }
+    }
+
+    // The smallest rectangle holding this one and the point `p`.
+    fn expand(p: vec2) -> Rect2 {
+        var lo = pos.min(p)
+        var hi = end().max(p)
+        return Rect2 { pos = lo, size = hi - lo }
+    }
+
+    // Moves every edge out by `amount` (in by a negative amount).
+    fn grow(amount: float) -> Rect2 {
+        return Rect2 { pos = pos - vec2(amount, amount), size = size + vec2(amount * 2.0, amount * 2.0) }
+    }
+
+    // The same rectangle with a non-negative size.
+    fn abs() -> Rect2 {
+        var lo = pos.min(end())
+        return Rect2 { pos = lo, size = size.abs() }
+    }
+}
+
+// ----------------------------------------------------------------- Transform2D
+
+// A 2D affine transform: p' = (a*x + c*y + tx, b*x + d*y + ty), the layout of
+// an SVG matrix(a b c d e f). It is the same math as cuervo/math/affine2.hpp
+// (y down: a positive rotation turns clockwise on screen). `t1 * t2` applies
+// `t2` first: (t1 * t2).apply(p) == t1.apply(t2.apply(p)). The default is the
+// identity.
+struct Transform2D: Mul {
+    var a = 1.0
+    var b = 0.0
+    var c = 0.0
+    var d = 1.0
+    var tx = 0.0
+    var ty = 0.0
+
+    static fn identity() -> Transform2D {
+        return Transform2D {}
+    }
+
+    static fn translate(t: vec2) -> Transform2D {
+        return Transform2D { a = 1.0, b = 0.0, c = 0.0, d = 1.0, tx = t.x, ty = t.y }
+    }
+
+    static fn scale(s: vec2) -> Transform2D {
+        return Transform2D { a = s.x, b = 0.0, c = 0.0, d = s.y, tx = 0.0, ty = 0.0 }
+    }
+
+    static fn rotate(radians: float) -> Transform2D {
+        var co = cos(radians)
+        var si = sin(radians)
+        return Transform2D { a = co, b = si, c = -si, d = co, tx = 0.0, ty = 0.0 }
+    }
+
+    // Translate, then rotate, then scale (a node's usual local transform).
+    static fn from_trs(position: vec2, rotation: float, scale_by: vec2) -> Transform2D {
+        return translate(position) * rotate(rotation) * scale(scale_by)
+    }
+
+    // Moves a point.
+    fn apply(p: vec2) -> vec2 {
+        return vec2(a * p.x + c * p.y + tx, b * p.x + d * p.y + ty)
+    }
+
+    // Applies only the linear part (directions, extents).
+    fn apply_vector(v: vec2) -> vec2 {
+        return vec2(a * v.x + c * v.y, b * v.x + d * v.y)
+    }
+
+    fn determinant() -> float {
+        return a * d - b * c
+    }
+
+    // The identity when the transform isn't invertible.
+    fn inverse() -> Transform2D {
+        var det = a * d - b * c
+        if det == 0.0 {
+            return Transform2D {}
+        }
+        var inv = 1.0 / det
+        var ia = d * inv
+        var ib = -b * inv
+        var ic = -c * inv
+        var id = a * inv
+        return Transform2D { a = ia, b = ib, c = ic, d = id, tx = -(ia * tx + ic * ty), ty = -(ib * tx + id * ty) }
+    }
+
+    fn mul(r: Transform2D) -> Transform2D {
+        return Transform2D {
+            a = a * r.a + c * r.b,
+            b = b * r.a + d * r.b,
+            c = a * r.c + c * r.d,
+            d = b * r.c + d * r.d,
+            tx = a * r.tx + c * r.ty + tx,
+            ty = b * r.tx + d * r.ty + ty,
+        }
+    }
+
+    // Where the origin ends up.
+    fn origin() -> vec2 {
+        return vec2(tx, ty)
+    }
+
+    // The rotation of the x axis, in radians.
+    fn rotation() -> float {
+        return atan2(b, a)
+    }
+}
+
+// ----------------------------------------------------------------- geometry
+// Functions over `vec2` points. Polygons are `List<vec2>`; the closing edge is
+// implied. Screen conventions (y down): "clockwise" is as seen on screen.
+
+// The 2D cross product of (b - a) and (c - a): positive when a, b, c turn
+// clockwise on screen.
+fn cross3(a: vec2, b: vec2, c: vec2) -> float {
+    return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+}
+
+// The closest point to `p` on the segment from `a` to `b`.
+fn closest_point_on_segment(p: vec2, a: vec2, b: vec2) -> vec2 {
+    var ab = b - a
+    var len2 = ab.length_squared()
+    if len2 == 0.0 {
+        return a
+    }
+    var t = clamp((p - a).dot(ab) / len2, 0.0, 1.0)
+    return a + ab * t
+}
+
+// True when `p` is inside `polygon` (even-odd rule; points on an edge may go either way).
+fn point_in_polygon(p: vec2, polygon: List<vec2>) -> bool {
+    var inside = false
+    var n = polygon.len()
+    var j = n - 1
+    for i in 0..n {
+        var a = polygon[i]
+        var b = polygon[j]
+        if a.y > p.y != b.y > p.y && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x {
+            inside = !inside
+        }
+        j = i
+    }
+    return inside
+}
+
+// The point where segment p1-p2 crosses segment p3-p4, or null when they don't
+// touch (parallel and collinear segments give null too).
+fn segment_intersection(p1: vec2, p2: vec2, p3: vec2, p4: vec2) -> vec2? {
+    var d1 = p2 - p1
+    var d2 = p4 - p3
+    var denom = d1.cross(d2)
+    if denom == 0.0 {
+        return null
+    }
+    var diff = p3 - p1
+    var t = diff.cross(d2) / denom
+    var u = diff.cross(d1) / denom
+    if t < 0.0 || t > 1.0 || u < 0.0 || u > 1.0 {
+        return null
+    }
+    return p1 + d1 * t
+}
+
+// The distance along the ray (in lengths of `dir`) to the first point where it
+// enters the circle; 0 if the origin is inside; null on a miss.
+fn ray_circle_intersection(origin: vec2, dir: vec2, center: vec2, radius: float) -> float? {
+    var a = dir.dot(dir)
+    if a == 0.0 {
+        return null
+    }
+    var f = origin - center
+    var b = f.dot(dir)
+    var c = f.dot(f) - radius * radius
+    if c <= 0.0 {
+        return 0.0
+    }
+    var disc = b * b - a * c
+    if disc < 0.0 {
+        return null
+    }
+    var t = (-b - sqrt(disc)) / a
+    if t < 0.0 {
+        return null
+    }
+    return t
+}
+
+// The signed area of a polygon: positive when its points run clockwise on screen.
+fn polygon_signed_area(polygon: List<vec2>) -> float {
+    var n = polygon.len()
+    var sum = 0.0
+    var j = n - 1
+    for i in 0..n {
+        sum += polygon[j].x * polygon[i].y - polygon[i].x * polygon[j].y
+        j = i
+    }
+    return sum * 0.5
+}
+
+fn polygon_area(polygon: List<vec2>) -> float {
+    return abs(polygon_signed_area(polygon))
+}
+
+// The convex hull of a point set (Andrew's monotone chain), clockwise on
+// screen, without repeated or collinear points. Fewer than 3 distinct points
+// are returned as they are.
+fn convex_hull(points: List<vec2>) -> List<vec2> {
+    var pts = points.slice(0)
+    pts.sort((p, q) => p.x < q.x || p.x == q.x && p.y < q.y)
+    var uniq = List<vec2>()
+    for p in pts {
+        if uniq.is_empty() || uniq[uniq.len() - 1] != p {
+            uniq.push(p)
+        }
+    }
+    var n = uniq.len()
+    if n < 3 {
+        return uniq
+    }
+    var hull = List<vec2>()
+    for p in uniq {
+        while hull.len() >= 2 && cross3(hull[hull.len() - 2], hull[hull.len() - 1], p) <= 0.0 {
+            hull.pop()
+        }
+        hull.push(p)
+    }
+    var lower = hull.len() + 1
+    var i = n - 2
+    while i >= 0 {
+        var p = uniq[i]
+        while hull.len() >= lower && cross3(hull[hull.len() - 2], hull[hull.len() - 1], p) <= 0.0 {
+            hull.pop()
+        }
+        hull.push(p)
+        i -= 1
+    }
+    hull.pop()
+    return hull
+}
+
+// Splits a simple polygon (either winding, no holes, no self-crossings) into
+// triangles by ear clipping. Returns indices into `polygon`, three per
+// triangle, each triangle clockwise on screen. Collinear vertices are skipped.
+// For polygons with holes or self-intersections use the engine's tessellator.
+fn triangulate(polygon: List<vec2>) -> List<int> {
+    var out = List<int>()
+    var n = polygon.len()
+    if n < 3 {
+        return out
+    }
+    var idx = List<int>()
+    if polygon_signed_area(polygon) >= 0.0 {
+        for i in 0..n {
+            idx.push(i)
+        }
+    } else {
+        var i = n - 1
+        while i >= 0 {
+            idx.push(i)
+            i -= 1
+        }
+    }
+    var guard = 0
+    while idx.len() > 3 && guard < n * n {
+        guard += 1
+        var m = idx.len()
+        var clipped = false
+        for k in 0..m {
+            var ia = idx[(k + m - 1) % m]
+            var ib = idx[k]
+            var ic = idx[(k + 1) % m]
+            var a = polygon[ia]
+            var b = polygon[ib]
+            var c = polygon[ic]
+            var turn = cross3(a, b, c)
+            if turn == 0.0 {
+                idx.remove(k)
+                clipped = true
+                break
+            }
+            if turn < 0.0 {
+                continue
+            }
+            var ear = true
+            for q in idx {
+                if q == ia || q == ib || q == ic {
+                    continue
+                }
+                var p = polygon[q]
+                if cross3(a, b, p) >= 0.0 && cross3(b, c, p) >= 0.0 && cross3(c, a, p) >= 0.0 {
+                    ear = false
+                    break
+                }
+            }
+            if ear {
+                out.push(ia)
+                out.push(ib)
+                out.push(ic)
+                idx.remove(k)
+                clipped = true
+                break
+            }
+        }
+        if !clipped {
+            // A degenerate polygon: clip the first vertex to make progress.
+            idx.remove(0)
+        }
+    }
+    if idx.len() == 3 && cross3(polygon[idx[0]], polygon[idx[1]], polygon[idx[2]]) != 0.0 {
+        out.push(idx[0])
+        out.push(idx[1])
+        out.push(idx[2])
+    }
+    return out
+}
+
+// -------------------------------------------------------------------- hashing
+// Stable integer hashes (a murmur3-style finalizer on 32 bits). The result is
+// the 32 hash bits as an `int`, so it can be negative; `hash_float` gives
+// [0, 1). The `seed` picks an unrelated hash function. Same inputs, same
+// output, on every platform.
+
+fn _mix32(h: u32) -> u32 {
+    var x = h
+    x = x ^ x >> 16
+    x = wrapping_mul(x, 0x85ebca6bu32)
+    x = x ^ x >> 13
+    x = wrapping_mul(x, 0xc2b2ae35u32)
+    x = x ^ x >> 16
+    return x
+}
+
+fn _hash_bits(x: int, y: int, z: int, seed: int) -> u32 {
+    var h = _mix32(seed as u32 ^ 0x9e3779b9u32)
+    h = _mix32(h ^ x as u32)
+    h = _mix32(h ^ y as u32)
+    h = _mix32(h ^ z as u32)
+    return h
+}
+
+fn hash(x: int, seed = 0) -> int {
+    return _hash_bits(x, 0, 0, seed) as int
+}
+
+fn hash2(x: int, y: int, seed = 0) -> int {
+    return _hash_bits(x, y, 0, seed) as int
+}
+
+fn hash3(x: int, y: int, z: int, seed = 0) -> int {
+    return _hash_bits(x, y, z, seed) as int
+}
+
+// A hash of the string's bytes (FNV-1a, then mixed).
+fn hash_str(s: str, seed = 0) -> int {
+    var h = 0x811c9dc5u32 ^ seed as u32
+    for i in 0..s.len() {
+        h = wrapping_mul(h ^ s.byte_at(i) as u32, 0x01000193u32)
+    }
+    return _mix32(h) as int
+}
+
+// A float in [0, 1) from a hash.
+fn hash_float(x: int, seed = 0) -> float {
+    return (_hash_bits(x, 0, 0, seed) >> 8) as float * (1.0 / 16777216.0)
+}
+
+// ---------------------------------------------------------------------- noise
+// Gradient noise: smooth, repeatable values from coordinates. All return about
+// [-1, 1] and are 0 at integer lattice points (Perlin). `seed` selects another
+// noise field. Built from floor, +, -, *, / only, so they are bit-identical
+// everywhere.
+
+fn _fade(t: float) -> float {
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+}
+
+fn _grad2(h: u32, x: float, y: float) -> float {
+    var k = h & 7
+    if k == 0 {
+        return x + y
+    }
+    if k == 1 {
+        return x - y
+    }
+    if k == 2 {
+        return -x + y
+    }
+    if k == 3 {
+        return -x - y
+    }
+    if k == 4 {
+        return x
+    }
+    if k == 5 {
+        return -x
+    }
+    if k == 6 {
+        return y
+    }
+    return -y
+}
+
+// 1D Perlin noise.
+fn perlin1(x: float, seed = 0) -> float {
+    var xf = floor(x)
+    var xi = xf as int
+    var fx = x - xf
+    var g0 = _hash_bits(xi, 0, 0, seed) & 1 == 0 ? fx : -fx
+    var g1 = _hash_bits(xi + 1, 0, 0, seed) & 1 == 0 ? fx - 1.0 : 1.0 - fx
+    var u = _fade(fx)
+    return (g0 + (g1 - g0) * u) * 2.0
+}
+
+// 2D Perlin noise.
+fn perlin2(x: float, y: float, seed = 0) -> float {
+    var xf = floor(x)
+    var yf = floor(y)
+    var xi = xf as int
+    var yi = yf as int
+    var fx = x - xf
+    var fy = y - yf
+    var u = _fade(fx)
+    var v = _fade(fy)
+    var n00 = _grad2(_hash_bits(xi, yi, 0, seed), fx, fy)
+    var n10 = _grad2(_hash_bits(xi + 1, yi, 0, seed), fx - 1.0, fy)
+    var n01 = _grad2(_hash_bits(xi, yi + 1, 0, seed), fx, fy - 1.0)
+    var n11 = _grad2(_hash_bits(xi + 1, yi + 1, 0, seed), fx - 1.0, fy - 1.0)
+    var nx0 = n00 + (n10 - n00) * u
+    var nx1 = n01 + (n11 - n01) * u
+    return nx0 + (nx1 - nx0) * v
+}
+
+fn _grad3(h: u32, x: float, y: float, z: float) -> float {
+    var k = h & 15
+    var u = k < 8 ? x : y
+    var v = k < 4 ? y : k == 12 || k == 14 ? x : z
+    return (k & 1 == 0 ? u : -u) + (k & 2 == 0 ? v : -v)
+}
+
+// 3D Perlin noise (Ken Perlin's improved noise).
+fn perlin3(x: float, y: float, z: float, seed = 0) -> float {
+    var xf = floor(x)
+    var yf = floor(y)
+    var zf = floor(z)
+    var xi = xf as int
+    var yi = yf as int
+    var zi = zf as int
+    var fx = x - xf
+    var fy = y - yf
+    var fz = z - zf
+    var u = _fade(fx)
+    var v = _fade(fy)
+    var w = _fade(fz)
+    var n000 = _grad3(_hash_bits(xi, yi, zi, seed), fx, fy, fz)
+    var n100 = _grad3(_hash_bits(xi + 1, yi, zi, seed), fx - 1.0, fy, fz)
+    var n010 = _grad3(_hash_bits(xi, yi + 1, zi, seed), fx, fy - 1.0, fz)
+    var n110 = _grad3(_hash_bits(xi + 1, yi + 1, zi, seed), fx - 1.0, fy - 1.0, fz)
+    var n001 = _grad3(_hash_bits(xi, yi, zi + 1, seed), fx, fy, fz - 1.0)
+    var n101 = _grad3(_hash_bits(xi + 1, yi, zi + 1, seed), fx - 1.0, fy, fz - 1.0)
+    var n011 = _grad3(_hash_bits(xi, yi + 1, zi + 1, seed), fx, fy - 1.0, fz - 1.0)
+    var n111 = _grad3(_hash_bits(xi + 1, yi + 1, zi + 1, seed), fx - 1.0, fy - 1.0, fz - 1.0)
+    var x00 = n000 + (n100 - n000) * u
+    var x10 = n010 + (n110 - n010) * u
+    var x01 = n001 + (n101 - n001) * u
+    var x11 = n011 + (n111 - n011) * u
+    var y0 = x00 + (x10 - x00) * v
+    var y1 = x01 + (x11 - x01) * v
+    return y0 + (y1 - y0) * w
+}
+
+fn _simplex_corner(h: u32, x: float, y: float) -> float {
+    var t = 0.5 - x * x - y * y
+    if t < 0.0 {
+        return 0.0
+    }
+    t = t * t
+    return t * t * _grad2(h, x, y)
+}
+
+// 2D simplex noise (fewer directional artifacts than Perlin).
+fn simplex2(x: float, y: float, seed = 0) -> float {
+    var f2 = 0.3660254
+    var g2 = 0.21132487
+    var s = (x + y) * f2
+    var i = floor(x + s)
+    var j = floor(y + s)
+    var t = (i + j) * g2
+    var x0 = x - (i - t)
+    var y0 = y - (j - t)
+    var i1 = 0
+    var j1 = 1
+    if x0 > y0 {
+        i1 = 1
+        j1 = 0
+    }
+    var x1 = x0 - i1 as float + g2
+    var y1 = y0 - j1 as float + g2
+    var x2 = x0 - 1.0 + 2.0 * g2
+    var y2 = y0 - 1.0 + 2.0 * g2
+    var ii = i as int
+    var jj = j as int
+    var n0 = _simplex_corner(_hash_bits(ii, jj, 0, seed), x0, y0)
+    var n1 = _simplex_corner(_hash_bits(ii + i1, jj + j1, 0, seed), x1, y1)
+    var n2 = _simplex_corner(_hash_bits(ii + 1, jj + 1, 0, seed), x2, y2)
+    return (n0 + n1 + n2) * 70.0
+}
+
+// Several octaves of 2D Perlin noise added up (fractal Brownian motion),
+// normalized to about [-1, 1]. Each octave doubles (`lacunarity`) the
+// frequency and halves (`gain`) the amplitude.
+fn fractal_perlin2(x: float, y: float, octaves = 4, lacunarity = 2.0, gain = 0.5, seed = 0) -> float {
+    var sum = 0.0
+    var amp = 1.0
+    var freq = 1.0
+    var norm = 0.0
+    for o in 0..octaves {
+        sum += perlin2(x * freq, y * freq, seed + o) * amp
+        norm += amp
+        amp = amp * gain
+        freq = freq * lacunarity
+    }
+    return norm > 0.0 ? sum / norm : 0.0
+}
+
+// ---------------------------------------------------------------- random streams
+
+// SplitMix64's finalizer (cuervo/core/rng.hpp mix64): nearby inputs give
+// unrelated outputs.
+fn _mix64(x: u64) -> u64 {
+    var z = wrapping_add(x, 0x9e3779b97f4a7c15u64)
+    z = wrapping_mul(z ^ z >> 30, 0xbf58476d1ce4e5b9u64)
+    z = wrapping_mul(z ^ z >> 27, 0x94d049bb133111ebu64)
+    return z ^ z >> 31
+}
+
+// A seeded random stream of your own (PCG32, the engine's generator), beside
+// the engine's global `Random`. It is deterministic: the same seed gives the
+// same numbers on every platform, and it never touches the global stream.
+// Streams made from the same parent seed with different keys are independent
+// (DESIGN.md 4.15 "Sub-seeding the RNG"): `Rng.derive` is exactly the
+// engine's derive_stream.
+class Rng {
+    var _state = 0u64
+    var _inc = 0u64
+
+    // A stream from a 64-bit seed (cuervo::Pcg32(seed)).
+    static fn seeded(seed: i64) -> Rng {
+        return with_sequence(seed as u64, 0xda3e39cb94b95bdbu64)
+    }
+
+    // A stream from a state and a sequence selector (cuervo::Pcg32(state, sequence)).
+    static fn with_sequence(init_state: u64, sequence: u64) -> Rng {
+        var r = Rng()
+        r._inc = sequence << 1 | 1u64
+        r.next_u32()
+        r._state = wrapping_add(r._state, init_state)
+        r.next_u32()
+        return r
+    }
+
+    // The child stream of `parent_seed` for the key (system, id, index): it
+    // depends on nothing else, so adding another stream never shifts it.
+    static fn derive(parent_seed: i64, system: int, id: int, index: int) -> Rng {
+        var h = _mix64(parent_seed as u64)
+        h = _mix64(h ^ system as u32 as u64)
+        h = _mix64(h ^ (id as u32 as u64 << 32 | index as u32 as u64))
+        return with_sequence(h, _mix64(h ^ 0x6a09e667f3bcc909u64))
+    }
+
+    // The next 32 random bits.
+    fn next_u32() -> u32 {
+        var old = _state
+        _state = wrapping_add(wrapping_mul(old, 6364136223846793005u64), _inc)
+        var xorshifted = ((old >> 18 ^ old) >> 27) as u32
+        var rot = (old >> 59) as u32
+        return xorshifted >> rot | xorshifted << (32u32 - rot & 31u32)
+    }
+
+    // An int in [0, bound) without modulo bias (0 if bound <= 0).
+    fn below(bound: int) -> int {
+        if bound <= 0 {
+            return 0
+        }
+        var b = bound as u32
+        var threshold = wrapping_sub(0u32, b) % b
+        while true {
+            var r = next_u32()
+            if r >= threshold {
+                return (r % b) as int
+            }
+        }
+        return 0
+    }
+
+    // An int in [lo, hi], both included. Panics if hi < lo.
+    fn range_int(lo: int, hi: int) -> int {
+        if hi < lo {
+            panic("Rng.range_int: hi < lo")
+        }
+        var span = (hi as i64 - lo as i64 + 1) as u32
+        if span == 0u32 {
+            return next_u32() as int
+        }
+        var threshold = wrapping_sub(0u32, span) % span
+        while true {
+            var r = next_u32()
+            if r >= threshold {
+                return (lo as i64 + (r % span) as i64) as int
+            }
+        }
+        return lo
+    }
+
+    // A float in [0, 1).
+    fn next_float() -> float {
+        return (next_u32() >> 8) as float * (1.0 / 16777216.0)
+    }
+
+    // A float in [lo, hi).
+    fn range(lo: float, hi: float) -> float {
+        return lo + (hi - lo) * next_float()
+    }
+
+    // True with probability `p`.
+    fn chance(p: float) -> bool {
+        return next_float() < p
+    }
+
+    // A normally distributed float (Box-Muller; always draws two numbers).
+    fn gaussian(mean = 0.0, deviation = 1.0) -> float {
+        var u1 = 1.0 - next_float()
+        var u2 = next_float()
+        return mean + deviation * (sqrt(-2.0 * log(u1)) * cos(TAU * u2))
+    }
+
+    // A uniformly random point inside the circle of `radius` around the origin.
+    fn in_circle(radius = 1.0) -> vec2 {
+        var r = radius * sqrt(next_float())
+        var a = TAU * next_float()
+        return vec2(cos(a) * r, sin(a) * r)
+    }
+
+    // A random point on the circle of `radius` around the origin.
+    fn on_circle(radius = 1.0) -> vec2 {
+        var a = TAU * next_float()
+        return vec2(cos(a) * radius, sin(a) * radius)
+    }
+
+    // A random element. Panics on an empty list.
+    fn pick<T>(items: List<T>) -> T {
+        if items.is_empty() {
+            panic("Rng.pick: the list is empty")
+        }
+        return items[below(items.len())]
+    }
+
+    // The index of a random element, chosen with probability proportional to
+    // its weight. Negative weights count as 0; panics if no weight is positive.
+    fn weighted_pick(weights: List<float>) -> int {
+        var total = 0.0
+        for w in weights {
+            if w > 0.0 {
+                total += w
+            }
+        }
+        if !(total > 0.0) {
+            panic("Rng.weighted_pick: no positive weight")
+        }
+        var r = next_float() * total
+        var last = 0
+        for i in 0..weights.len() {
+            if weights[i] > 0.0 {
+                last = i
+                if r < weights[i] {
+                    return i
+                }
+                r -= weights[i]
+            }
+        }
+        return last
+    }
+
+    // Shuffles the list in place (Fisher-Yates, like List.shuffle).
+    fn shuffle<T>(items: List<T>) {
+        var i = items.len()
+        while i > 1 {
+            var j = below(i)
+            items.swap(i - 1, j)
+            i -= 1
+        }
+    }
+}

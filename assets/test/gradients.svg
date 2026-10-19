@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Engine test asset: linear + radial gradients (bbox and user units,
+     gradientTransform, focal point, spread methods, stop opacity, href). -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="480" height="320" viewBox="0 0 480 320">
+  <defs>
+    <linearGradient id="sunset" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff7e5f"/>
+      <stop offset="0.5" stop-color="#feb47b"/>
+      <stop offset="100%" stop-color="#6a3093"/>
+    </linearGradient>
+    <linearGradient id="diag" xlink:href="#sunset" gradientTransform="rotate(45 0.5 0.5)"/>
+    <linearGradient id="stripes" gradientUnits="userSpaceOnUse" x1="250" y1="0" x2="270" y2="0"
+                    spreadMethod="reflect">
+      <stop offset="0" stop-color="#1d3557"/>
+      <stop offset="1" stop-color="#a8dadc"/>
+    </linearGradient>
+    <linearGradient id="repeat" gradientUnits="userSpaceOnUse" x1="360" y1="0" x2="380" y2="20"
+                    spreadMethod="repeat">
+      <stop offset="0" stop-color="#e63946"/>
+      <stop offset="0.5" stop-color="#f1faee"/>
+      <stop offset="1" stop-color="#e63946"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5" fx="0.3" fy="0.3">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.35" stop-color="#4cc9f0"/>
+      <stop offset="1" stop-color="#3a0ca3"/>
+    </radialGradient>
+    <radialGradient id="fade" gradientUnits="userSpaceOnUse" cx="400" cy="240" r="60">
+      <stop offset="0" stop-color="#2a9d8f" stop-opacity="1"/>
+      <stop offset="1" stop-color="#2a9d8f" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="ellipse" cx="0.5" cy="0.5" r="0.5" gradientTransform="translate(0.5 0.5) scale(1 0.5) translate(-0.5 -0.5)">
+      <stop offset="0" style="stop-color: gold"/>
+      <stop offset="1" style="stop-color: darkred"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="10" y="10" width="100" height="140" rx="12" fill="url(#sunset)"/>
+  <rect x="125" y="10" width="110" height="140" fill="url(#diag)" stroke="#222" stroke-width="2"/>
+  <rect x="250" y="10" width="100" height="140" fill="url(#stripes)"/>
+  <rect x="360" y="10" width="110" height="140" fill="url(#repeat)"/>
+
+  <circle cx="70" cy="235" r="70" fill="url(#glow)"/>
+  <ellipse cx="220" cy="235" rx="70" ry="45" fill="url(#ellipse)" stroke="url(#sunset)" stroke-width="8"/>
+  <rect x="330" y="175" width="140" height="130" fill="#264653"/>
+  <circle cx="400" cy="240" r="60" fill="url(#fade)"/>
+  <!-- missing paint server with fallback color -->
+  <circle cx="310" cy="290" r="18" fill="url(#does-not-exist) #e76f51"/>
+</svg>

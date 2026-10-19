@@ -1,0 +1,21 @@
+# A level built without code (DESIGN.md 6, milestone 6): scripts/blocks.plm
+# defines reusable node classes; scenes/level.scene places and tunes them and
+# was made with editor operations only (level.cmds, see editor/README.md):
+#   cuervo-editor --project examples/editor_level --script-commands examples/editor_level/level.cmds
+#   cuervo --game examples/editor_level
+name = "Editor Level"
+main_scene = "scenes/level.scene"   # the root is this scene: no main script
+virtual_size = [1280, 720]
+tick_rate = 60
+seed = 20261016
+clear_color = "0b1020"
+render_tier = "compatible"
+
+[scene]
+transform_hierarchy = false   # script-driven world-space scene (DESIGN.md 4.17)
+
+[input.actions]
+shoot = ["Key.Z", "Key.Space", "Key.J", "Pad.South"]
+
+[input.axes]
+move = ["Keys.Arrows", "Keys.WASD", "Pad.LeftStick", "Pad.Dpad"]

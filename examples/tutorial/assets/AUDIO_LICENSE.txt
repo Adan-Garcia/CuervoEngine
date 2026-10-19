@@ -1,0 +1,9 @@
+Audio in this directory (sfx/pickup.wav, sfx/hurt.wav)
+======================================================
+
+Copied from examples/shmup/assets/sfx (pickup.wav is shoot.wav renamed).
+Every sound there is synthesized by tools/gen_shmup_audio.py from oscillators
+and seeded noise; no recordings or third-party samples are involved.
+
+License: CC0 1.0 Universal (public domain dedication). Use them for anything,
+with or without attribution.

@@ -1,0 +1,114 @@
+// SDF shape stress test. Four seeded emitters travel Lissajous paths and fire
+// rings of particles whose phase turns every shot, so they spray spirals that
+// curve (Module.Turn). Each emitter has its own shape: outlined circles,
+// capsules, spinning rounded rects and rings. Spawning tops the pool up to
+// the target count within about a second; everything is deterministic
+// (DESIGN.md 4.1), so `--bench` runs compare across backends and builds.
+
+const DEFAULT_LEVEL = 2 // 50k: the milestone 2 figure
+
+class Bench extends Node {
+    var level = DEFAULT_LEVEL
+    var steps = [1000, 10000, 50000, 100000] // target counts
+    var emitters = List<Emitter>()
+    var rings = List<int>()       // particles per shot, per emitter
+    var phases = List<float>()    // the next shot's ring phase
+    var phase_steps = List<float>()
+    var shot_colors = List<Color>()
+
+    fn ready() {
+        emitters.push(Emitter(tag = #circles, outline = 1.5, outline_color = Color.hex("ffffff")))
+        emitters.push(Emitter(tag = #capsules, shape = #capsule))
+        emitters.push(Emitter(tag = #rects, shape = #rect))
+        emitters.push(Emitter(tag = #rings, shape = #ring))
+        shot_colors.push(Color.hex("ff5973"))
+        shot_colors.push(Color.hex("59d9ff"))
+        shot_colors.push(Color.hex("ffcc4d"))
+        shot_colors.push(Color.hex("99ff80d9"))
+        for i in 0..4 {
+            phases.push(Random.range(0.0, TAU))
+            var direction = i % 2 == 0 ? 1.0 : -1.0
+            phase_steps.push(Random.range(0.05, 0.25) * direction)
+            rings.push(Random.range_int(16, 40))
+            emitters[i].add(Module.Turn(rate = Random.range(-0.72, 0.72)))
+        }
+    }
+
+    fn target() -> int {
+        return steps[level]
+    }
+
+    fn total() -> int {
+        var n = 0
+        for e in emitters {
+            n += e.count()
+        }
+        return n
+    }
+
+    // Lissajous paths around the screen center, one per emitter.
+    fn origin(i: int) -> vec2 {
+        var k = i as float
+        var t = ((Time.tick % 100000) as float) * 0.01 + k * 1.7
+        return vec2(Screen.size.x * (0.5 + 0.3 * sin(t * (0.7 + 0.2 * k))),
+                    Screen.size.y * (0.5 + 0.3 * cos(t * (0.9 + 0.15 * k))))
+    }
+
+    fn update(dt: float) {
+        if Input.pressed(#more) {
+            level = (level + 1) % steps.len()
+            if total() > target() {
+                for e in emitters {
+                    e.clear()
+                }
+            }
+        }
+        // Refill in about a second so the pool sits near the target.
+        var count = total()
+        var budget = max(target() / 60, 1)
+        for k in 0..4 {
+            var i = (k + Time.tick) % 4
+            var per_emitter = budget / (4 - k)
+            var spawned = 0
+            while spawned < per_emitter && count < target() {
+                // One speed and lifetime per shot (no jitter), so each ring
+                // expands as a circle and successive rings form the spiral.
+                var shot = Shot {
+                    speed = Random.range(60.0, 210.0), life = Random.range(2.0, 5.0),
+                    size = 5.0, color = shot_colors[i], spin = i == 2 ? 2.0 : 0.0,
+                }
+                var n = emitters[i].fire(Pattern.Ring(count = rings[i], phase = phases[i]), origin(i), shot)
+                spawned += n
+                count += n
+                // Keep the phase small so the deterministic sin/cos stay accurate.
+                phases[i] = wrap(phases[i] + phase_steps[i], 0.0, TAU)
+            }
+            budget -= spawned
+        }
+    }
+
+    fn draw(g: Canvas) {
+        // Static outlined shapes under the particles: a fixed reference for
+        // comparing backends.
+        var frame = Color.hex("e6e6ff")
+        g.rect(vec2(40.0, 40.0), vec2(240.0, 100.0), fill = Color.hex("262e4de6"), stroke = frame, width = 3.0,
+               radius = 16.0)
+        g.rect(vec2(1020.0, 50.0), vec2(200.0, 80.0), fill = Color.hex("4d2640e6"), stroke = frame, width = 3.0,
+               radius = 8.0, rotation = 0.3)
+        g.circle(vec2(640.0, 360.0), 87.0, stroke = Color.hex("6666b380"), width = 6.0)
+        g.rect(vec2(426.0, 636.0), vec2(428.0, 28.0), fill = Color.hex("334066"), stroke = Color.hex("ffffff"),
+               width = 2.0, radius = 14.0)
+
+        for e in emitters {
+            e.draw(g)
+        }
+
+        // HUD: only deterministic numbers, so screenshots compare equal across
+        // backends (`--bench` logs the timings).
+        g.new_layer()
+        g.rect(vec2(12.0, 12.0), vec2(360.0, 72.0), fill = Color.hex("0d0f1acc"), radius = 6.0)
+        g.text(vec2(24.0, 20.0), "{total()} SDF shapes (target {target()})", size = 20.0)
+        g.text(vec2(24.0, 50.0), "tick {Time.tick}   Space: 1k / 10k / 50k / 100k", size = 14.0,
+               color = Color.hex("9aa3c0"))
+    }
+}

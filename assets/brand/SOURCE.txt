@@ -1,0 +1,29 @@
+Cuervo design kit, synced by tools/sync_brand.py. Do not edit; run the script.
+kit commit: cfa6f5a6f347043e0ef2576d7d6f8fd9b57dfa05
+kit commit date: 2026-10-05T21:34:09-04:00
+kit commit subject: Add Cuervo concept website (Astro, local only)
+kit working tree: clean for the copied files
+
+files (sha256  path under assets/brand  <-  kit path):
+61d96d04085b6ca4a19c3fab055bca2d71d8248976e2872912073654d829725e  logo/app-icon.svg  <-  logo/app-icon.svg
+06e7eb346eb96b515d7fa17bfd3a7d7758eaefc9c6d959b168c01b480b8dd611  logo/favicon.svg  <-  logo/favicon.svg
+9a24cedaa43f665d47003c1e5a4fd51f347ab630030fb1466dceaecf32453eb4  logo/lockup-horizontal.svg  <-  logo/lockup-horizontal.svg
+4fe5240ecaf2c2134ad53a543a7236e9ab6f1ffaeb433f20975efb74f0ab43c9  logo/lockup-stacked.svg  <-  logo/lockup-stacked.svg
+f68bd71de80d6bde06e8ab0dfc6000289b149d72dc2deacb346978e826fe3643  logo/mark-bone.svg  <-  logo/mark-bone.svg
+2135d169e1a275d8731457c8735223cde03542b0d12ac7df2216118187b2a17c  logo/mark-ember-dark.svg  <-  logo/mark-ember-dark.svg
+c395358235b292308d8640cace78ad22bb3bedfd3285be8e86ff6b1efbe9a169  logo/mark-ember.svg  <-  logo/mark-ember.svg
+60dae6ac9c35bb23fa872422aa7c4352194d1184530609e5d6baa895c38eb03d  logo/mark-raven.svg  <-  logo/mark-raven.svg
+0179cd59efe6f93a745ca2c8a2147975b702232f8defdc05e690513e70d42436  logo/mark-small-ember.svg  <-  logo/mark-small-ember.svg
+0138deff6f5612909fc1134a3be090b59fb04d5c7257293a79a30aceeab034f1  logo/mark-small.svg  <-  logo/mark-small.svg
+bd21634d7e2ca6efbec1f27864fe97f4b77e058d77a62f13a92050b40e0f2535  logo/mark.svg  <-  logo/mark.svg
+0c495d2af7691fd33b01fa97c5bcf7da9187bf40b06d4c47c0890fed43218c36  logo/wordmark.svg  <-  logo/wordmark.svg
+36b3062ee7052aa80b6e30b041a7a1f10aede5774ebb81aa8a8f506f34148ec6  png/app-icon-512.png  <-  logo/png/app-icon-512.png
+daab062217fdc8b3fc794ffdffeaabcea1ece49c7bbc65630f581d3318594c9e  png/favicon-16.png  <-  logo/png/favicon-16.png
+d2904461aa44e3ee5b54080590cb089f78425c00e4b1543b91d7853e4f9b8642  png/favicon-32.png  <-  logo/png/favicon-32.png
+3605438c3b133e69e0499f8794a3e26f677ddcc90f424477d9d96eb29ad6eeaf  png/favicon-48.png  <-  logo/png/favicon-48.png
+e8c43d2323b2e014ef7d2e78cb0487a1e5ead4e02352d45f80582cf8dcad2e41  png/mark-ember-256.png  <-  logo/png/mark-ember-256.png
+53f756b7b6bac5c6c039b5ac69e09e4f563e43eab8a5629029e7294d0614975f  png/mark-ember-512.png  <-  logo/png/mark-ember-512.png
+4ef4ea7ebaa1b737f08841ad12233359ad44f6881ca9683e08bac720e0532b92  png/mark-ember-dark-256.png  <-  logo/png/mark-ember-dark-256.png
+28d04b420358a41b8637def5d333388d12a8c905b0cc907a0108cb2aa907ef9e  png/mark-ember-dark-512.png  <-  logo/png/mark-ember-dark-512.png
+e0c921b7b82b956d305ab79365e9ad8bbbe9a888b69e93751af1000fa2779997  png/mark-raven-256.png  <-  logo/png/mark-raven-256.png
+9f8d9157d0b3c15a3f65c8f09b2982542932c7d71d3b4204d4309c83401d3844  tokens.json  <-  tokens/tokens.json

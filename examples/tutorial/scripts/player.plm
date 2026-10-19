@@ -1,0 +1,37 @@
+// The player: moves with the `move` axis, carries a hitbox, and blinks
+// while invulnerable after a hit.
+class Player extends Node2D {
+    var speed = 420.0
+    var invulnerable = 0.0
+
+    fn ready() {
+        position = vec2(Screen.size.x * 0.5, Screen.size.y - 60.0)
+    }
+
+    fn update(dt: float) {
+        position += Input.axis(#move) * speed * dt
+        position = position.clamp(vec2(20.0, 20.0), Screen.size - vec2(20.0, 20.0))
+        // Hitboxes last one tick, so add one every tick you want to be hit.
+        if invulnerable > 0.0 {
+            invulnerable = max(invulnerable - dt, 0.0)
+        } else {
+            Collision.hitbox(self, position, 12.0, LAYER_PLAYER)
+        }
+    }
+
+    fn on_hit(tag: name, count: int) {
+        if tag == #rain && invulnerable == 0.0 {
+            invulnerable = 1.5
+            Game.main.hurt()
+        }
+    }
+
+    fn draw(g: Canvas) {
+        // Blink: hidden 4 ticks out of 8 while invulnerable.
+        if invulnerable > 0.0 && (Time.tick / 4) % 2 == 0 {
+            return
+        }
+        g.circle(position, 16.0, fill = INK.with_alpha(0.2), stroke = INK, width = 3.0)
+        g.circle(position, 5.0, fill = GEM_COLOR)
+    }
+}

@@ -1,0 +1,27 @@
+# A tic-tac-toe stage written entirely in the language
+#   cuervo --game examples/tictak
+name = "tictak"
+main = "Game"
+virtual_size = [640, 360]
+tick_rate = 60
+seed = 20261015
+clear_color = "070a14"
+render_tier = "compatible"   # DESIGN.md 4.4: runs on Vulkan, GL and the web
+
+[scene]
+transform_hierarchy = false   # script-driven world-space scene (DESIGN.md 4.17)
+
+[input.actions]
+pause = ["Key.Escape", "Key.P", "Pad.Start"]
+# Menus (engine UI, DESIGN.md 4.10)
+ui_up = ["Key.Up", "Key.W", "Pad.DpadUp", "Pad.LeftStickUp"]
+ui_down = ["Key.Down", "Key.S", "Pad.DpadDown", "Pad.LeftStickDown"]
+ui_left = ["Key.Left", "Key.A", "Pad.DpadLeft", "Pad.LeftStickLeft"]
+ui_right = ["Key.Right", "Key.D", "Pad.DpadRight", "Pad.LeftStickRight"]
+ui_accept = ["Key.Enter", "Key.Space", "Key.Z", "Pad.South"]
+ui_cancel = ["Key.Escape", "Key.Backspace", "Key.X", "Pad.East"]
+click = ["Mouse.Left"]
+right_click = ["Mouse.Right"]
+
+[input.axes]
+move = ["Keys.Arrows", "Keys.WASD", "Pad.LeftStick", "Pad.Dpad"]

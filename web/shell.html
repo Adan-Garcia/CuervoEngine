@@ -1,0 +1,82 @@
+<!doctype html>
+<!--
+  HTML shell of the web export (docs/WEB.md). Emscripten replaces the
+  SCRIPT placeholder below with the loader of index.js, which fetches
+  index.wasm and index.data (the preloaded project + font).
+
+  URL parameters (development aids, all optional):
+    ?args=--quit-after%205        extra runtime arguments, space-separated
+    ?log=1                        show the engine log under the canvas
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cuervo Engine</title>
+<style>
+  :root { color-scheme: dark; --bg: #05060a; --fg: #c9d1e6; --dim: #6b7487; --err: #ff8a8a; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+               font: 14px/1.4 system-ui, sans-serif; }
+  main { display: flex; flex-direction: column; align-items: center; justify-content: center;
+         min-height: 100%; gap: 12px; padding: 16px; box-sizing: border-box; }
+  /* The canvas keeps the game's aspect ratio inside the viewport; the engine
+     letterboxes inside it (scale modes, DESIGN.md 4.4). */
+  canvas { display: block; width: min(100%, calc((100vh - 64px) * 16 / 9)); aspect-ratio: 16 / 9;
+           background: #000; outline: none; }
+  #status { color: var(--dim); min-height: 1.4em; }
+  #status.error { color: var(--err); }
+  #log { display: none; width: min(100%, 1280px); max-height: 30vh; overflow: auto; margin: 0;
+         font: 12px/1.35 ui-monospace, monospace; color: var(--dim); white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<main>
+  <!-- tabindex: the canvas takes keyboard focus; contextmenu off for right-click bindings. -->
+  <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+  <div id="status">Loading…</div>
+  <pre id="log"></pre>
+</main>
+<script>
+  const params = new URLSearchParams(location.search);
+  const statusEl = document.getElementById('status');
+  const logEl = document.getElementById('log');
+  if (params.get('log') === '1') logEl.style.display = 'block';
+  function log(text, isError) {
+    // Mirrored to the console: headless smoke tests read it from there.
+    (isError ? console.error : console.log)(text);
+    logEl.textContent += text + '\n';
+    if (logEl.textContent.length > 200000) logEl.textContent = logEl.textContent.slice(-100000);
+  }
+  var Module = {
+    canvas: document.getElementById('canvas'),
+    arguments: (params.get('args') || '').split(' ').filter(Boolean),
+    print: (text) => log(text, false),
+    printErr: (text) => log(text, true),
+    setStatus: (text) => {
+      // Emscripten reports download progress here ("Downloading data... (x/y)").
+      statusEl.textContent = text || 'Running. Click the game for keyboard focus.';
+    },
+    onRuntimeInitialized: () => { Module.canvas.focus(); },
+    onEngineExit: (code) => {
+      statusEl.textContent = 'The game ended (exit code ' + code + '). Reload to play again.';
+      log('[web] engine exited with code ' + code, code !== 0);
+    },
+    onAbort: (what) => {
+      statusEl.className = 'error';
+      statusEl.textContent = 'The engine stopped: ' + what;
+    },
+  };
+  Module.canvas.addEventListener('click', () => Module.canvas.focus());
+  Module.canvas.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    statusEl.className = 'error';
+    statusEl.textContent = 'WebGL context lost; reload the page.';
+  });
+  if (!document.createElement('canvas').getContext('webgl2')) {
+    statusEl.className = 'error';
+    statusEl.textContent = 'This browser has no WebGL2, which the engine needs.';
+  }
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>

@@ -1,0 +1,800 @@
+// Engine API, part 5: game UI (DESIGN.md 4.10). Retained UI nodes in the
+// scene tree, drawn with the Canvas (SDF rounded rects + MSDF text).
+//
+// Layout. A Control's rect (`position` = top-left, `size`) is computed every
+// tick before the UI updates: a Control whose parent isn't a Control is a UI
+// root and is placed in the screen rect; every other Control is placed by
+// its parent. Outside containers a control uses anchors + offsets
+// (Godot-style): its edges sit at `parent.position + parent.size * anchor` +
+// `offset`, and it never gets smaller than its combined minimum size (its
+// content's, e.g. a label's text, and `min_size`). When a dimension's two
+// anchors coincide the control grows around that anchor (0 = right/down,
+// 0.5 = both ways, 1 = left/up); otherwise it grows right/down.
+// Containers (VBox, HBox, Margin, Panel, Center) ignore their children's
+// anchors and place them. All of it is plain float math in fixed tree order,
+// so layout is deterministic (DESIGN.md 4.1).
+//
+// Focus. One control has the focus (`UI.focused`). The actions ui_up,
+// ui_down, ui_left, ui_right (with key repeat), ui_accept and ui_cancel
+// move it geometrically between the focusable controls of the UI root that
+// holds it (wrapping around at the ends), activate it, or emit the root's
+// `cancelled` signal. The pointer (`Input.pointer()`, ui_click) focuses what
+// it moves over and activates what it clicks; sliders follow drags. Each
+// input is consumed by the first root that uses it in a tick. Projects bind
+// the ui_* actions in project.toml.
+//
+// Themes are minimal: colors, font sizes, padding (Theme). A control uses
+// the nearest `theme` up its parents, else UI.theme.
+
+// Colors, font sizes and spacing of the UI widgets. Assign one to a
+// control's `theme` (or change UI.theme) to restyle a tree.
+class Theme {
+    // Text sizes: widgets and Label #normal; Label #title; Label #small.
+    var font_size = 22.0
+    var title_size = 52.0
+    var small_size = 16.0
+    // Text colors. Labels: #dim and #small use `text_dim`, #title and #accent
+    // `accent`, #danger `danger`, #gold `gold`; widgets use `accent` when focused.
+    var text = Color.hex("e8ecff")
+    var text_dim = Color.hex("8890b0")
+    var text_disabled = Color.hex("4c5370")
+    var accent = Color.hex("7fe6ff")
+    var danger = Color.hex("ff5a8a")
+    var gold = Color.hex("ffd866")
+    // Panel background and border; button fills by state.
+    var panel = Color.hex("0d1124f6")
+    var panel_border = Color.hex("2c3560")
+    var button = Color.hex("161c38")
+    var button_focus = Color.hex("22305e")
+    var button_pressed = Color.hex("3a4c90")
+    var padding = vec2(20.0, 10.0) // inside buttons, toggles and sliders
+    // Inside a Panel, on every side.
+    var panel_padding = 28.0
+    // Between VBox/HBox children.
+    var separation = 12.0
+    // Corner radius and border width of panels and widgets.
+    var radius = 8.0
+    var border = 2.0
+}
+
+// The base of every UI node: a laid-out rect, focus and input (see the
+// top of this file).
+class Control extends Node2D {
+    // Anchors: fractions of the parent's rect (0,0 top-left .. 1,1
+    // bottom-right) where the top-left and bottom-right edges sit. Offsets:
+    // pixels added to them. set_anchors() sets all four from a preset.
+    @export var anchor_min = vec2(0.0, 0.0)
+    @export var anchor_max = vec2(0.0, 0.0)
+    @export var offset_min = vec2(0.0, 0.0)
+    @export var offset_max = vec2(0.0, 0.0)
+    // The control is never smaller than this (or its content).
+    @export var min_size = vec2(0.0, 0.0)
+    // In an HBox/VBox: share the space left over by the other children.
+    @export var expand = false
+    // Buttons, toggles and sliders ignore input and use `text_disabled`.
+    @export var disabled = false
+    // The laid-out size (with `position`, the rect), set by layout every tick.
+    var size = vec2(0.0, 0.0)
+    // null: the nearest ancestor's theme, else UI.theme.
+    var theme: Theme
+
+    // On a UI root: ui_cancel was pressed while it held the focus.
+    signal cancelled
+
+    // Controls are laid out in screen coordinates: they never inherit a
+    // parent's transform (DESIGN.md 4.17, milestone 9.1).
+    fn inherits_transform() -> bool {
+        return false
+    }
+
+    // ---- overridable behavior
+    // The size the content needs (a label's text); override in custom controls.
+    fn content_min_size() -> vec2 {
+        return vec2(0.0, 0.0)
+    }
+    fn can_focus() -> bool {
+        return false
+    }
+    // ui_accept or a click while focused.
+    fn activate() {}
+    // A direction while focused; true if the control used it (sliders).
+    fn nudge(dir: vec2) -> bool {
+        return false
+    }
+    // A click (ui_click) at `p`; activates by default.
+    fn pointer_down(p: vec2) {
+        activate()
+    }
+    // The pointer moved to `p` while held after a click on this control.
+    fn pointer_drag(p: vec2) {}
+
+    // ---- queries
+    // The larger of content_min_size() and `min_size`.
+    fn combined_min_size() -> vec2 {
+        return content_min_size().max(min_size)
+    }
+    fn center() -> vec2 {
+        return position + size * 0.5
+    }
+    fn contains(p: vec2) -> bool {
+        return p.x >= position.x && p.y >= position.y && p.x < position.x + size.x && p.y < position.y + size.y
+    }
+    fn has_focus() -> bool {
+        return UI.focused == self
+    }
+    // Gives this control the focus.
+    fn grab_focus() {
+        UI.focused = self
+    }
+    // True when its parent isn't a Control: it is laid out in the screen rect.
+    fn is_ui_root() -> bool {
+        return !(parent is Control)
+    }
+    // The theme in effect: `theme`, the nearest ancestor's, or UI.theme.
+    fn get_theme() -> Theme {
+        var n: Node = self
+        while n != null {
+            if n is Control c && c.theme != null {
+                return c.theme
+            }
+            n = n.parent
+        }
+        return UI.theme
+    }
+    // False when it or an ancestor (Node2D or CanvasLayer) is hidden.
+    fn is_visible_in_tree() -> bool {
+        var n: Node = self
+        while n != null {
+            if n is Node2D d && !d.visible {
+                return false
+            }
+            if n is CanvasLayer l && !l.visible {
+                return false
+            }
+            n = n.parent
+        }
+        return true
+    }
+    fn is_ancestor_of(c: Node) -> bool {
+        var n = c
+        while n != null {
+            if n == self {
+                return true
+            }
+            n = n.parent
+        }
+        return false
+    }
+
+    // Anchor presets: #full (with `margin` on every side), #center, #top,
+    // #bottom, #left, #right, #top_left, #top_right, #bottom_left,
+    // #bottom_right (`margin` away from the edges).
+    fn set_anchors(preset: name, margin = 0.0) {
+        if preset == #full {
+            anchor_min = vec2(0.0, 0.0)
+            anchor_max = vec2(1.0, 1.0)
+            offset_min = vec2(margin, margin)
+            offset_max = vec2(-margin, -margin)
+            return
+        }
+        var a = vec2(0.5, 0.5)
+        match preset {
+            #top => a = vec2(0.5, 0.0)
+            #bottom => a = vec2(0.5, 1.0)
+            #left => a = vec2(0.0, 0.5)
+            #right => a = vec2(1.0, 0.5)
+            #top_left => a = vec2(0.0, 0.0)
+            #top_right => a = vec2(1.0, 0.0)
+            #bottom_left => a = vec2(0.0, 1.0)
+            #bottom_right => a = vec2(1.0, 1.0)
+            _ => a = vec2(0.5, 0.5)
+        }
+        anchor_min = a
+        anchor_max = a
+        offset_min = (vec2(0.5, 0.5) - a) * (2.0 * margin)
+        offset_max = offset_min
+    }
+
+    // ---- layout
+    // Layout internals: places the control in its parent's rect from its
+    // anchors and offsets; containers override layout_children().
+    fn layout_in(parent_pos: vec2, parent_size: vec2) {
+        var lo = parent_pos + parent_size * anchor_min + offset_min
+        var hi = parent_pos + parent_size * anchor_max + offset_max
+        var sz = (hi - lo).max(combined_min_size())
+        var extra = sz - (hi - lo)
+        var gx = anchor_min.x == anchor_max.x ? anchor_min.x : 0.0
+        var gy = anchor_min.y == anchor_max.y ? anchor_min.y : 0.0
+        set_rect(lo - extra * vec2(gx, gy), sz)
+    }
+    fn set_rect(pos: vec2, sz: vec2) {
+        position = pos
+        size = sz
+        layout_children()
+    }
+    fn layout_children() {
+        for c in children {
+            if c is Control k {
+                k.layout_in(position, size)
+            }
+        }
+    }
+
+    // ---- focus helpers
+    fn collect_focusable(out: List<Control>) {
+        if !visible {
+            return
+        }
+        if can_focus() {
+            out.push(self)
+        }
+        for c in children {
+            if c is Control k {
+                k.collect_focusable(out)
+            }
+        }
+    }
+    // The topmost (last drawn) focusable control under `p`.
+    fn focusable_at(p: vec2) -> Control {
+        var found: Control
+        if !visible {
+            return found
+        }
+        if can_focus() && contains(p) {
+            found = self
+        }
+        for c in children {
+            if c is Control k {
+                var f = k.focusable_at(p)
+                if f != null {
+                    found = f
+                }
+            }
+        }
+        return found
+    }
+    fn emit_cancelled() {
+        emit cancelled
+    }
+
+    // UI roots lay out their tree and handle input before it updates.
+    fn update_tree(dt: float) {
+        if !freed && is_ui_root() && can_process() && is_visible_in_tree() {
+            layout_in(vec2(0.0, 0.0), Screen.size)
+            UI.process(self)
+        }
+        super.update_tree(dt)
+    }
+}
+
+// ---------------------------------------------------------------- containers
+
+class Container extends Control {}
+
+// Stacks visible children (VBox: top to bottom, HBox: left to right) at
+// their minimum size along the stack, filling the other direction. Space
+// left over goes to `expand` children, else `align` places the stack.
+class BoxContainer extends Container {
+    @export var separation = -1.0 // < 0: the theme's
+    @export var align = #begin    // #begin, #center, #end
+    fn vertical() -> bool {
+        return true
+    }
+    fn gap() -> float {
+        return separation >= 0.0 ? separation : get_theme().separation
+    }
+    fn content_min_size() -> vec2 {
+        var along = 0.0
+        var across = 0.0
+        var n = 0
+        for c in children {
+            if c is Control k && k.visible {
+                var m = k.combined_min_size()
+                along += vertical() ? m.y : m.x
+                across = max(across, vertical() ? m.x : m.y)
+                n += 1
+            }
+        }
+        if n > 1 {
+            along += gap() * ((n - 1) as float)
+        }
+        return vertical() ? vec2(across, along) : vec2(along, across)
+    }
+    fn layout_children() {
+        var need = content_min_size()
+        var extra = max(vertical() ? size.y - need.y : size.x - need.x, 0.0)
+        var expanders = 0
+        for c in children {
+            if c is Control k && k.visible && k.expand {
+                expanders += 1
+            }
+        }
+        var cursor = 0.0
+        if expanders == 0 {
+            if align == #center {
+                cursor = extra * 0.5
+            } else if align == #end {
+                cursor = extra
+            }
+        }
+        var first = true
+        for c in children {
+            if c is Control k && k.visible {
+                if !first {
+                    cursor += gap()
+                }
+                first = false
+                var m = k.combined_min_size()
+                var len = vertical() ? m.y : m.x
+                if k.expand {
+                    len += extra / (expanders as float)
+                }
+                if vertical() {
+                    k.set_rect(position + vec2(0.0, cursor), vec2(size.x, len))
+                } else {
+                    k.set_rect(position + vec2(cursor, 0.0), vec2(len, size.y))
+                }
+                cursor += len
+            }
+        }
+    }
+}
+
+class VBox extends BoxContainer {}
+
+class HBox extends BoxContainer {
+    fn vertical() -> bool {
+        return false
+    }
+}
+
+// Children fill the rect minus `margins` (left, top, right, bottom).
+class Margin extends Container {
+    @export var margins = vec4(0.0, 0.0, 0.0, 0.0)
+    fn inset() -> vec4 {
+        return margins
+    }
+    fn content_min_size() -> vec2 {
+        var m = vec2(0.0, 0.0)
+        for c in children {
+            if c is Control k && k.visible {
+                m = m.max(k.combined_min_size())
+            }
+        }
+        var i = inset()
+        return m + vec2(i.x + i.z, i.y + i.w)
+    }
+    fn layout_children() {
+        var i = inset()
+        for c in children {
+            if c is Control k {
+                k.set_rect(position + vec2(i.x, i.y), (size - vec2(i.x + i.z, i.y + i.w)).max(vec2(0.0, 0.0)))
+            }
+        }
+    }
+}
+
+// A Margin with a themed background; adds the theme's panel padding.
+class Panel extends Margin {
+    fn inset() -> vec4 {
+        return margins + vec4(get_theme().panel_padding)
+    }
+    fn draw(g: Canvas) {
+        var t = get_theme()
+        g.rect(position, size, fill = t.panel, stroke = t.panel_border, width = t.border, radius = t.radius * 1.5)
+    }
+}
+
+// Children at their minimum size, centered.
+class Center extends Container {
+    fn content_min_size() -> vec2 {
+        var m = vec2(0.0, 0.0)
+        for c in children {
+            if c is Control k && k.visible {
+                m = m.max(k.combined_min_size())
+            }
+        }
+        return m
+    }
+    fn layout_children() {
+        for c in children {
+            if c is Control k {
+                var m = k.combined_min_size()
+                k.set_rect(position + (size - m) * 0.5, m)
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- widgets
+
+class Label extends Control {
+    @export var text = ""
+    @export var style = #normal // #normal, #title, #small, #dim, #accent, #danger, #gold
+    @export var font_size = 0.0 // > 0 overrides the style's size
+    @export var align = #left   // #left, #center, #right
+    fn text_size() -> float {
+        if font_size > 0.0 {
+            return font_size
+        }
+        var t = get_theme()
+        if style == #title {
+            return t.title_size
+        }
+        if style == #small {
+            return t.small_size
+        }
+        return t.font_size
+    }
+    fn text_color() -> Color {
+        var t = get_theme()
+        match style {
+            #dim | #small => return t.text_dim
+            #accent | #title => return t.accent
+            #danger => return t.danger
+            #gold => return t.gold
+            _ => return t.text
+        }
+    }
+    fn content_min_size() -> vec2 {
+        return UI.measure(text, text_size())
+    }
+    fn draw(g: Canvas) {
+        var x = position.x
+        if align == #center {
+            x += size.x * 0.5
+        } else if align == #right {
+            x += size.x
+        }
+        g.text(vec2(x, position.y + size.y * 0.5), text, size = text_size(), color = text_color(), align = align,
+               baseline = #middle)
+    }
+}
+
+class Button extends Control {
+    @export var text = ""
+    // Activated: ui_accept while focused, or a click.
+    signal pressed
+    var flash = 0 // ticks of "pressed" highlight
+
+    fn can_focus() -> bool {
+        return !disabled
+    }
+    fn activate() {
+        if !disabled {
+            flash = 8
+            emit pressed
+        }
+    }
+    fn update(dt: float) {
+        if flash > 0 {
+            flash -= 1
+        }
+    }
+    fn content_min_size() -> vec2 {
+        var t = get_theme()
+        return UI.measure(text, t.font_size) + t.padding * 2.0
+    }
+    fn draw(g: Canvas) {
+        var t = get_theme()
+        var focus = has_focus()
+        var fill = flash > 0 ? t.button_pressed : (focus ? t.button_focus : t.button)
+        g.rect(position, size, fill = fill, stroke = focus ? t.accent : t.panel_border, width = t.border,
+               radius = t.radius)
+        var color = disabled ? t.text_disabled : (focus ? t.accent : t.text)
+        g.text(center(), text, size = t.font_size, color = color, align = #center, baseline = #middle)
+    }
+}
+
+// An on/off switch with a label; ui_accept or a click flips it.
+class Toggle extends Control {
+    @export var text = ""
+    @export var on = false
+    // `on` changed; `value` is the new state.
+    signal toggled(value: bool)
+
+    fn can_focus() -> bool {
+        return !disabled
+    }
+    fn activate() {
+        if !disabled {
+            on = !on
+            emit toggled(on)
+        }
+    }
+    fn content_min_size() -> vec2 {
+        var t = get_theme()
+        return UI.measure(text, t.font_size) + t.padding * 2.0 + vec2(72.0, 0.0)
+    }
+    fn draw(g: Canvas) {
+        var t = get_theme()
+        var focus = has_focus()
+        g.rect(position, size, fill = focus ? t.button_focus : t.button, stroke = focus ? t.accent : t.panel_border,
+               width = t.border, radius = t.radius)
+        var color = disabled ? t.text_disabled : (focus ? t.accent : t.text)
+        g.text(vec2(position.x + t.padding.x, position.y + size.y * 0.5), text, size = t.font_size, color = color,
+               baseline = #middle)
+        var sw = vec2(48.0, 24.0)
+        var at = vec2(position.x + size.x - t.padding.x - sw.x, position.y + (size.y - sw.y) * 0.5)
+        g.rect(at, sw, fill = on ? t.accent.with_alpha(0.35) : t.panel, stroke = on ? t.accent : t.text_dim, width = 2.0,
+               radius = sw.y * 0.5)
+        var knob = on ? at + vec2(sw.x - sw.y * 0.5, sw.y * 0.5) : at + vec2(sw.y * 0.5, sw.y * 0.5)
+        g.circle(knob, sw.y * 0.5 - 4.0, fill = on ? t.accent : t.text_dim)
+    }
+}
+
+// A value in [min_value, max_value] snapped to `increment`; ui_left/ui_right
+// change it while focused, the pointer drags it.
+class Slider extends Control {
+    @export var text = ""
+    @export var value = 0.5
+    @export var min_value = 0.0
+    @export var max_value = 1.0
+    @export var increment = 0.1 // 0: continuous
+    // `value` changed (keys or dragging).
+    signal changed(value: float)
+
+    fn can_focus() -> bool {
+        return !disabled
+    }
+    // Sets `value` clamped and snapped, emitting `changed` if it moved.
+    fn set_value(v: float) {
+        var x = clamp(v, min_value, max_value)
+        if increment > 0.0 {
+            x = clamp(min_value + round((x - min_value) / increment) * increment, min_value, max_value)
+        }
+        if x != value {
+            value = x
+            emit changed(x)
+        }
+    }
+    fn ratio() -> float {
+        if max_value <= min_value {
+            return 0.0
+        }
+        return (value - min_value) / (max_value - min_value)
+    }
+    fn nudge(dir: vec2) -> bool {
+        if dir.x == 0.0 || disabled {
+            return false
+        }
+        var s = increment > 0.0 ? increment : (max_value - min_value) * 0.05
+        set_value(value + dir.x * s)
+        return true
+    }
+    fn track_x() -> float {
+        var t = get_theme()
+        return text == "" ? position.x + t.padding.x : position.x + size.x * 0.42
+    }
+    fn track_width() -> float {
+        var t = get_theme()
+        return max(position.x + size.x - t.padding.x - 64.0 - track_x(), 1.0)
+    }
+    fn pointer_down(p: vec2) {
+        pointer_drag(p)
+    }
+    fn pointer_drag(p: vec2) {
+        if !disabled {
+            set_value(min_value + clamp((p.x - track_x()) / track_width(), 0.0, 1.0) * (max_value - min_value))
+        }
+    }
+    fn content_min_size() -> vec2 {
+        var t = get_theme()
+        return UI.measure(text, t.font_size) + t.padding * 2.0 + vec2(260.0, 0.0)
+    }
+    fn draw(g: Canvas) {
+        var t = get_theme()
+        var focus = has_focus()
+        g.rect(position, size, fill = focus ? t.button_focus : t.button, stroke = focus ? t.accent : t.panel_border,
+               width = t.border, radius = t.radius)
+        var color = disabled ? t.text_disabled : (focus ? t.accent : t.text)
+        var mid = position.y + size.y * 0.5
+        if text != "" {
+            g.text(vec2(position.x + t.padding.x, mid), text, size = t.font_size, color = color, baseline = #middle)
+        }
+        var x0 = track_x()
+        var w = track_width()
+        g.rect(vec2(x0, mid - 3.0), vec2(w, 6.0), fill = t.panel, radius = 3.0)
+        g.rect(vec2(x0, mid - 3.0), vec2(w * ratio(), 6.0), fill = color, radius = 3.0)
+        g.circle(vec2(x0 + w * ratio(), mid), 9.0, fill = color)
+        var pct = round(ratio() * 100.0) as int
+        g.text(vec2(position.x + size.x - t.padding.x, mid), "{pct}%", size = t.small_size, color = color, align = #right,
+               baseline = #middle)
+    }
+}
+
+// ---------------------------------------------------------------- focus and input
+
+class UI {
+    // The default theme.
+    static var theme = Theme()
+    // The control with the focus, or null.
+    static var focused: Control
+    // The control being dragged (a slider), or null.
+    static var dragging: Control
+    // When set, only UI roots under this node take input (a modal dialog
+    // over other menus).
+    static var modal: Node
+
+    // Per-tick input state, computed by the first root that runs in a tick
+    // and consumed by the root that uses it.
+    static var _tick = -1
+    static var _pointer = vec2(-1.0, -1.0)
+    static var _pointer_moved = false
+    static var _click = false
+    static var _nav = vec2(0.0, 0.0)
+    static var _accept = false
+    static var _cancel = false
+    static var _hold_dir = vec2(0.0, 0.0)
+    static var _hold_ticks = 0
+
+    // Size of `text` laid out with the game's font at `size` (one line per
+    // '\n'): the width of the widest line and the height of all lines.
+    @native static fn measure(text: str, size: float) -> vec2 {}
+
+    // UI internals, run by the UI roots: per-tick input, focus moves, clicks.
+    static fn begin_tick() {
+        if _tick == Time.tick {
+            return
+        }
+        _tick = Time.tick
+        var p = Input.pointer()
+        _pointer_moved = p != _pointer
+        _pointer = p
+        _click = Input.pressed(#ui_click)
+        _accept = Input.pressed(#ui_accept)
+        _cancel = Input.pressed(#ui_cancel)
+        var dir = vec2(0.0, 0.0)
+        if Input.held(#ui_up) {
+            dir = vec2(0.0, -1.0)
+        } else if Input.held(#ui_down) {
+            dir = vec2(0.0, 1.0)
+        } else if Input.held(#ui_left) {
+            dir = vec2(-1.0, 0.0)
+        } else if Input.held(#ui_right) {
+            dir = vec2(1.0, 0.0)
+        }
+        _nav = vec2(0.0, 0.0)
+        if dir != _hold_dir {
+            _hold_dir = dir
+            _hold_ticks = 0
+            _nav = dir
+        } else if dir != vec2(0.0, 0.0) {
+            // Key repeat: after 0.4 s, every 0.1 s (at 60 Hz).
+            _hold_ticks += 1
+            if _hold_ticks >= 24 && (_hold_ticks - 24) % 6 == 0 {
+                _nav = dir
+            }
+        }
+    }
+
+    // Drops this tick's UI input (e.g. after the key that opened a menu, so
+    // the menu doesn't see the same press).
+    static fn consume_input() {
+        begin_tick()
+        _click = false
+        _accept = false
+        _cancel = false
+        _nav = vec2(0.0, 0.0)
+    }
+
+    static fn is_under(n: Node, ancestor: Node) -> bool {
+        var x = n
+        while x != null {
+            if x == ancestor {
+                return true
+            }
+            x = x.parent
+        }
+        return false
+    }
+
+    static fn process(root: Control) {
+        begin_tick()
+        if modal != null && (!is_under(root, modal) || !modal.is_alive()) {
+            if modal.is_alive() {
+                return
+            }
+            modal = null
+        }
+        if focused != null && (!focused.is_alive() || !focused.can_focus() || !focused.is_visible_in_tree()) {
+            focused = null
+        }
+        // Pointer: hovering focuses, clicking activates.
+        if _pointer_moved || _click {
+            var hit = root.focusable_at(_pointer)
+            if hit != null {
+                if _pointer_moved {
+                    focused = hit
+                }
+                if _click {
+                    _click = false
+                    focused = hit
+                    dragging = hit
+                    hit.pointer_down(_pointer)
+                }
+            }
+        }
+        if dragging != null && root.is_ancestor_of(dragging) {
+            if Input.held(#ui_click) && dragging.is_alive() {
+                dragging.pointer_drag(_pointer)
+            } else {
+                dragging = null
+            }
+        }
+        // Keys and gamepad.
+        var inside = focused != null && root.is_ancestor_of(focused)
+        if focused == null && (_nav != vec2(0.0, 0.0) || _accept) {
+            var list = List<Control>()
+            root.collect_focusable(list)
+            if list.len() > 0 {
+                focused = list[0]
+                _nav = vec2(0.0, 0.0)
+                _accept = false
+            }
+        } else if inside {
+            if _nav != vec2(0.0, 0.0) {
+                var dir = _nav
+                _nav = vec2(0.0, 0.0)
+                if !focused.nudge(dir) {
+                    var n = neighbor(root, focused, dir)
+                    if n != null {
+                        focused = n
+                    }
+                }
+            }
+            if _accept {
+                _accept = false
+                focused.activate()
+            }
+        }
+        if _cancel && (inside || focused == null) {
+            _cancel = false
+            root.emit_cancelled()
+        }
+    }
+
+    // The focusable control of `root` nearest to `from` in direction `dir`,
+    // wrapping to the far end when there is none that way.
+    static fn neighbor(root: Control, from: Control, dir: vec2) -> Control {
+        var list = List<Control>()
+        root.collect_focusable(list)
+        var origin = from.center()
+        var best: Control
+        var best_score = 0.0
+        for c in list {
+            if c == from {
+                continue
+            }
+            var d = c.center() - origin
+            var along = d.dot(dir)
+            if along <= 1.0 {
+                continue
+            }
+            var score = along + abs(d.x * dir.y - d.y * dir.x) * 2.0
+            if best == null || score < best_score {
+                best = c
+                best_score = score
+            }
+        }
+        if best != null {
+            return best
+        }
+        for c in list {
+            if c == from {
+                continue
+            }
+            var d = c.center() - origin
+            var along = d.dot(dir)
+            if along >= -1.0 {
+                continue
+            }
+            var score = along + abs(d.x * dir.y - d.y * dir.x) * 2.0
+            if best == null || score < best_score {
+                best = c
+                best_score = score
+            }
+        }
+        return best
+    }
+}

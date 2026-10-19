@@ -1,0 +1,132 @@
+// Engine API, part 4: audio (DESIGN.md 4.9), backed by cuervo/audio.
+//
+// Sounds are triggered from the simulation tick and played by the audio
+// thread. Nothing here reads back what the audio thread is doing (whether a
+// voice is still playing, how far it got), so a game behaves the same with
+// or without a sound device and replays sound identical.
+//
+// Sounds are referred to by name. Every audio file under the project's
+// `assets/` directory is registered by its file name: `assets/sfx/hit.wav` is
+// `#hit`. Files under an `assets/music/` directory stream, loop and play on
+// the music bus. Formats: WAV, OGG Vorbis, FLAC, MP3.
+//
+// Buses: #master, #music, #sfx, #ui, #voice. Every bus feeds #master.
+class Audio {
+    // Plays a sound and returns its voice id (for stop/set_voice). `pitch` is
+    // a playback rate (2.0 = an octave up), `pan` goes from -1 (left) to 1
+    // (right), `bus` and `priority` default (null) to the sound's own. The id is fresh even
+    // when the sound is unknown, so scripts never branch on audio state.
+    @native static fn play(sound: name, volume = 1.0, pitch = 1.0, pan = 0.0, bus: name? = null, looping = false,
+                           fade = 0.0, priority: int? = null) -> int {}
+    // Same, by path relative to the project directory (loaded on first use).
+    @native static fn play_file(path: str, volume = 1.0, pitch = 1.0, pan = 0.0, bus: name? = null, looping = false,
+                                fade = 0.0, priority: int? = null) -> int {}
+    // Fades a voice out over `fade` seconds (0: a click-free stop).
+    @native static fn stop(voice: int, fade = 0.0) {}
+    // Changes a playing voice, ramped over `fade` seconds.
+    @native static fn set_voice(voice: int, volume = 1.0, pitch = 1.0, pan = 0.0, fade = 0.05) {}
+    // Stops every voice, music included.
+    @native static fn stop_all(fade = 0.0) {}
+
+    // Registers a file (relative to the project) with settings and returns its
+    // name (`id`, or the file name when `id` is null). `limit`: at most this many voices of the
+    // sound; a new one steals the oldest (0 = no per-sound limit). `priority`:
+    // higher wins when every voice is busy. `stream`: decode while playing.
+    // Registering a name again keeps the first registration.
+    @native static fn load(path: str, id: name? = null, bus = #sfx, volume = 1.0, limit = 8, priority = 0,
+                           stream = false) -> name {}
+
+    // Music: one looping track at a time on the music bus. Playing the track
+    // that already plays does nothing.
+    @native static fn music(track: name, fade = 0.0, volume = 1.0) {}
+    // Fades the current track out while `track` fades in.
+    @native static fn crossfade(track: name, seconds = 1.5) {}
+    @native static fn stop_music(fade = 1.0) {}
+
+    // Bus volume (linear gain, 1.0 = unchanged), ramped over `fade` seconds.
+    @native static fn set_volume(bus: name, volume: float, fade = 0.0) {}
+    @native static fn volume(bus: name) -> float {}
+    @native static fn set_muted(bus: name, muted: bool) {}
+    @native static fn muted(bus: name) -> bool {}
+}
+
+// Plays a sound when asked (`play()`), or when it enters the tree with
+// `autoplay` (DESIGN.md 4.9). Triggered from the simulation like Audio.play,
+// so replays sound the same; it never reads back whether the sound is still
+// playing (`voice` is the last voice it started, -1 when stopped).
+class AudioPlayer extends Node2D {
+    // A registered sound (`assets/sfx/hit.wav` is #hit)...
+    @export var sound = #none
+    // ...or a file relative to the project, used when not empty.
+    @export var file = ""
+    // Linear gain (1.0 = the sound as recorded).
+    @export var volume = 1.0
+    // Playback rate: 2.0 = an octave up.
+    @export var pitch = 1.0
+    // -1 (left) .. 1 (right).
+    @export var pan = 0.0
+    // #master, #music, #sfx, #ui, #voice, or #default for the sound's own.
+    @export var bus = #default
+    // Repeats until stopped.
+    @export var looping = false
+    // Plays when the node enters the tree.
+    @export var autoplay = false
+    // Seconds to fade in.
+    @export var fade_in = 0.0
+    // Stops the sound when the node leaves the tree.
+    @export var stop_on_exit = true
+    // The last voice play() started, or -1.
+    var voice = -1
+    // Times play() was called.
+    var plays = 0
+
+    // Sets the node up when it enters the tree (call super.ready() when overriding).
+    fn ready() {
+        if autoplay {
+            play()
+        }
+    }
+
+    // Starts the sound (again: one more voice) and returns its voice id.
+    fn play() -> int {
+        plays += 1
+        var b: name? = null
+        if bus != #default {
+            b = bus
+        }
+        if file != "" {
+            voice = Audio.play_file(file, volume = volume, pitch = pitch, pan = pan, bus = b, looping = looping,
+                                    fade = fade_in)
+        } else {
+            voice = Audio.play(sound, volume = volume, pitch = pitch, pan = pan, bus = b, looping = looping,
+                               fade = fade_in)
+        }
+        return voice
+    }
+
+    // Stops the last voice, fading out over `fade` seconds.
+    fn stop(fade = 0.0) {
+        if voice >= 0 {
+            Audio.stop(voice, fade = fade)
+            voice = -1
+        }
+    }
+
+    // Cleans up when the node leaves the tree.
+    fn exit() {
+        if stop_on_exit {
+            stop()
+        }
+    }
+
+    // Draws the node (render only).
+    fn draw(g: Canvas) {
+        if !ready_done {
+            var c = Color.rgb(0.9, 0.6, 1.0, 0.7)
+            var position = global_position()
+            g.rect(position - vec2(9.0, 5.0), vec2(6.0, 10.0), fill = c)
+            g.arc(position, 8.0, -0.7, 0.7, stroke = c, width = 2.0)
+            g.arc(position, 13.0, -0.7, 0.7, stroke = c, width = 2.0)
+        }
+    }
+}

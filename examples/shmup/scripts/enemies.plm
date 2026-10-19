@@ -1,0 +1,243 @@
+// Enemies: behavior is written as coroutines (DESIGN.md 5.9).
+
+class Enemy extends Node2D {
+    signal died(points: int)
+
+    var hp = 3
+    var radius = 16.0
+    var points = 100
+    var color = Color.hex("ff6f7d")
+    var flash_ticks = 0
+
+    fn update(dt: float) {
+        Collision.hitbox(self, position, radius, LAYER_ENEMY)
+        if flash_ticks > 0 {
+            flash_ticks -= 1
+        }
+        var p = Game.main.player
+        if p.is_alive() && position.distance(p.position) < radius + 8.0 {
+            p.take_hit()
+        }
+        var s = Screen.size
+        if position.y > s.y + 80.0 || position.x < -120.0 || position.x > s.x + 120.0 {
+            queue_free()
+        }
+    }
+
+    fn on_hit(tag: name, count: int) {
+        if tag != #player_shot || freed {
+            return
+        }
+        Audio.play(#hit, volume = 0.25, pan = pan_at(position))
+        hp -= count
+        flash_ticks = 3
+        if hp <= 0 {
+            Audio.play(#explosion, volume = 0.45, pitch = 0.9 + 0.05 * ((Time.tick % 5) as float), pan = pan_at(position))
+            Game.main.burst(position, color, 24)
+            emit died(points)
+            queue_free()
+        }
+    }
+
+    fn fire_at_player(count: int, spread: float, speed: float) {
+        var g = Game.main
+        g.enemy_shots.aimed(position, g.player.position, speed, count = count, spread = spread, size = 5.0,
+                            color = BULLET_COLOR)
+    }
+
+    fn body_color() -> Color {
+        return flash_ticks > 0 ? Color.hex("ffffff") : color
+    }
+
+    fn draw(g: Canvas) {
+        var c = body_color()
+        g.circle(position, radius, fill = c.with_alpha(0.25), stroke = c, width = 2.5)
+        g.circle(position, radius * 0.35, fill = c)
+    }
+}
+
+// Flies down in a line, fires a few aimed bursts, then speeds off.
+class Drone extends Enemy {
+    var velocity = vec2(0.0, 150.0)
+
+    fn ready() {
+        hp = 3
+        radius = 14.0
+        points = 100
+        start(attack())
+    }
+
+    fn attack() {
+        await wait(0.8)
+        for i in 0..3 {
+            fire_at_player(3, 0.35, 230.0)
+            await wait(0.9)
+        }
+        velocity *= 2.0
+    }
+
+    fn update(dt: float) {
+        position += velocity * dt
+        super.update(dt)
+    }
+}
+
+// Swoops down in a sine wave, dropping slow rings.
+class Sweeper extends Enemy {
+    var base_x = 640.0
+    var age = 0.0
+
+    fn ready() {
+        hp = 5
+        radius = 18.0
+        points = 150
+        color = Color.hex("b48cff")
+        start(attack())
+    }
+
+    fn attack() {
+        loop {
+            await wait(1.1)
+            Game.main.enemy_shots.ring(position, 12, 120.0, phase = age, size = 5.0, color = color)
+        }
+    }
+
+    fn update(dt: float) {
+        age += dt
+        position.x = base_x + 140.0 * sin(age * 1.8)
+        position.y += 95.0 * dt
+        super.update(dt)
+    }
+
+    fn draw(g: Canvas) {
+        var c = body_color()
+        g.rect(position - vec2(radius, radius), vec2(radius * 2.0, radius * 2.0), fill = c.with_alpha(0.25), stroke = c,
+               width = 2.5, radius = 5.0, rotation = age * 2.0)
+    }
+}
+
+// Descends, holds position and fires a rotating spiral, then retreats.
+class Spinner extends Enemy {
+    var stop_y = 170.0
+    var spin = 0.0
+
+    fn ready() {
+        hp = 24
+        radius = 24.0
+        points = 500
+        color = SPIRAL_COLOR
+        start(attack())
+    }
+
+    fn attack() {
+        while position.y < stop_y {
+            position.y += 110.0 * Time.dt
+            yield
+        }
+        for k in 0..45 {
+            Game.main.enemy_shots.ring(position, 8, 150.0, phase = spin, size = 5.0, color = SPIRAL_COLOR)
+            spin += 0.19
+            await wait(0.1)
+        }
+        while position.y > -80.0 {
+            position.y -= 140.0 * Time.dt
+            yield
+        }
+        queue_free()
+    }
+
+    fn draw(g: Canvas) {
+        var c = body_color()
+        g.circle(position, radius, fill = c.with_alpha(0.2), stroke = c, width = 3.0)
+        for i in 0..4 {
+            var d = from_angle(spin + (i as float) * PI / 2.0, radius + 6.0)
+            g.line(position, position + d, color = c, width = 3.0)
+        }
+    }
+}
+
+enum Phase {
+    Opening,
+    Spiral(arms: int),
+    Rage,
+}
+
+// Every second wave: a boss with phases (LANGUAGE.md 5.2 style).
+class Boss extends Enemy {
+    signal defeated
+
+    var max_hp = 260
+    var phase: Phase = Phase.Opening
+    var turn = 0.0
+
+    fn ready() {
+        hp = max_hp
+        radius = 46.0
+        points = 5000
+        color = Color.hex("ff4060")
+        start(run_phases())
+    }
+
+    fn run_phases() {
+        while position.y < 150.0 {
+            position.y += 70.0 * Time.dt
+            yield
+        }
+        while hp > 0 {
+            match phase {
+                Phase.Opening => {
+                    for i in 0..5 {
+                        Game.main.enemy_shots.ring(position, 28, 170.0, phase = (i as float) * 0.11, size = 6.0,
+                                                   color = color)
+                        await wait(0.45)
+                    }
+                    phase = Phase.Spiral(arms = 5)
+                }
+                Phase.Spiral(arms) => {
+                    for i in 0..70 {
+                        Game.main.enemy_shots.ring(position, arms, 200.0, phase = turn, size = 5.0, color = SPIRAL_COLOR)
+                        turn += 0.13
+                        await wait(0.06)
+                        if hp < max_hp / 3 {
+                            break
+                        }
+                    }
+                    phase = hp < max_hp / 3 ? Phase.Rage : Phase.Opening
+                }
+                Phase.Rage => {
+                    for i in 0..10 {
+                        fire_at_player(7, 0.9, 300.0)
+                        await wait(0.12)
+                    }
+                    await wait(0.5)
+                }
+            }
+        }
+    }
+
+    fn update(dt: float) {
+        if position.y >= 150.0 {
+            position.x = Screen.size.x * 0.5 + 220.0 * sin(Time.seconds * 0.5)
+        }
+        super.update(dt)
+    }
+
+    fn on_hit(tag: name, count: int) {
+        super.on_hit(tag, count)
+        if hp <= 0 {
+            Audio.play(#big_explosion, volume = 0.7, priority = 10)
+            Game.main.burst(position, GOLD, 80)
+            emit defeated
+        }
+    }
+
+    fn draw(g: Canvas) {
+        var c = body_color()
+        g.circle(position, radius, fill = c.with_alpha(0.22), stroke = c, width = 4.0)
+        g.circle(position, radius * 0.45, fill = c.with_alpha(0.8))
+        var w = 420.0
+        var left = vec2(Screen.size.x * 0.5 - w * 0.5, 92.0)
+        g.rect(left, vec2(w, 10.0), fill = Color.hex("2a1020"), radius = 4.0)
+        g.rect(left, vec2(w * (max(hp, 0) as float) / (max_hp as float), 10.0), fill = c, radius = 4.0)
+    }
+}

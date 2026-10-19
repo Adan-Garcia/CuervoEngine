@@ -1,0 +1,104 @@
+// The player's ship: movement and shooting through input actions, a small
+// hitbox, invulnerability after a hit, bombs.
+
+class Player extends Node2D {
+    signal hurt
+
+    var speed = 380.0
+    var focus_speed = 160.0
+    var cooldown = 0
+    var invulnerable = 0.0
+    var bombs = 2
+    var focused = false
+
+    fn ready() {
+        position = vec2(Screen.size.x * 0.5, Screen.size.y - 90.0)
+        invulnerable = 1.5
+        start(flash())
+    }
+
+    fn update(dt: float) {
+        var g = Game.main
+        var dir = Input.axis(#move)
+        var shooting = Input.held(#shoot)
+        focused = Input.held(#focus)
+        if g.demo {
+            dir = autopilot()
+            shooting = true
+            focused = false
+        }
+        var s = focused ? focus_speed : speed
+        position += dir * s * dt
+        position = position.clamp(vec2(24.0, 24.0), Screen.size - vec2(24.0, 24.0))
+
+        if cooldown > 0 {
+            cooldown -= 1
+        }
+        if shooting && cooldown == 0 {
+            cooldown = 5
+            // Pitch varies with the tick, not Random: audio must not consume the
+            // simulation RNG.
+            Audio.play(#shoot, volume = 0.15, pitch = 1.0 + 0.03 * ((Time.tick % 4) as float), pan = pan_at(position))
+            var spread = focused ? 0.06 : 0.28
+            g.player_shots.fire(Pattern.Arc(count = 3, direction = -PI / 2.0, spread = spread), position - vec2(0.0, 16.0),
+                                Shot { speed = 950.0, size = 4.0, color = SHOT_COLOR, life = 1.5 })
+        }
+        if Input.pressed(#bomb) && bombs > 0 {
+            bombs -= 1
+            Audio.play(#bomb, volume = 0.7)
+            g.enemy_shots.kill_near(position, 400.0)
+            g.burst(position, GOLD, 60)
+        }
+
+        if invulnerable > 0.0 {
+            invulnerable = max(invulnerable - dt, 0.0)
+        } else {
+            Collision.hitbox(self, position, 4.0, LAYER_PLAYER)
+        }
+    }
+
+    // Demo mode: weave across the screen, staying low.
+    fn autopilot() -> vec2 {
+        var t = Time.seconds
+        var target = vec2(Screen.size.x * (0.5 + 0.38 * sin(t * 0.6)), Screen.size.y - 110.0 + 50.0 * sin(t * 1.7))
+        var to = target - position
+        if to.length() < 4.0 {
+            return vec2(0.0, 0.0)
+        }
+        return to.normalized()
+    }
+
+    fn on_hit(tag: name, count: int) {
+        if tag == #enemy_shot {
+            take_hit()
+        }
+    }
+
+    fn take_hit() {
+        if invulnerable > 0.0 || !is_alive() {
+            return
+        }
+        invulnerable = 2.0
+        emit hurt
+        start(flash())
+    }
+
+    fn flash() {
+        while invulnerable > 0.0 {
+            visible = Options.reduced_flashing || !visible
+            await wait(0.07)
+        }
+        visible = true
+    }
+
+    fn draw(g: Canvas) {
+        var p = position
+        g.line(p + vec2(-16.0, 12.0), p + vec2(0.0, -18.0), color = SHOT_COLOR, width = 4.0)
+        g.line(p + vec2(16.0, 12.0), p + vec2(0.0, -18.0), color = SHOT_COLOR, width = 4.0)
+        g.line(p + vec2(-16.0, 12.0), p + vec2(16.0, 12.0), color = SHOT_COLOR, width = 3.0)
+        g.circle(p + vec2(0.0, 18.0), 4.0 + 2.0 * sin(Time.seconds * 30.0), fill = GOLD.with_alpha(0.8))
+        if focused {
+            g.circle(p, 5.0, fill = Color.hex("ffffff"), stroke = BULLET_COLOR, width = 1.5)
+        }
+    }
+}

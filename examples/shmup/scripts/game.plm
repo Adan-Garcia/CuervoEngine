@@ -1,0 +1,284 @@
+// The stage: score, lives, waves, pause and game over. The title screen
+// runs the stage in demo mode behind it (menus.plm).
+
+// Collision layers (Emitter `layer` / `hits`, Collision.hitbox).
+const LAYER_PLAYER = 0
+const LAYER_ENEMY = 1
+const LAYER_PLAYER_SHOT = 2
+const LAYER_ENEMY_SHOT = 3
+
+var INK = Color.hex("e8ecff")
+var DIM = Color.hex("8890b0")
+var SHOT_COLOR = Color.hex("7fe6ff")
+var BULLET_COLOR = Color.hex("ff5a8a")
+var SPIRAL_COLOR = Color.hex("ffc44d")
+var GOLD = Color.hex("ffd866")
+
+// Stereo position of a sound made at `p`: -0.6 (left edge) .. 0.6 (right edge).
+fn pan_at(p: vec2) -> float {
+    return (p.x / Screen.size.x * 2.0 - 1.0) * 0.6
+}
+
+class Game extends Node {
+    static var main: Game
+
+    var score = 0
+    var high_score = 0
+    var lives = 3
+    var wave = 0
+    var state = #title      // #title, #playing, #paused, #game_over
+    var demo = true         // title screen: the ship flies itself
+    var menus: Menus
+    var banner = ""
+    var player: Player
+    var waves: Task
+    var stars = List<vec3>() // x, y, depth
+
+    // Bullets are gameplay particles (cuervo/particles).
+    var player_shots = Emitter(tag = #player_shot, layer = LAYER_PLAYER_SHOT, hits = 1 << LAYER_ENEMY, radius = 5.0,
+                               shape = #capsule)
+    var enemy_shots = Emitter(tag = #enemy_shot, layer = LAYER_ENEMY_SHOT, hits = 1 << LAYER_PLAYER,
+                              outline = 1.5, outline_color = Color.hex("ffffff"))
+    var sparks = Emitter(tag = #sparks)
+
+    fn ready() {
+        Game.main = self
+        sparks.add(Module.Drag(k = 2.5))
+        sparks.add(Module.SizeOverLife(from = 1.0, to = 0.0))
+        for i in 0..90 {
+            stars.push(vec3(Random.range(0.0, Screen.size.x), Random.range(0.0, Screen.size.y), Random.range(0.2, 1.0)))
+        }
+        menus = Menus()
+        add_child(menus)
+        go_to_title()
+    }
+
+    // ---------------------------------------------------------------- flow
+
+    fn start_game() {
+        Scene.paused = false
+        Options.apply_volumes()
+        state = #playing
+        demo = false
+        reset_stage()
+        new_game()
+        menus.show(null, "")
+    }
+
+    fn go_to_title() {
+        Scene.paused = false
+        Options.apply_volumes()
+        state = #title
+        demo = true
+        reset_stage()
+        new_game()
+        menus.show(menus.title, "start")
+    }
+
+    fn pause_game() {
+        Scene.paused = true
+        Options.apply_volumes(duck = true)
+        state = #paused
+        menus.show(menus.pause, "resume")
+    }
+
+    fn resume() {
+        Scene.paused = false
+        Options.apply_volumes()
+        state = #playing
+        menus.show(null, "")
+    }
+
+    // Removes the ships, enemies and bullets of the current run.
+    fn reset_stage() {
+        if waves != null {
+            waves.cancel()
+        }
+        for c in children {
+            if c is Enemy || c is Player {
+                c.queue_free()
+            }
+        }
+        enemy_shots.clear()
+        player_shots.clear()
+        banner = ""
+    }
+
+    fn new_game() {
+        score = 0
+        lives = 3
+        wave = 0
+        player = Player()
+        add_child(player)
+        player.hurt.connect(fn() { lose_life() })
+        waves = start(run_waves())
+        Audio.music(#stage_loop, fade = 1.0, volume = 0.35)
+    }
+
+    fn update(dt: float) {
+        if state == #playing && Input.pressed(#pause) {
+            pause_game()
+        }
+    }
+
+    fn add_score(points: int) {
+        score += points
+        if !demo {
+            high_score = max(high_score, score)
+        }
+    }
+
+    fn enemy_count() -> int {
+        var n = 0
+        for c in children {
+            if c is Enemy && c.is_alive() {
+                n += 1
+            }
+        }
+        return n
+    }
+
+    fn spawn(e: Enemy, at: vec2) {
+        e.position = at
+        add_child(e)
+        e.died.connect(fn(points: int) { add_score(points) })
+    }
+
+    // ---------------------------------------------------------------- waves
+
+    fn run_waves() {
+        await wait(1.0)
+        loop {
+            wave += 1
+            await announce("WAVE {wave}")
+            await drone_line(4 + wave, 1.0)
+            await wait(1.2)
+            await drone_line(4 + wave, -1.0)
+            await sweepers(3 + wave)
+            await until(fn() { enemy_count() == 0 })
+            spawn(Spinner(), vec2(Screen.size.x * 0.3, -40.0))
+            await wait(1.5)
+            spawn(Spinner(), vec2(Screen.size.x * 0.7, -40.0))
+            await until(fn() { enemy_count() == 0 })
+            if wave % 2 == 0 {
+                await announce("WARNING")
+                var boss = Boss()
+                spawn(boss, vec2(Screen.size.x * 0.5, -90.0))
+                await boss.defeated
+                enemy_shots.clear()
+                await announce("BOSS DEFEATED")
+            }
+            await wait(1.0)
+        }
+    }
+
+    fn announce(text: str) {
+        banner = text
+        await wait(1.6)
+        banner = ""
+    }
+
+    // A diagonal line of drones; `side` picks which edge they come from.
+    fn drone_line(count: int, side: float) {
+        for i in 0..count {
+            var x = Screen.size.x * 0.5 - side * (Screen.size.x * 0.4 - (i as float) * 60.0)
+            var d = Drone()
+            d.velocity = vec2(side * 40.0, 150.0)
+            spawn(d, vec2(x, -30.0))
+            await wait(0.3)
+        }
+    }
+
+    fn sweepers(count: int) {
+        for i in 0..count {
+            var s = Sweeper()
+            s.base_x = Random.range(160.0, Screen.size.x - 160.0)
+            spawn(s, vec2(s.base_x, -30.0))
+            await wait(0.6)
+        }
+    }
+
+    // ---------------------------------------------------------------- lives
+
+    fn lose_life() {
+        lives -= 1
+        Audio.play(#hurt, volume = 0.6, priority = 10, pan = pan_at(player.position))
+        enemy_shots.kill_near(player.position, 220.0)
+        burst(player.position, SHOT_COLOR, 40)
+        if lives <= 0 {
+            end_game()
+        }
+    }
+
+    fn burst(at: vec2, color: Color, count: int) {
+        sparks.fire(Pattern.Burst(count = count, direction = 0.0, spread = TAU), at,
+                    Shot { speed = 170.0, speed_jitter = 90.0, life = 0.7, life_jitter = 0.3, size = 3.5, color = color })
+    }
+
+    fn end_game() {
+        Audio.stop_music(fade = 2.0)
+        Audio.play(#big_explosion, volume = 0.7, priority = 10, pitch = 0.8)
+        waves.cancel()
+        player.queue_free()
+        if demo {
+            start(restart_demo())
+            return
+        }
+        state = #game_over
+        start(show_game_over())
+    }
+
+    fn restart_demo() {
+        await wait(2.0)
+        if state == #title {
+            reset_stage()
+            new_game()
+        }
+    }
+
+    fn show_game_over() {
+        await wait(1.5)
+        if state == #game_over {
+            menus.set_score(score, high_score)
+            menus.show(menus.game_over, "retry")
+        }
+    }
+
+    // ---------------------------------------------------------------- drawing
+
+    fn draw(g: Canvas) {
+        for s in stars {
+            var y = (s.y + Time.seconds * 90.0 * s.z) % Screen.size.y
+            g.circle(vec2(s.x, y), 0.6 + s.z * 1.4, fill = INK.with_alpha(0.25 + s.z * 0.5))
+        }
+        sparks.draw(g)
+        player_shots.draw(g)
+    }
+
+    // After the ships: enemy bullets and the HUD on top.
+    fn draw_tree(g: Canvas) {
+        super.draw_tree(g)
+        draw_hud(g)
+    }
+
+    fn draw_hud(g: Canvas) {
+        enemy_shots.draw(g)
+        if state == #title {
+            return
+        }
+        g.text(vec2(24.0, 18.0), "SCORE {score}", size = 24.0, color = INK)
+        g.text(vec2(24.0, 48.0), "HI {high_score}", size = 16.0, color = DIM)
+        g.text(vec2(Screen.size.x - 24.0, 18.0), "WAVE {wave}", size = 20.0, color = INK, align = #right)
+        for i in 0..lives {
+            g.circle(vec2(Screen.size.x - 34.0 - (i as float) * 26.0, 62.0), 8.0, fill = SHOT_COLOR.with_alpha(0.3),
+                     stroke = SHOT_COLOR, width = 2.0)
+        }
+        if banner != "" {
+            g.text(Screen.size * 0.5, banner, size = 48.0, color = GOLD, align = #center, baseline = #middle)
+        }
+        if state == #playing {
+            g.text(vec2(Screen.size.x * 0.5, Screen.size.y - 30.0), "Esc / P / Start: pause", size = 14.0,
+                   color = DIM.with_alpha(0.6), align = #center)
+        }
+    }
+}

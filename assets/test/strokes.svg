@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Engine test asset: stroke joins (miter / round / bevel, miter limit),
+     caps (butt / round / square), dashes with offset, translucent strokes
+     crossing themselves (must cover each pixel once), non-uniform scale. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="360" viewBox="0 0 480 360">
+  <g fill="none" stroke="#1d3557" stroke-width="16">
+    <polyline points="20,90 60,20 100,90" stroke-linejoin="miter"/>
+    <polyline points="130,90 170,20 210,90" stroke-linejoin="round"/>
+    <polyline points="240,90 280,20 320,90" stroke-linejoin="bevel"/>
+    <!-- sharp angle: miter limit 4 falls back to bevel, 20 keeps the miter -->
+    <polyline points="350,90 380,20 395,90" stroke-linejoin="miter" stroke-miterlimit="4"/>
+    <polyline points="420,90 450,20 465,90" stroke-linejoin="miter" stroke-miterlimit="20"/>
+  </g>
+
+  <g stroke="#e63946" stroke-width="18">
+    <line x1="40" y1="130" x2="160" y2="130" stroke-linecap="butt"/>
+    <line x1="40" y1="170" x2="160" y2="170" stroke-linecap="round"/>
+    <line x1="40" y1="210" x2="160" y2="210" stroke-linecap="square"/>
+  </g>
+  <!-- guides showing where the lines end -->
+  <g stroke="#222" stroke-width="1">
+    <line x1="40" y1="115" x2="40" y2="225"/>
+    <line x1="160" y1="115" x2="160" y2="225"/>
+  </g>
+
+  <g fill="none" stroke-width="6">
+    <path d="M200 130 H460" stroke="#2a9d8f" stroke-dasharray="20 10"/>
+    <path d="M200 155 H460" stroke="#2a9d8f" stroke-dasharray="20 10" stroke-dashoffset="15"/>
+    <path d="M200 180 H460" stroke="#e9c46a" stroke-dasharray="0 14" stroke-linecap="round"/>
+    <path d="M200 205 H460" stroke="#f4a261" stroke-dasharray="30 6 6 6" stroke-linecap="square"/>
+    <circle cx="260" cy="290" r="45" stroke="#264653" stroke-dasharray="12 8" stroke-linejoin="round"/>
+  </g>
+
+  <!-- a translucent stroke crossing itself: overlaps must not darken -->
+  <path d="M20 330 C 60 230, 120 360, 150 260 S 60 250, 40 300 Z" fill="none"
+        stroke="#7209b7" stroke-opacity="0.5" stroke-width="14" stroke-linejoin="round"/>
+
+  <!-- stroke under a non-uniform scale: thick vertical, thin horizontal edges -->
+  <g transform="translate(340 240) scale(3 1)">
+    <rect x="0" y="0" width="35" height="90" fill="#a8dadc" stroke="#1d3557" stroke-width="4"/>
+  </g>
+</svg>

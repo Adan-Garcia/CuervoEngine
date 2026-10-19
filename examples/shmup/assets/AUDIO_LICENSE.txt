@@ -1,0 +1,9 @@
+Audio in this directory (sfx/*.wav, music/stage_loop.wav)
+=========================================================
+
+Every sound here is synthesized by tools/gen_shmup_audio.py from oscillators
+and seeded noise; no recordings or third-party samples are involved. Rerunning
+the script reproduces the files.
+
+License: CC0 1.0 Universal (public domain dedication). Use them for anything,
+with or without attribution.

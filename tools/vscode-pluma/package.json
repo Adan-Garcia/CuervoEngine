@@ -1,0 +1,150 @@
+{
+  "name": "pluma",
+  "displayName": "Pluma (Cuervo Engine)",
+  "description": "Pluma language support for Cuervo Engine games: syntax highlighting, the Pluma language server (diagnostics, completion, hover, go to definition, rename, formatting) and the script debugger.",
+  "version": "0.1.0",
+  "publisher": "cuervo",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Debuggers",
+    "Formatters"
+  ],
+  "keywords": [
+    "pluma",
+    "cuervo",
+    "plm",
+    "game engine"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:pluma",
+    "onDebugResolve:pluma",
+    "onDebugInitialConfigurations",
+    "workspaceContains:project.toml"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "pluma",
+        "aliases": [
+          "Pluma",
+          "pluma"
+        ],
+        "extensions": [
+          ".plm"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "pluma",
+        "scopeName": "source.pluma",
+        "path": "./syntaxes/pluma.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Pluma",
+      "properties": {
+        "pluma.toolsPath": {
+          "type": "string",
+          "default": "cuervo-tools",
+          "markdownDescription": "The `cuervo-tools` executable that runs the language server (`cuervo-tools lsp <project>`). A bare name is looked up on `PATH`; `${workspaceFolder}` and a leading `~` are expanded, e.g. `${workspaceFolder}/build/debug/tools/cuervo_tools/cuervo-tools`."
+        },
+        "pluma.runtimePath": {
+          "type": "string",
+          "default": "cuervo",
+          "markdownDescription": "The `cuervo` runtime the debugger launches (`cuervo --dap`). A bare name is looked up on `PATH`; `${workspaceFolder}` and a leading `~` are expanded, e.g. `${workspaceFolder}/build/debug/runtime/cuervo`."
+        },
+        "pluma.projectPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "The project directory (the one with `project.toml`) the language server analyzes. Empty: the first workspace folder. `${workspaceFolder}` is expanded."
+        },
+        "pluma.checkStyle": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Report naming-style warnings (`PascalCase` types, `snake_case` functions and variables, `SCREAMING_SNAKE_CASE` constants, `#snake_case` names)."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "pluma.restartServer",
+        "title": "Restart Language Server",
+        "category": "Pluma"
+      }
+    ],
+    "breakpoints": [
+      {
+        "language": "pluma"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "pluma",
+        "label": "Pluma (Cuervo)",
+        "languages": [
+          "pluma"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "project"
+            ],
+            "properties": {
+              "project": {
+                "type": "string",
+                "description": "The game's project directory (the one with project.toml).",
+                "default": "${workspaceFolder}"
+              },
+              "backend": {
+                "type": "string",
+                "enum": [
+                  "vulkan",
+                  "gl"
+                ],
+                "description": "Render backend. Default: Vulkan, falling back to OpenGL."
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "Pause before the first tick.",
+                "default": false
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "pluma",
+            "request": "launch",
+            "name": "Run game (Pluma)",
+            "project": "${workspaceFolder}"
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "Pluma (Cuervo): Launch",
+            "description": "Run a Cuervo Engine game under the Pluma debugger.",
+            "body": {
+              "type": "pluma",
+              "request": "launch",
+              "name": "Run game (Pluma)",
+              "project": "^\"\\${workspaceFolder}\""
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "check": "node --check extension.js",
+    "package": "npx @vscode/vsce package --allow-missing-repository --skip-license"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

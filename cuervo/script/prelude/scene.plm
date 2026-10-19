@@ -1,0 +1,492 @@
+// Engine API, part 2: the node tree (DESIGN.md 4.3 "Authoring").
+//
+// Scripts extend Node / Node2D and override the lifecycle (DESIGN.md 7.2):
+//   ready()        once, when the node first enters the tree
+//   update(dt)     every fixed tick, parents before children
+//   draw(g)        every rendered frame (render only: don't change state)
+//   exit()         when the node leaves the tree (queue_free)
+//   on_hit(tag, n) n particles of the emitter tagged `tag` hit one of the
+//                  node's hitboxes this tick (Collision.hitbox)
+// Coroutines started in a node's methods are owned by it and cancelled when
+// it leaves the tree (DESIGN.md 5.9).
+//
+// The engine drives the tree through `enter_tree`, `update_tree`,
+// `Scene.draw_frame` and `Scene.flush`; games don't call those.
+//
+// Scene files (DESIGN.md 4.12): `Scene.load("scenes/x.scene")` builds a
+// saved tree (its `@export` fields), `Scene.save(node, path)` writes one.
+// Pause: while `Scene.paused` is true only nodes with `always_process` (or
+// under such a node) update, their coroutines alone advance, and gameplay
+// particles stand still.
+
+// The base of everything in the tree: a name, a parent, children and the
+// lifecycle methods above. It has no position (Node2D adds one).
+class Node {
+    // Its name in scene files and for `find`.
+    @export var name = ""
+    // Created by a script rather than loaded: Scene.save skips it (and its
+    // children), since the script creates it again.
+    var transient = false
+    // Keeps updating while Scene.paused (menus); inherited by children.
+    @export var always_process = false
+    // null for the root and for nodes not added to anything yet.
+    var parent: Node
+    // In update and draw order. Change it with add_child and queue_free.
+    var children = List<Node>()
+    // Engine bookkeeping, read-only for scripts: in the tree now, ready() has
+    // run, queue_free() was called.
+    var in_tree = false
+    var ready_done = false
+    var freed = false
+
+    // The lifecycle (see the top of this file): override these.
+    fn ready() {}
+    fn update(dt: float) {}
+    fn draw(g: Canvas) {}
+    fn exit() {}
+    // `count` particles of the emitter tagged `tag` hit this node's hitboxes
+    // this tick.
+    fn on_hit(tag: name, count: int) {}
+
+    // Appends `child`. If this node is in the tree the child enters it now
+    // (its ready() runs before add_child returns). Panics if `child` already
+    // has a parent.
+    fn add_child(child: Node) {
+        if child.parent != null {
+            panic("add_child: the node already has a parent")
+        }
+        child.parent = self
+        children.push(child)
+        if in_tree {
+            child.enter_tree()
+        }
+    }
+
+    // Removes the node (and its children) at the end of the tick.
+    fn queue_free() {
+        if !freed {
+            freed = true
+            Scene.free_queue.push(self)
+        }
+    }
+
+    // In the tree and not queued for removal.
+    fn is_alive() -> bool {
+        return in_tree && !freed
+    }
+
+    // The first descendant named `n` (depth-first, in child order), or null.
+    fn find(n: str) -> Node {
+        for c in children {
+            if c.name == n {
+                return c
+            }
+            var f = c.find(n)
+            if f != null {
+                return f
+            }
+        }
+        return null
+    }
+
+    // True when the node updates during a pause (it or an ancestor has
+    // `always_process`).
+    fn can_process() -> bool {
+        if !Scene.paused {
+            return true
+        }
+        var n = self
+        while n != null {
+            if n.always_process {
+                return true
+            }
+            n = n.parent
+        }
+        return false
+    }
+
+    // Engine-internal: marks the subtree as in the tree and runs ready() once
+    // per node.
+    fn enter_tree() {
+        in_tree = true
+        if !ready_done {
+            ready_done = true
+            ready()
+        }
+        for c in children {
+            if !c.in_tree {
+                c.enter_tree()
+            }
+        }
+    }
+
+    // Engine-internal: update() (unless paused), then the children's.
+    fn update_tree(dt: float) {
+        if freed {
+            return
+        }
+        if can_process() {
+            update(dt)
+        }
+        for c in children {
+            c.update_tree(dt)
+        }
+    }
+
+    // Draws the node, then its children in order. CanvasLayer children are
+    // drawn later, on top (Scene.draw_frame).
+    fn draw_tree(g: Canvas) {
+        draw(g)
+        for c in children {
+            if c is CanvasLayer l {
+                Scene.layers.push(l)
+            } else {
+                c.draw_tree(g)
+            }
+        }
+    }
+
+    // Engine-internal: exit() on the subtree (children first) and cancels its
+    // coroutines.
+    fn exit_tree() {
+        for c in children {
+            c.exit_tree()
+        }
+        exit()
+        in_tree = false
+        Scene.cancel_tasks(self)
+    }
+}
+
+// A position, rotation and scale: what `Node2D.global_transform()` returns and
+// `set_global_transform` takes. Applying it scales a point, turns it, then
+// moves it (the order Node2D composes with).
+struct NodeTransform {
+    var position = vec2(0.0, 0.0)
+    var rotation = 0.0
+    var scale = vec2(1.0, 1.0)
+
+    // `p` (in the transform's own frame) in the outer frame.
+    fn apply(p: vec2) -> vec2 {
+        return position + (p * scale).rotated(rotation)
+    }
+}
+
+// A node with a place in the world (DESIGN.md 4.17, milestone 9.1).
+//
+// `position`, `rotation` (radians, clockwise) and `scale` are *local*: relative
+// to the parent Node2D when the transform hierarchy is on, which is the
+// default (project.toml `[scene] transform_hierarchy`, `Scene.transform_hierarchy`).
+// Moving a parent then moves, turns and scales its children. Use the `global_*`
+// methods for the world values and `to_local` / `to_global` to convert points.
+//
+// A node does not inherit when the hierarchy is off for the project, when its
+// own `top_level` is set, or when its parent is not a Node2D (a plain Node or a
+// CanvasLayer in between breaks the chain; UI controls never inherit, they are
+// laid out in screen coordinates). Such a node's local values are its world
+// values, and the whole tree then behaves exactly as it did before 9.1.
+//
+// Composition applies each ancestor's local transform in turn (scale, then
+// rotation, then translation), so points are exact. `global_rotation` adds the
+// rotations and `global_scale` multiplies the scales component-wise; with a
+// non-uniform scale on a rotated ancestor that is the closest rotation + scale
+// (a real shear can't be represented). The math uses dmath only.
+class Node2D extends Node {
+    // Position in virtual pixels (y down), relative to the parent when the
+    // hierarchy applies, else in the world.
+    @export var position = vec2(0.0, 0.0)
+    // Radians, clockwise. Drawing nodes (Shape, Path, Sprite, ...) apply it.
+    @export var rotation = 0.0
+    // Size factor; drawing nodes apply it.
+    @export var scale = vec2(1.0, 1.0)
+    // false hides the node and its children (they still update).
+    @export var visible = true
+    // true makes the node ignore its parent's transform even when the project's
+    // hierarchy is on: `position`, `rotation` and `scale` are world values.
+    @export var top_level = false
+
+    fn draw_tree(g: Canvas) {
+        if visible {
+            super.draw_tree(g)
+        }
+    }
+
+    // True when this node's transform is relative to its parent's.
+    fn inherits_transform() -> bool {
+        if !Scene.transform_hierarchy() || top_level {
+            return false
+        }
+        return parent is Node2D
+    }
+
+    // The world position.
+    fn global_position() -> vec2 {
+        var pos = position
+        var n: Node2D = self
+        while n.inherits_transform() {
+            if n.parent is Node2D p {
+                pos = p.position + (pos * p.scale).rotated(p.rotation)
+                n = p
+            } else {
+                break
+            }
+        }
+        return pos
+    }
+
+    // The world rotation (radians).
+    fn global_rotation() -> float {
+        var r = rotation
+        var n: Node2D = self
+        while n.inherits_transform() {
+            if n.parent is Node2D p {
+                r += p.rotation
+                n = p
+            } else {
+                break
+            }
+        }
+        return r
+    }
+
+    // The world scale (the product of the scales up the chain).
+    fn global_scale() -> vec2 {
+        var s = scale
+        var n: Node2D = self
+        while n.inherits_transform() {
+            if n.parent is Node2D p {
+                s = s * p.scale
+                n = p
+            } else {
+                break
+            }
+        }
+        return s
+    }
+
+    // The world position, rotation and scale in one value.
+    fn global_transform() -> NodeTransform {
+        return NodeTransform { position = global_position(), rotation = global_rotation(), scale = global_scale() }
+    }
+
+    // Moves the node so its world position is `p` (writes `position`).
+    fn set_global_position(p: vec2) {
+        if inherits_transform() {
+            if parent is Node2D par {
+                position = par.to_local(p)
+                return
+            }
+        }
+        position = p
+    }
+
+    // Turns the node to the world rotation `r` (writes `rotation`).
+    fn set_global_rotation(r: float) {
+        if inherits_transform() {
+            if parent is Node2D par {
+                rotation = r - par.global_rotation()
+                return
+            }
+        }
+        rotation = r
+    }
+
+    // Sets the world scale (writes `scale`; a zero scale up the chain is
+    // treated as 1).
+    fn set_global_scale(s: vec2) {
+        if inherits_transform() {
+            if parent is Node2D par {
+                scale = s / Node2D.safe_scale(par.global_scale())
+                return
+            }
+        }
+        scale = s
+    }
+
+    // Sets position, rotation and scale from a world transform.
+    fn set_global_transform(t: NodeTransform) {
+        set_global_position(t.position)
+        set_global_rotation(t.rotation)
+        set_global_scale(t.scale)
+    }
+
+    // A point in this node's frame (the origin is its world position, axes
+    // follow its world rotation and scale) in world coordinates.
+    fn to_global(p: vec2) -> vec2 {
+        var pos = position + (p * scale).rotated(rotation)
+        var n: Node2D = self
+        while n.inherits_transform() {
+            if n.parent is Node2D par {
+                pos = par.position + (pos * par.scale).rotated(par.rotation)
+                n = par
+            } else {
+                break
+            }
+        }
+        return pos
+    }
+
+    // A world point in this node's frame (the inverse of to_global).
+    fn to_local(p: vec2) -> vec2 {
+        var q = p
+        if inherits_transform() {
+            if parent is Node2D par {
+                q = par.to_local(p)
+            }
+        }
+        return (q - position).rotated(-rotation) / Node2D.safe_scale(scale)
+    }
+
+    // `s` with zero components replaced by 1 (so dividing by it is safe).
+    static fn safe_scale(s: vec2) -> vec2 {
+        return vec2(s.x == 0.0 ? 1.0 : s.x, s.y == 0.0 ? 1.0 : s.y)
+    }
+}
+
+// A scene instanced as a child: what the editor creates when a .scene is
+// dropped into the scene view (DESIGN.md 4.13, "Clarified (Phase 6B)").
+// When it enters the tree it loads `scene` (Scene.load) and adds that
+// scene's root as a transient child, so saving keeps the reference rather
+// than a copy and edits to the instanced scene show up everywhere it is
+// used. With the transform hierarchy on (Node2D) the instanced root is a
+// child and inherits the instance's transform; with it off the instance
+// moves the scene's root by its own `position` when the root is a Node2D. A scene can't instance itself, directly or deeper.
+class SceneInstance extends Node2D {
+    // The instanced scene file, relative to the project.
+    @export var scene = ""
+    // The instanced scene's root (a transient child) once loaded.
+    var instance: Node
+
+    fn ready() {
+        instantiate()
+    }
+
+    // Loads `scene` if it isn't loaded yet (ready() calls this).
+    fn instantiate() {
+        if scene == "" || instance != null {
+            return
+        }
+        var p = parent
+        while p != null {
+            if p is SceneInstance outer {
+                if outer.scene == scene {
+                    panic("SceneInstance: '{scene}' instances itself")
+                }
+            }
+            p = p.parent
+        }
+        var root = Scene.load(scene)
+        root.transient = true
+        if root is Node2D n {
+            // With the hierarchy the root is our child and inherits `position`;
+            // without it the root is moved by hand (nodes draw in world space).
+            if !Scene.transform_hierarchy() || n.top_level {
+                n.position = n.position + position
+            }
+        }
+        instance = root
+        add_child(root)
+    }
+}
+
+// A subtree drawn on top of everything with a lower `layer` (shapes and
+// text both): HUDs and menus. Layers draw in `layer` order, ties in tree
+// order, after the rest of the tree.
+class CanvasLayer extends Node {
+    // Layers draw in increasing `layer`: higher is on top.
+    @export var layer = 1
+    @export var visible = true
+
+    fn draw_tree(g: Canvas) {
+        if visible {
+            super.draw_tree(g)
+        }
+    }
+}
+
+class Scene {
+    // The tree's root: an instance of project.toml's `main` class, or the root
+    // of its `main_scene`.
+    static var root: Node
+    // Engine-internal: the nodes queue_free()d this tick.
+    static var free_queue = List<Node>()
+    // true pauses the game (see the top of this file).
+    static var paused = false
+    // Engine-internal: the canvas layers drawn this frame.
+    static var layers = List<CanvasLayer>()
+
+    // Whether Node2D transforms are relative to the parent (project.toml
+    // `[scene] transform_hierarchy`, default true), fixed for the run: false
+    // makes every node behave as before milestone 9.1. A native function, not
+    // a static, so the state hash (which covers numeric globals) is the same
+    // either way.
+    @native static fn transform_hierarchy() -> bool {}
+    // Cancels the coroutines owned by `node`.
+    @native static fn cancel_tasks(node: Node) {}
+
+    // Builds the node tree saved in a scene file (path relative to the
+    // project directory). The root is returned outside the tree: add_child
+    // it somewhere to make it enter (and run ready()). Panics if the file is
+    // missing or broken.
+    @native static fn load(path: str) -> Node {}
+    // Saves `node` and its (non-transient) descendants. Returns false (and
+    // logs why) if the file can't be written.
+    @native static fn save(node: Node, path: str) -> bool {}
+    // Asks the runner to close the game after this tick.
+    @native static fn quit() {}
+
+    // Every rendered frame: the tree through the current Camera2D, then the
+    // canvas layers in screen coordinates.
+    static fn draw_frame(g: Canvas) {
+        layers.clear()
+        if Camera2D.current_camera? cam {
+            g.set_view(cam.global_position(), zoom = cam.zoom > 0.0 ? cam.zoom : 1.0, rotation = cam.global_rotation())
+        }
+        root.draw_tree(g)
+        if Camera2D.current_camera != null {
+            g.reset_view()
+        }
+        var done = 0
+        while done < layers.len() {
+            var best = done
+            var i = done + 1
+            while i < layers.len() {
+                if layers[i].layer < layers[best].layer {
+                    best = i
+                }
+                i += 1
+            }
+            var l = layers[best]
+            layers.remove(best)
+            layers.insert(done, l)
+            done += 1
+            g.new_layer()
+            l.draw_tree(g)
+        }
+        layers.clear()
+    }
+
+    // End of tick: removes queued nodes from the tree.
+    static fn flush() {
+        var i = 0
+        while i < free_queue.len() {
+            var n = free_queue[i]
+            i += 1
+            if n.parent? p {
+                var k = 0
+                while k < p.children.len() {
+                    if p.children[k] == n {
+                        p.children.remove(k)
+                        break
+                    }
+                    k += 1
+                }
+            }
+            n.parent = null
+            if n.in_tree {
+                n.exit_tree()
+            }
+        }
+        free_queue.clear()
+    }
+}

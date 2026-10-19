@@ -1,0 +1,18 @@
+# SDF shape stress test / milestone 2 benchmark (DESIGN.md 6: "50k SDF shapes
+# at 60 fps"), on the engine's own particles and SDF batcher.
+#   cuervo --game examples/bench                 # Space/Enter/Pad A: 1k / 10k / 50k / 100k
+#   cuervo --game examples/bench --bench 10      # VSync off, warm up, log frame-time stats
+#   cuervo --game examples/bench --bench 10 --press 1:more   # bench at 100k (one step up)
+name = "bench"
+main = "Bench"
+virtual_size = [1280, 720]
+tick_rate = 60
+seed = 20261018
+clear_color = "0d0f1a"
+render_tier = "compatible"   # DESIGN.md 4.4: runs on Vulkan, GL and the web
+
+[scene]
+transform_hierarchy = false   # script-driven world-space scene (DESIGN.md 4.17)
+
+[input.actions]
+more = ["Key.Space", "Key.Enter", "Pad.South"]

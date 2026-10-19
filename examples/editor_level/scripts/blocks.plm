@@ -1,0 +1,208 @@
+// Building blocks for levels made in the editor (cuervo-editor, DESIGN.md
+// 4.13). The scripts define *kinds* of things; the level itself, where they
+// are and how they are tuned, lives in scenes/level.scene and was built with
+// editor operations only (level.cmds). Every tunable is @export, so the
+// inspector edits it and the scene file stores it.
+//
+// Nodes look up the level root in update(), never in draw(): the editor
+// draws scenes without running ready() or update().
+
+const LAYER_PLAYER = 0
+const LAYER_TURRET = 1
+const LAYER_PLAYER_SHOT = 2
+const LAYER_ENEMY_SHOT = 3
+
+enum FirePattern {
+    Ring,   // `count` bullets evenly around
+    Aimed,  // a fan of `count` bullets at the ship
+    Spiral, // rings that turn by `spin` each volley
+}
+
+// The level root: backdrop, stars, the shared bullet emitters and the HUD.
+class Level extends Node2D {
+    static var main: Level
+
+    @export var title = "Level"
+    @export var backdrop = Color.hex("0b1020")
+    @export var star_count = 60
+    @export var star_color = Color.hex("e8ecff")
+
+    var player_shots = Emitter(tag = #player_shot, layer = LAYER_PLAYER_SHOT, hits = 1 << LAYER_TURRET, radius = 4.0,
+                               shape = #capsule)
+    var enemy_shots = Emitter(tag = #enemy_shot, layer = LAYER_ENEMY_SHOT, hits = 1 << LAYER_PLAYER, outline = 1.5,
+                              outline_color = Color.hex("ffffff"))
+    var stars = List<vec3>()
+    var hits_taken = 0
+
+    fn ready() {
+        Level.main = self
+        for i in 0..star_count {
+            stars.push(vec3(Random.range(0.0, Screen.size.x), Random.range(0.0, Screen.size.y), Random.range(0.2, 1.0)))
+        }
+    }
+
+    fn turrets_left() -> int {
+        var n = 0
+        for c in children {
+            if c is Turret && c.is_alive() {
+                n += 1
+            }
+        }
+        return n
+    }
+
+    fn draw(g: Canvas) {
+        g.rect(vec2(0.0, 0.0), Screen.size, fill = backdrop)
+        for s in stars {
+            var y = (s.y + Time.seconds * 60.0 * s.z) % Screen.size.y
+            g.circle(vec2(s.x, y), 0.6 + s.z * 1.2, fill = star_color.with_alpha(0.2 + s.z * 0.5))
+        }
+        player_shots.draw(g)
+    }
+
+    // Enemy bullets and the HUD over everything else.
+    fn draw_tree(g: Canvas) {
+        super.draw_tree(g)
+        enemy_shots.draw(g)
+        g.text(vec2(24.0, 18.0), title, size = 22.0, color = star_color)
+        if in_tree {
+            g.text(vec2(Screen.size.x - 24.0, 18.0), "TURRETS {turrets_left()}   HITS {hits_taken}", size = 18.0,
+                   color = star_color.with_alpha(0.8), align = #right)
+        }
+    }
+}
+
+// The player's ship: moves with #move, shoots with #shoot.
+class Ship extends Node2D {
+    @export var speed = 360.0
+    @export var color = Color.hex("7fe6ff")
+    @export var fire_rate = 8.0 // volleys per second
+
+    var cooldown = 0.0
+    var invulnerable = 0.0
+
+    fn update(dt: float) {
+        var level = Level.main
+        position += Input.axis(#move) * speed * dt
+        position = position.clamp(vec2(24.0, 24.0), Screen.size - vec2(24.0, 24.0))
+        cooldown = max(cooldown - dt, 0.0)
+        if Input.held(#shoot) && cooldown == 0.0 && level != null {
+            cooldown = 1.0 / fire_rate
+            level.player_shots.fire(Pattern.Arc(count = 3, direction = -PI / 2.0, spread = 0.2),
+                                    position - vec2(0.0, 16.0), Shot { speed = 900.0, size = 4.0, color = color })
+        }
+        if invulnerable > 0.0 {
+            invulnerable = max(invulnerable - dt, 0.0)
+        } else {
+            Collision.hitbox(self, position, 5.0, LAYER_PLAYER)
+        }
+    }
+
+    fn on_hit(tag: name, count: int) {
+        if tag == #enemy_shot && invulnerable == 0.0 {
+            invulnerable = 1.0
+            if Level.main != null {
+                Level.main.hits_taken += 1
+            }
+        }
+    }
+
+    fn draw(g: Canvas) {
+        var p = position
+        var c = invulnerable > 0.0 ? color.with_alpha(0.4) : color
+        g.line(p + vec2(-16.0, 12.0), p + vec2(0.0, -18.0), color = c, width = 4.0)
+        g.line(p + vec2(16.0, 12.0), p + vec2(0.0, -18.0), color = c, width = 4.0)
+        g.line(p + vec2(-16.0, 12.0), p + vec2(16.0, 12.0), color = c, width = 3.0)
+    }
+}
+
+// A stationary gun. Fires `pattern` every `interval` seconds until its `hp`
+// runs out.
+class Turret extends Node2D {
+    @export var pattern = FirePattern.Ring
+    @export var count = 12
+    @export var interval = 1.2
+    @export var bullet_speed = 160.0
+    @export var spin = 0.25 // Spiral: radians added per volley
+    @export var bullet_color = Color.hex("ff5a8a")
+    @export var hp = 20
+    @export var radius = 18.0
+
+    var phase = 0.0
+    var flash = 0
+
+    fn ready() {
+        start(fire_loop())
+    }
+
+    fn fire_loop() {
+        await wait(interval * 0.5)
+        loop {
+            fire()
+            await wait(interval)
+        }
+    }
+
+    fn fire() {
+        var level = Level.main
+        if level == null {
+            return
+        }
+        var shot = Shot { speed = bullet_speed, size = 5.0, color = bullet_color, life = 6.0 }
+        match pattern {
+            FirePattern.Ring => level.enemy_shots.fire(Pattern.Ring(count = count, phase = phase), position, shot)
+            FirePattern.Aimed => {
+                var target = position + vec2(0.0, 100.0)
+                for c in level.children {
+                    if c is Ship s {
+                        target = s.position
+                    }
+                }
+                level.enemy_shots.fire(Pattern.Aimed(count = count, spread = 0.5), position, shot, at = target)
+            }
+            FirePattern.Spiral => {
+                level.enemy_shots.fire(Pattern.Ring(count = count, phase = phase), position, shot)
+                phase += spin
+            }
+        }
+    }
+
+    fn update(dt: float) {
+        Collision.hitbox(self, position, radius, LAYER_TURRET)
+        if flash > 0 {
+            flash -= 1
+        }
+    }
+
+    fn on_hit(tag: name, count: int) {
+        if tag != #player_shot || freed {
+            return
+        }
+        hp -= count
+        flash = 3
+        if hp <= 0 {
+            queue_free()
+        }
+    }
+
+    fn draw(g: Canvas) {
+        var c = flash > 0 ? Color.hex("ffffff") : bullet_color
+        g.circle(position, radius, fill = c.with_alpha(0.22), stroke = c, width = 2.5)
+        g.circle(position, radius * 0.4, fill = c)
+        if pattern == FirePattern.Aimed {
+            g.line(position, position + vec2(0.0, radius + 10.0), color = c, width = 3.0)
+        }
+    }
+}
+
+// Scenery: a rounded block (no collision).
+class Block extends Node2D {
+    @export var size = vec2(160.0, 24.0)
+    @export var color = Color.hex("2a3150")
+    @export var corner = 6.0
+
+    fn draw(g: Canvas) {
+        g.rect(position - size * 0.5, size, fill = color, stroke = color.lerp(Color.hex("ffffff"), 0.25), width = 1.5,
+               radius = corner, rotation = rotation)
+    }
+}

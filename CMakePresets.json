@@ -1,0 +1,78 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "environment": {
+                "PATH": "C:/Program Files/LLVM/bin;C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64;$penv{PATH}"
+            }
+        },
+        {
+            "name": "debug",
+            "displayName": "Debug",
+            "inherits": "base",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+        },
+        {
+            "name": "release",
+            "displayName": "Release",
+            "inherits": "base",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+        },
+        {
+            "name": "host-tools",
+            "displayName": "Host tools for cross builds (shader_tool, runtime for font import)",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CUERVO_BUILD_TESTS": "OFF",
+                "CUERVO_VULKAN": "OFF"
+            }
+        },
+        {
+            "name": "web-pack",
+            "displayName": "Web runtime that loads an exported game.pak (docs/EXPORT.md)",
+            "inherits": "web",
+            "cacheVariables": { "CUERVO_WEB_PACK": "fetch" }
+        },
+        {
+            "name": "web",
+            "displayName": "Web (WebGL2 / WASM, Emscripten; see docs/WEB.md)",
+            "inherits": "base",
+            "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CUERVO_HOST_BUILD": "${sourceDir}/build/host-tools"
+            }
+        },
+        {
+            "name": "web-threads",
+            "displayName": "Web with WASM threads (needs COOP/COEP; docs/WEB.md \"Threads\")",
+            "inherits": "web",
+            "cacheVariables": { "CUERVO_WEB_THREADS": "ON" }
+        },
+        {
+            "name": "web-pack-threads",
+            "displayName": "Pack-loading web runtime with WASM threads",
+            "inherits": "web-pack",
+            "cacheVariables": { "CUERVO_WEB_THREADS": "ON" }
+        }
+    ],
+    "buildPresets": [
+        { "name": "debug", "configurePreset": "debug" },
+        { "name": "release", "configurePreset": "release" },
+        { "name": "host-tools", "configurePreset": "host-tools", "targets": ["shader_tool", "runtime"] },
+        { "name": "web", "configurePreset": "web" },
+        { "name": "web-pack", "configurePreset": "web-pack", "targets": ["runtime"] },
+        { "name": "web-threads", "configurePreset": "web-threads" },
+        { "name": "web-pack-threads", "configurePreset": "web-pack-threads", "targets": ["runtime"] }
+    ],
+    "testPresets": [
+        { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true } },
+        { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } }
+    ]
+}

@@ -1,0 +1,12 @@
+# Every built-in node of milestone 8.2 (DESIGN.md 4.16) in one level, built
+# with editor operations only (level.cmds, see editor/README.md) and no
+# scripts at all:
+#   cuervo-editor --project examples/node_level --script-commands examples/node_level/level.cmds
+#   cuervo --game examples/node_level
+name = "Node Level"
+main_scene = "scenes/level.scene"   # the root is this scene: no main script
+virtual_size = [1280, 720]
+tick_rate = 60
+seed = 20261018
+clear_color = "10131c"
+render_tier = "compatible"

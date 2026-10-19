@@ -1,0 +1,161 @@
+# The level in scenes/level.scene, built with editor operations only (no
+# code, no scripts): every line is what a click, drag or inspector edit does
+# in cuervo-editor. It uses every built-in node of milestone 8.2 (DESIGN.md
+# 4.16): Shape, Path, Sprite, Text, Camera2D, Timer, Area, Emitter2D and
+# AudioPlayer. Rebuild it with
+#   cuervo-editor --project examples/node_level --script-commands examples/node_level/level.cmds
+# The format is in editor/README.md.
+
+new Node2D level
+
+# The camera: a little wider than the screen and slightly turned.
+add / Camera2D camera
+set /camera position (640.0, 360.0)
+set /camera zoom 0.9
+set /camera rotation 0.03
+
+# Scenery: SDF shapes (Shape) of every kind.
+add / Node2D scenery
+add /scenery Shape floor
+set /scenery/floor kind Rect
+set /scenery/floor position (640.0, 640.0)
+set /scenery/floor size (1200.0, 60.0)
+set /scenery/floor corner_radius 18.0
+set /scenery/floor fill "232a3d"
+set /scenery/floor stroke "4b5a80"
+set /scenery/floor stroke_width 3.0
+add /scenery Shape sun
+set /scenery/sun position (1110.0, 130.0)
+set /scenery/sun radius 54.0
+set /scenery/sun fill "ffb347"
+set /scenery/sun stroke "ffe0a3"
+set /scenery/sun stroke_width 4.0
+duplicate /scenery/sun
+rename /scenery/sun2 halo
+set /scenery/halo kind Ring
+set /scenery/halo radius 80.0
+set /scenery/halo thickness 6.0
+set /scenery/halo stroke_width 0.0
+set /scenery/halo fill "ffb34766"
+add /scenery Shape pill
+set /scenery/pill kind Capsule
+set /scenery/pill position (220.0, 520.0)
+set /scenery/pill size (180.0, 0.0)
+set /scenery/pill radius 22.0
+set /scenery/pill rotation -0.3
+set /scenery/pill fill "6bd6a3"
+set /scenery/pill stroke "1d3b2e"
+set /scenery/pill stroke_width 3.0
+add /scenery Shape gauge
+set /scenery/gauge kind Arc
+set /scenery/gauge position (220.0, 200.0)
+set /scenery/gauge radius 60.0
+set /scenery/gauge thickness 12.0
+set /scenery/gauge start_angle -3.1
+set /scenery/gauge end_angle -0.6
+set /scenery/gauge fill "7fe6ff"
+add /scenery Shape pie
+set /scenery/pie kind Sector
+set /scenery/pie position (220.0, 200.0)
+set /scenery/pie radius 40.0
+set /scenery/pie start_angle -2.4
+set /scenery/pie end_angle -0.9
+set /scenery/pie fill "ff6b8a"
+set /scenery/pie stroke "ffffff"
+set /scenery/pie stroke_width 2.0
+add /scenery Shape card
+set /scenery/card kind Rect
+set /scenery/card position (1040.0, 470.0)
+set /scenery/card size (200.0, 120.0)
+set /scenery/card corner_radius 14.0
+set /scenery/card rotation 0.12
+set /scenery/card filled false
+set /scenery/card stroke "c9a6ff"
+set /scenery/card stroke_width 4.0
+
+# Paths: a polyline zigzag and a closed Bezier loop.
+add /scenery Path zigzag
+set /scenery/zigzag position (380.0, 600.0)
+set /scenery/zigzag points [(0.0, 0.0), (60.0, -50.0), (120.0, 0.0), (180.0, -50.0), (240.0, 0.0)]
+set /scenery/zigzag width 6.0
+set /scenery/zigzag color "ffd166"
+add /scenery Path loop
+set /scenery/loop curve Bezier
+set /scenery/loop closed true
+set /scenery/loop position (860.0, 230.0)
+set /scenery/loop points [(0.0, 0.0), (60.0, -90.0), (160.0, -90.0), (200.0, 0.0), (240.0, 80.0), (60.0, 110.0), (20.0, 40.0)]
+set /scenery/loop width 4.0
+set /scenery/loop color "9ad1ff"
+
+# The robot (an imported SVG) and its caption in the world.
+add / Sprite robot
+set /robot asset "assets/robot.svg"
+set /robot position (640.0, 420.0)
+set /robot scale (0.8, 0.8)
+add / Text caption
+set /caption text "Every node, no code"
+set /caption position (640.0, 250.0)
+set /caption size 34.0
+set /caption align #center
+set /caption baseline #middle
+set /caption color "e8ecf5"
+
+# Gameplay: a fountain of particles (Emitter2D) on layer 0 that hits layer 1,
+# where the goal (an Area) sits; a probe area overlaps it.
+add / Emitter2D fountain
+set /fountain position (420.0, 360.0)
+set /fountain pattern Arc
+set /fountain count 5
+set /fountain direction -0.4
+set /fountain spread 0.9
+set /fountain speed 260.0
+set /fountain speed_jitter 30.0
+set /fountain interval 0.2
+set /fountain life 2.0
+set /fountain size 5.0
+set /fountain color "ffcf5c"
+set /fountain fade true
+set /fountain end_color "ff5c8a40"
+set /fountain gravity (0.0, 180.0)
+set /fountain layer 0
+set /fountain hits 2
+set /fountain tag #spark
+add / Area goal
+set /goal position (900.0, 420.0)
+set /goal radius 46.0
+set /goal layer 1
+set /goal mask 4
+set /goal debug_draw true
+add / Area probe
+set /probe shape Capsule
+set /probe length 120.0
+set /probe radius 14.0
+set /probe position (960.0, 400.0)
+set /probe rotation 0.5
+set /probe layer 2
+set /probe mask 2
+set /probe debug_draw true
+set /probe debug_color "ff8c5c80"
+
+# A repeating timer and a sound that plays when the level starts.
+add / Timer beat
+set /beat wait_time 0.5
+set /beat autostart true
+add / AudioPlayer chime
+set /chime sound #pickup
+set /chime autoplay true
+set /chime volume 0.6
+set /chime bus #sfx
+
+# HUD text in screen coordinates (CanvasLayer ignores the camera).
+add / CanvasLayer hud
+add /hud Label title
+set /hud/title text "NODE LEVEL - built in cuervo-editor"
+set /hud/title style #dim
+set /hud/title anchor_min (0.5, 1.0)
+set /hud/title anchor_max (0.5, 1.0)
+set /hud/title offset_min (0.0, -24.0)
+set /hud/title offset_max (0.0, -24.0)
+
+expect /scenery/halo kind Ring
+save scenes/level.scene

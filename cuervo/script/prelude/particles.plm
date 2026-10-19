@@ -1,0 +1,269 @@
+// Engine API, part 3: gameplay particles and collision (DESIGN.md 4.6,
+// 4.7), backed by cuervo/particles and cuervo/collision. Bullets are
+// particles: an Emitter with a collision layer.
+
+// Where and which way one shot's particles start (cuervo/particles/patterns.hpp).
+enum Pattern {
+    Ring(count: int, phase: float),                    // evenly around the circle
+    Arc(count: int, direction: float, spread: float),  // evenly across `spread` radians
+    Aimed(count: int, spread: float),                  // an Arc towards `at`
+    Burst(count: int, direction: float, spread: float), // random headings (simulation RNG)
+}
+
+// What every particle of one shot gets (ParticleTemplate).
+struct Shot {
+    // Pixels per second along the heading. Each `*_jitter` adds a uniform
+    // random amount in [-jitter, jitter] per particle.
+    var speed = 120.0
+    var speed_jitter = 0.0
+    var life = 6.0           // seconds; <= 0: until it leaves the screen
+    var life_jitter = 0.0
+    // Radius in pixels (also the collision radius when the emitter's
+    // `radius` is 0).
+    var size = 4.0
+    var color = Color {}
+    // Rotation speed in radians per second.
+    var spin = 0.0
+    var offset = 0.0         // spawn distance from the origin along the heading
+    // Start rotated to the heading (else unrotated).
+    var face_heading = true
+}
+
+// Native per-particle behaviors, run every tick in the order added
+// (cuervo/particles/modules.hpp).
+enum Module {
+    // Constant acceleration (gravity, wind), pixels per second squared.
+    Accelerate(by: vec2),
+    // velocity *= 1 - k * dt every tick.
+    Drag(k: float),
+    // Speeds up (negative: slows down) along the heading, kept in [min, max].
+    SpeedRamp(accel: float, min: float, max: float),
+    // Rotates the velocity at `rate` radians per second (curving shots).
+    Turn(rate: float),
+    // Steers towards the last `fire` target (`at`) at most `turn_rate` radians
+    // per second, from `delay` seconds of age, for `duration` seconds (<= 0:
+    // forever).
+    Homing(turn_rate: float, delay: float, duration: float),
+    // Circles the emitter's position (scripts don't move it yet: (0, 0)): the
+    // offset turns `angular_speed` radians and grows `radial_speed` pixels per
+    // second.
+    Orbit(angular_speed: float, radial_speed: float),
+    // Sideways wobble: amplitude * sin(TAU * frequency * age + phase) pixels.
+    Wave(amplitude: float, frequency: float, phase: float),
+    // Keeps the rotation pointing along the velocity.
+    FaceVelocity,
+    // Color blended from `from` to `to` over the lifetime.
+    ColorOverLife(from: Color, to: Color),
+    // Size multiplied by a factor going from `from` to `to` over the lifetime.
+    SizeOverLife(from: float, to: float),
+}
+
+// A gameplay emitter (deterministic, simulated by the engine every tick
+// after the scripts' update). With `layer` >= 0 its particles join the
+// collision world on that layer and hit hitboxes on the `hits` layers (a
+// bit mask: 1 << layer); a hit calls the hitbox owner's on_hit(tag, count).
+// shape: #circle, #capsule, #rect or #ring.
+class Emitter {
+    // Construct with named arguments: `Emitter(tag = #shots, layer = 2, hits = 1 << 1)`.
+    // `radius` is the collision radius (<= 0: each particle's size); with
+    // `kill_on_hit` a particle dies when it hits. `outline` draws an outline
+    // that wide in `outline_color`. With `kill_outside` particles die 64 pixels
+    // outside the screen.
+    @native fn init(tag = #particles, layer = -1, hits = 0, radius = 0.0, kill_on_hit = true, shape = #circle,
+                    outline = 0.0, outline_color: Color = Color {}, kill_outside = true) {}
+    // Fires `pattern` from `origin` now; returns the number spawned. `at` is
+    // the target of Pattern.Aimed.
+    @native fn fire(pattern: Pattern, origin: vec2, shot: Shot = Shot {}, at = vec2(0.0, 0.0)) -> int {}
+    // One particle with an explicit velocity (`shot` gives the rest; its
+    // speed and jitters are ignored).
+    @native fn spawn(position: vec2, velocity: vec2, shot: Shot = Shot {}) {}
+    // Adds a behavior to every particle of the emitter, current and future.
+    @native fn add(module: Module) {}
+    // Live particles.
+    @native fn count() -> int {}
+    // Kills every particle within `radius` of `center`; returns how many.
+    @native fn kill_near(center: vec2, radius: float) -> int {}
+    // Kills every particle.
+    @native fn clear() {}
+    // Draws the particles; call it from a node's draw(g).
+    @native fn draw(g: Canvas) {}
+
+    // Shorthand: fires a Pattern.Ring of `count` shots.
+    fn ring(origin: vec2, count: int, speed: float, phase = 0.0, size = 4.0, color: Color = Color {}) -> int {
+        return fire(Pattern.Ring(count = count, phase = phase), origin, Shot { speed = speed, size = size, color = color })
+    }
+
+    // Shorthand: fires `count` shots from `origin` towards `at`.
+    fn aimed(origin: vec2, at: vec2, speed: float, count = 1, spread = 0.0, size = 4.0,
+             color: Color = Color {}) -> int {
+        return fire(Pattern.Aimed(count = count, spread = spread), origin,
+                    Shot { speed = speed, size = size, color = color }, at)
+    }
+}
+
+// The pattern an `Emitter2D` fires (a plain enum, so scene files store it).
+enum EmitPattern {
+    Ring,  // `count` evenly around the circle, starting at `direction`
+    Arc,   // `count` evenly across `spread` radians centered on `direction`
+    Burst, // `count` random headings within `spread` of `direction` (the emitter's own stream)
+    Point, // `count` along `direction`
+}
+
+// A gameplay particle emitter as a node (DESIGN.md 4.6): an `Emitter` that
+// fires `pattern` from the node's `position` every `interval` seconds while
+// `emitting` (rounded to whole ticks, so it fires on the same ticks in every
+// run). Angles add the node's `rotation`. With `layer` >= 0 the particles
+// collide like an Emitter's: they hit hitboxes and areas on the `hits`
+// layers. Everything is configured by its exported fields; the emitter is
+// made when the node enters the tree (`ready`), so the editor's view shows
+// only a marker.
+class Emitter2D extends Node2D {
+    // The tag on_hit / Area.hit receive.
+    @export var tag = #particles
+    // Fires while true; set it in the editor to start with the game.
+    @export var emitting = true
+    // Fires one shot when it starts, then stops (emitting = false).
+    @export var one_shot = false
+    // Seconds between shots.
+    @export var interval = 0.25
+    // The shot's pattern.
+    @export var pattern = EmitPattern.Ring
+    // Particles per shot.
+    @export var count = 12
+    // Radians: the shot's heading (Ring: the first particle's).
+    @export var direction = 0.0
+    // Arc and Burst: the width of the fan in radians.
+    @export var spread = 1.0
+    // Pixels per second, plus a random [-jitter, jitter] per particle.
+    @export var speed = 120.0
+    // Random speed added per particle, in [-jitter, jitter].
+    @export var speed_jitter = 0.0
+    // Seconds (<= 0: until it leaves the screen, which needs kill_outside).
+    @export var life = 1.5
+    // Random lifetime added per particle, in [-jitter, jitter].
+    @export var life_jitter = 0.0
+    // Radius in pixels (and the collision radius).
+    @export var size = 4.0
+    // The particles' color.
+    @export var color = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }
+    // With `fade`, the color blends to `end_color` over the lifetime.
+    @export var fade = false
+    // The color `fade` ends at.
+    @export var end_color = Color { r = 1.0, g = 1.0, b = 1.0, a = 0.0 }
+    // Size multiplied from 1 to this over the lifetime (1 = unchanged).
+    @export var end_scale = 1.0
+    // Rotation speed, radians per second.
+    @export var spin = 0.0
+    // Constant acceleration in pixels per second squared (gravity, wind).
+    @export var gravity = vec2(0.0, 0.0)
+    // velocity *= 1 - drag * dt every tick.
+    @export var drag = 0.0
+    // Collision layer (-1 = no collision) and the layers it hits.
+    @export var layer = -1
+    // The layers its particles hit (bit i = layer i).
+    @export var hits = 0
+    // A particle dies when it hits something.
+    @export var kill_on_hit = true
+    // Kill particles 64 pixels outside the screen.
+    @export var kill_outside = false
+    // #circle, #capsule, #rect or #ring.
+    @export var particle_shape = #circle
+    // Outline width of each particle (0 = none).
+    @export var outline = 0.0
+    // The outline's color.
+    @export var outline_color = Color { r = 0.0, g = 0.0, b = 0.0, a = 1.0 }
+    // The engine emitter, made in ready().
+    var emitter: Emitter
+    // Ticks since emitting started.
+    var ticks = 0
+    // Shots fired so far.
+    var shots = 0
+
+    // Sets the node up when it enters the tree (call super.ready() when overriding).
+    fn ready() {
+        emitter = Emitter(tag = tag, layer = layer, hits = hits, radius = 0.0, kill_on_hit = kill_on_hit,
+                          shape = particle_shape, outline = outline, outline_color = outline_color,
+                          kill_outside = kill_outside)
+        if gravity != vec2(0.0, 0.0) {
+            emitter.add(Module.Accelerate(by = gravity))
+        }
+        if drag > 0.0 {
+            emitter.add(Module.Drag(k = drag))
+        }
+        if fade {
+            emitter.add(Module.ColorOverLife(from = color, to = end_color))
+        }
+        if end_scale != 1.0 {
+            emitter.add(Module.SizeOverLife(from = 1.0, to = end_scale))
+        }
+    }
+
+    // Starts emitting from the next tick (a one-shot fires once more).
+    fn restart() {
+        emitting = true
+        ticks = 0
+    }
+
+    // Fires one shot now; returns the particles spawned (0 before ready()).
+    fn burst() -> int {
+        if emitter? e {
+            shots += 1
+            var heading = direction + global_rotation()
+            var position = global_position()
+            var shot = Shot { speed = speed, speed_jitter = speed_jitter, life = life, life_jitter = life_jitter,
+                              size = size, color = color, spin = spin }
+            match pattern {
+                EmitPattern.Ring => return e.fire(Pattern.Ring(count = count, phase = heading), position, shot)
+                EmitPattern.Arc => return e.fire(Pattern.Arc(count = count, direction = heading, spread = spread),
+                                                 position, shot)
+                EmitPattern.Burst => return e.fire(Pattern.Burst(count = count, direction = heading, spread = spread),
+                                                   position, shot)
+                EmitPattern.Point => return e.fire(Pattern.Arc(count = count, direction = heading, spread = 0.0),
+                                                   position, shot)
+            }
+        }
+        return 0
+    }
+
+    // Live particles.
+    fn particle_count() -> int {
+        if emitter? e {
+            return e.count()
+        }
+        return 0
+    }
+
+    // Engine-internal: fires on schedule before the node's update().
+    fn update_tree(dt: float) {
+        if !freed && emitting && emitter != null && can_process() {
+            var every = max(1, round(interval / Time.dt) as int)
+            if ticks % every == 0 {
+                burst()
+                if one_shot {
+                    emitting = false
+                }
+            }
+            ticks += 1
+        }
+        super.update_tree(dt)
+    }
+
+    // Cleans up when the node leaves the tree.
+    fn exit() {
+        if emitter? e {
+            e.clear()
+        }
+    }
+
+    // Draws the node (render only).
+    fn draw(g: Canvas) {
+        if emitter? e {
+            e.draw(g)
+        } else if !ready_done {
+            var position = global_position()
+            g.circle(position, 6.0, fill = color.with_alpha(0.6), stroke = Color.rgb(1.0, 0.6, 0.2, 0.8), width = 1.5)
+            g.line(position, position + from_angle(direction + global_rotation(), 18.0), color = Color.rgb(1.0, 0.6, 0.2, 0.8),
+                   width = 1.5)
+        }
+    }
+}

@@ -1,0 +1,6 @@
+# A tiny game for the debug adapter's end-to-end test (tests/dap_session.py).
+name = "dap_game"
+main = "Main"
+virtual_size = [320, 180]
+tick_rate = 60
+seed = 7

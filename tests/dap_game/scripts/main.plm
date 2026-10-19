@@ -1,0 +1,16 @@
+class Main extends Node {
+    var count = 0
+    var history = List<int>()
+
+    fn ready() {
+        print("dap game ready")
+    }
+
+    fn update(dt: float) {
+        count += 1
+        history.push(count * 2)
+        if count == 1000000 {
+            print("never")
+        }
+    }
+}

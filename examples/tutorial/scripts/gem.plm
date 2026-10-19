@@ -1,0 +1,23 @@
+// A falling gem: touch it for a point.
+class Gem extends Node2D {
+    var fall_speed = 110.0
+    var spin = 0.0
+
+    fn update(dt: float) {
+        position.y += fall_speed * dt
+        spin += 3.0 * dt
+        var game = Game.main
+        if game.player.is_alive() && position.distance(game.player.position) < 30.0 {
+            game.add_score(1)
+            game.burst(position, GEM_COLOR)
+            Audio.play(#pickup, volume = 0.5)
+            queue_free()
+        } else if position.y > Screen.size.y + 20.0 {
+            queue_free()
+        }
+    }
+
+    fn draw(g: Canvas) {
+        g.rect(position - vec2(9.0, 9.0), vec2(18.0, 18.0), fill = GEM_COLOR, radius = 3.0, rotation = PI / 4.0 + spin)
+    }
+}

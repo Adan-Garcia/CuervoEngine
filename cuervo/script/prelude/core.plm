@@ -1,0 +1,181 @@
+// Engine API, part 1: math constants, colors, time, screen, randomness,
+// input and the canvas (DESIGN.md 4.4 "Runtime drawing", 4.8, 5.2).
+// `@native` functions are implemented in cuervo/script/script_host.cpp.
+
+// PI, TAU, E, INF, NAN and the rest of the math library are declared in
+// pluma/std/math.plm (LANGUAGE.md 9.20 - 9.24), compiled before this file.
+
+// Colors are authored in sRGB (DESIGN.md 7.2); components are 0..1.
+struct Color {
+    var r = 1.0
+    var g = 1.0
+    var b = 1.0
+    var a = 1.0
+
+    // A color from its components: `Color.rgb(1.0, 0.25, 0.4)`.
+    static fn rgb(r: float, g: float, b: float, a = 1.0) -> Color {
+        return Color { r = r, g = g, b = b, a = a }
+    }
+
+    // "ff4060" or "ff4060cc" (with alpha); a leading '#' is allowed.
+    @native static fn hex(text: str) -> Color {}
+
+    // The same color with alpha `alpha` (fades, translucent fills).
+    fn with_alpha(alpha: float) -> Color {
+        return Color { r = r, g = g, b = b, a = alpha }
+    }
+
+    // Blends component by component: `t` = 0 is this color, 1 is `to`.
+    fn lerp(to: Color, t: float) -> Color {
+        return Color { r = r + (to.r - r) * t, g = g + (to.g - g) * t, b = b + (to.b - b) * t, a = a + (to.a - a) * t }
+    }
+}
+
+// Simulation time, counted in fixed ticks (DESIGN.md 4.1). Set by the engine
+// before every tick.
+class Time {
+    // The number of the tick being simulated: 1 in the first update().
+    static var tick = 0
+    // Seconds per tick (1 / tick_rate): the `dt` that update(dt) gets.
+    static var dt = 0.016666668
+    // Simulated seconds (tick / tick_rate). Never wall-clock time, so it replays.
+    static var seconds = 0.0
+}
+
+// The virtual coordinate space (DESIGN.md 4.4): y down, origin top-left.
+class Screen {
+    // The project's `virtual_size` (project.toml) in virtual pixels.
+    static var size = vec2(1280.0, 720.0)
+}
+
+// The simulation's seeded PCG32 (DESIGN.md 4.1): the only randomness.
+class Random {
+    // A float in [lo, hi).
+    @native static fn range(lo: float, hi: float) -> float {}
+    // An int in [lo, hi], both ends included. Panics if hi < lo.
+    @native static fn range_int(lo: int, hi: int) -> int {}
+    // True with probability `p` (0..1).
+    @native static fn chance(p: float) -> bool {}
+    // A random element of `items`. Panics if the list is empty.
+    static fn pick<T>(items: List<T>) -> T {
+        if items.is_empty() { panic("Random.pick: the list is empty") }
+        return items[range_int(0, items.len() - 1)]
+    }
+    // The index of a random element, chosen with probability proportional to
+    // its weight (negative weights count as 0). Panics if no weight is positive.
+    static fn weighted_pick(weights: List<float>) -> int {
+        var total = 0.0
+        for w in weights {
+            if w > 0.0 { total += w }
+        }
+        if !(total > 0.0) { panic("Random.weighted_pick: no positive weight") }
+        var r = range(0.0, 1.0) * total
+        var last = 0
+        for i in 0..weights.len() {
+            if weights[i] > 0.0 {
+                last = i
+                if r < weights[i] { return i }
+                r -= weights[i]
+            }
+        }
+        return last
+    }
+    // A normally distributed float (Box-Muller; always draws two numbers).
+    static fn gaussian(mean = 0.0, deviation = 1.0) -> float {
+        var u1 = 1.0 - range(0.0, 1.0)
+        var u2 = range(0.0, 1.0)
+        return mean + deviation * (sqrt(-2.0 * log(u1)) * cos(TAU * u2))
+    }
+    // A uniformly random point inside the circle of `radius` around the origin.
+    static fn in_circle(radius = 1.0) -> vec2 {
+        var r = radius * sqrt(range(0.0, 1.0))
+        var a = TAU * range(0.0, 1.0)
+        return vec2(cos(a) * r, sin(a) * r)
+    }
+    // A random point on the circle of `radius` around the origin.
+    static fn on_circle(radius = 1.0) -> vec2 {
+        var a = TAU * range(0.0, 1.0)
+        return vec2(cos(a) * radius, sin(a) * radius)
+    }
+    // A new `Rng` stream seeded from two draws of this stream, for a system
+    // that needs its own sequence (it advances this stream by exactly two draws).
+    static fn fork() -> Rng {
+        var hi = range_int(0, 2147483647)
+        var lo = range_int(0, 2147483647)
+        return Rng.seeded(((hi as i64) << 31) | (lo as i64))
+    }
+}
+
+// Named actions and axes from project.toml (DESIGN.md 4.8). Scripts read
+// actions, never raw devices.
+class Input {
+    // True while the action is down (any of its bindings).
+    @native static fn held(action: name) -> bool {}
+    // True only on the tick the action went down.
+    @native static fn pressed(action: name) -> bool {}
+    // True only on the tick the action went up.
+    @native static fn released(action: name) -> bool {}
+    // A 2D axis (e.g. `move = ["Keys.Arrows", "Pad.LeftStick"]`), length <= 1.
+    @native static fn axis(axis: name) -> vec2 {}
+    // True while nothing has been pressed for `seconds` (attract modes).
+    @native static fn idle(seconds: float) -> bool {}
+    // The mouse pointer in virtual coordinates, recorded in the input frame.
+    @native static fn pointer() -> vec2 {}
+}
+
+// Canvas-style drawing (DESIGN.md 4.4): `draw(g)` methods get one. World
+// coordinates; shapes are drawn in call order, text on top of the shapes.
+// Without `fill` or `stroke` a shape is filled white.
+class Canvas {
+    // A disc. With `stroke`, an outline `width` wide (pass both for a filled,
+    // outlined circle).
+    @native fn circle(center: vec2, radius: float, fill: Color? = null, stroke: Color? = null, width = 1.0) {}
+    // `pos` is the top-left corner; `rotation` turns it about its center.
+    @native fn rect(pos: vec2, size: vec2, fill: Color? = null, stroke: Color? = null, width = 1.0, radius = 0.0,
+                    rotation = 0.0) {}
+    // A segment from `a` to `b`, `width` thick.
+    @native fn line(a: vec2, b: vec2, color: Color = Color {}, width = 1.0) {}
+    // Draws a circular arc from `start_angle` to `end_angle` in radians.
+    // If `fill` is set (or neither fill nor stroke is given), fills the sector.
+    // If `stroke` is set, strokes the arc circumference.
+    @native fn arc(center: vec2, radius: float, start_angle: float, end_angle: float,
+                   fill: Color? = null, stroke: Color? = null, width = 1.0) {}
+    // A capsule: a segment `2 * half_length` long through `center`, turned by
+    // `rotation`, with round caps of `radius`. Outlined like circle().
+    @native fn capsule(center: vec2, half_length: float, radius: float, rotation = 0.0, fill: Color? = null,
+                       stroke: Color? = null, width = 1.0) {}
+    // A band `thickness` wide centered on the circle of `radius`. With
+    // `stroke`, both edges are outlined `width` wide.
+    @native fn ring(center: vec2, radius: float, thickness: float, fill: Color? = null, stroke: Color? = null,
+                    width = 1.0) {}
+    // align: #left, #center, #right; baseline: #top, #middle, #bottom.
+    // `max_width` > 0 wraps lines at that width.
+    @native fn text(pos: vec2, text: str, size = 16.0, color: Color = Color {}, align = #left, baseline = #top,
+                    max_width = 0.0) {}
+    // A filled and/or outlined polygon through `points` (offsets turned by
+    // `rotation`, scaled by `scale` and moved to `pos`), triangulated by the
+    // vector tessellator (non-zero fill rule). Used by Polygon2D.
+    @native fn polygon(points: List<vec2>, fill: Color? = null, stroke: Color? = null, width = 1.0,
+                       pos = vec2(0.0, 0.0), rotation = 0.0, scale = vec2(1.0, 1.0)) {}
+    // A stroked polyline of `width` through `points` (same placement as
+    // polygon). `join` is 0 miter, 1 round, 2 bevel; `cap` is 0 butt, 1 round,
+    // 2 square. With `gradient` colors the line fades through them from the
+    // first to the last point. Used by Line2D.
+    @native fn polyline(points: List<vec2>, color: Color = Color {}, width = 1.0, closed = false, join = 1, cap = 1,
+                        gradient = List<Color>(), pos = vec2(0.0, 0.0), rotation = 0.0, scale = vec2(1.0, 1.0)) {}
+    // An imported vector image (SVG or .evec, project-relative path) at `pos`:
+    // centered there, or with its top-left corner there, then turned and
+    // scaled about `pos`. `tint` multiplies its colors. Loaded on first use;
+    // a missing or broken file is logged once and draws nothing.
+    @native fn vector(asset: str, pos: vec2, rotation = 0.0, scale = vec2(1.0, 1.0), centered = true,
+                      tint: Color = Color {}) {}
+    // Draws what follows through a camera: `center` is the world point shown
+    // in the middle of the screen (Camera2D). What was drawn before keeps the
+    // previous view and is covered by what follows, like new_layer().
+    @native fn set_view(center: vec2, zoom = 1.0, rotation = 0.0) {}
+    // Back to the screen view (world = virtual pixels), like set_view.
+    @native fn reset_view() {}
+    // Everything drawn after this covers everything drawn before it (shapes
+    // and text alike). Scene.draw_frame starts one per CanvasLayer.
+    @native fn new_layer() {}
+}

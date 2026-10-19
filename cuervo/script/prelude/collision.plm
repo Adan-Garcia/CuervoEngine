@@ -1,0 +1,147 @@
+// Engine API, part 3a: the collision world (DESIGN.md 4.7), backed by
+// cuervo/collision. Compiled in with CUERVO_FEATURE_COLLISION (particles need
+// it, but hitboxes and areas also work without particles).
+
+// Game shapes for the collision world (DESIGN.md 4.7). Hitboxes last one
+// tick: add them in update().
+class Collision {
+    // A circle on `layer` (0..31) for this tick; particles that hit it call
+    // `owner.on_hit`.
+    @native static fn hitbox(owner: Node, center: vec2, radius: float, layer: int) {}
+    // Number of shapes (particles or hitboxes) on `mask` layers overlapping
+    // the circle, in the world built by the last tick (graze checks).
+    @native static fn count(center: vec2, radius: float, mask: int) -> int {}
+    // Engine-internal (Area): registers `owner`'s shape for this tick, a
+    // circle or (with `capsule`) a segment `2 * half_length` long along
+    // `rotation`. It is a hitbox too.
+    @native static fn area(owner: Area, capsule: bool, center: vec2, radius: float, half_length: float,
+                           rotation: float, layer: int, mask: int) {}
+}
+
+// The shape of an `Area`.
+enum AreaShape {
+    Circle,  // `radius` around `position`
+    Capsule, // a segment `length` long through `position` along `rotation`, `radius` thick
+}
+
+// A collision shape in the world (DESIGN.md 4.7) on one `layer` that watches
+// the layers in `mask` (a bit mask: 1 << layer). Every tick after the
+// scripts' update() and the particles, it finds the other areas it overlaps
+// on its mask layers: `area_entered(other)` when one starts overlapping,
+// `area_exited(other)` when it stops (or leaves the tree), both in the order
+// the areas entered the tree's update. Gameplay particles whose emitter hits
+// the area's layer hit it as a hitbox: `hit(tag, count)`.
+// Touching shapes overlap. Detection is one-sided: an area sees the areas on
+// its mask, whatever their masks are.
+class Area extends Node2D {
+    // Another area on the mask layers started overlapping this one.
+    signal area_entered(other: Area)
+    // An area stopped overlapping this one (or left the tree).
+    signal area_exited(other: Area)
+    // `count` particles of the emitter tagged `tag` hit the area this tick.
+    signal hit(tag: name, count: int)
+    // Circle or capsule.
+    @export var shape = AreaShape.Circle
+    // The circle's (or the capsule's) radius in pixels.
+    @export var radius = 16.0
+    // Capsule: the segment's length (0 = a circle).
+    @export var length = 0.0
+    // 0..31.
+    @export var layer = 0
+    // The layers it detects (bit i = layer i).
+    @export var mask = 1
+    // false takes the area out of the world (it neither detects nor is
+    // detected; the areas it overlapped exit).
+    @export var monitoring = true
+    // Draws the shape in the game too (the editor always shows it).
+    @export var debug_draw = false
+    // The color `debug_draw` uses.
+    @export var debug_color = Color { r = 0.3, g = 0.9, b = 0.5, a = 0.5 }
+    // The areas it overlaps, in the order they started.
+    var overlapping = List<Area>()
+    // Engine bookkeeping: the overlaps found this tick.
+    var touching = List<Area>()
+
+    // True while it overlaps `other`.
+    fn overlaps(other: Area) -> bool {
+        return overlapping.contains(other)
+    }
+
+    // Engine-internal: registers the shape for this tick, then updates.
+    fn update_tree(dt: float) {
+        if !freed && monitoring && can_process() {
+            if layer < 0 || layer > 31 {
+                panic("Area '{name}': layer must be 0..31")
+            }
+            Collision.area(self, shape == AreaShape.Capsule && length > 0.0, global_position(), radius, length * 0.5,
+                           global_rotation(), layer, mask)
+        } else if !monitoring && overlapping.len() > 0 {
+            var gone = overlapping
+            overlapping = List<Area>()
+            for o in gone {
+                emit area_exited(o)
+            }
+        }
+        super.update_tree(dt)
+    }
+
+    // Particles hit the area: emits `hit` (call super.on_hit when overriding).
+    fn on_hit(tag: name, count: int) {
+        emit hit(tag, count)
+    }
+
+    // Engine-internal: `other` overlaps this area this tick.
+    fn area_touch(other: Area) {
+        touching.push(other)
+    }
+
+    // Engine-internal: compares this tick's overlaps with the last tick's
+    // and emits the signals (exits first, then entries).
+    fn area_end_tick() {
+        var now = touching
+        touching = List<Area>()
+        var before = overlapping
+        overlapping = List<Area>()
+        for o in before {
+            if now.contains(o) {
+                overlapping.push(o)
+            }
+        }
+        var entered = List<Area>()
+        for o in now {
+            if !before.contains(o) {
+                overlapping.push(o)
+                entered.push(o)
+            }
+        }
+        for o in before {
+            if !now.contains(o) {
+                emit area_exited(o)
+            }
+        }
+        for o in entered {
+            emit area_entered(o)
+        }
+    }
+
+    // Cleans up when the node leaves the tree.
+    fn exit() {
+        overlapping.clear()
+        touching.clear()
+    }
+
+    // Draws the node (render only).
+    fn draw(g: Canvas) {
+        if !debug_draw && ready_done {
+            return
+        }
+        var position = global_position()
+        if shape == AreaShape.Capsule && length > 0.0 {
+            g.capsule(position, length * 0.5, radius, global_rotation(), fill = debug_color.with_alpha(debug_color.a * 0.35),
+                      stroke = debug_color, width = 1.5)
+        } else {
+            g.circle(position, radius, fill = debug_color.with_alpha(debug_color.a * 0.35), stroke = debug_color,
+                     width = 1.5)
+        }
+    }
+}

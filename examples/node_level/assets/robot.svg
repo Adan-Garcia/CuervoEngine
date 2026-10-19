@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Demo character for the vector renderer (cuervo --demo vector). Original
+     artwork made for this repository; same license as the engine. Exercises
+     curves, gradients, strokes with caps/joins, opacity and transforms. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="300" viewBox="0 0 240 300">
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5ec8f2"/>
+      <stop offset="1" stop-color="#2a6fb8"/>
+    </linearGradient>
+    <radialGradient id="head" cx="0.4" cy="0.35" r="0.75">
+      <stop offset="0" stop-color="#e8f6ff"/>
+      <stop offset="0.55" stop-color="#9fd6f5"/>
+      <stop offset="1" stop-color="#4b93cf"/>
+    </radialGradient>
+    <linearGradient id="visor" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#20304a"/>
+      <stop offset="1" stop-color="#0c1424"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fff6a8"/>
+      <stop offset="1" stop-color="#ffb030"/>
+    </radialGradient>
+  </defs>
+
+  <!-- ground shadow -->
+  <ellipse cx="120" cy="286" rx="70" ry="9" fill="#000000" opacity="0.18"/>
+
+  <!-- legs -->
+  <g fill="#3c5a80" stroke="#1d2b40" stroke-width="3" stroke-linejoin="round">
+    <rect x="82" y="226" width="26" height="46" rx="8"/>
+    <rect x="132" y="226" width="26" height="46" rx="8"/>
+    <path d="M70 270 h40 a8 8 0 0 1 8 8 v4 h-56 v-4 a8 8 0 0 1 8 -8 z"/>
+    <path d="M130 270 h40 a8 8 0 0 1 8 8 v4 h-56 v-4 a8 8 0 0 1 8 -8 z"/>
+  </g>
+
+  <!-- arms: thick round-capped strokes -->
+  <g fill="none" stroke="#2a6fb8" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M58 168 C 34 182, 28 204, 36 226"/>
+    <path d="M182 168 C 206 160, 218 136, 214 112"/>
+  </g>
+  <circle cx="36" cy="230" r="11" fill="#9fd6f5" stroke="#1d2b40" stroke-width="3"/>
+  <circle cx="214" cy="106" r="11" fill="#9fd6f5" stroke="#1d2b40" stroke-width="3"/>
+
+  <!-- body -->
+  <rect x="58" y="146" width="124" height="90" rx="22" fill="url(#body)" stroke="#1d2b40" stroke-width="4"/>
+  <!-- chest heart (cubic curves) -->
+  <path d="M120 214 C 96 198, 92 182, 104 175 C 112 170, 118 174, 120 180 C 122 174, 128 170, 136 175 C 148 182, 144 198, 120 214 Z"
+        fill="#ff5d7a" stroke="#8a1f38" stroke-width="2.5" stroke-linejoin="round"/>
+  <!-- rivets -->
+  <g fill="#1d2b40">
+    <circle cx="72" cy="160" r="3"/>
+    <circle cx="168" cy="160" r="3"/>
+    <circle cx="72" cy="222" r="3"/>
+    <circle cx="168" cy="222" r="3"/>
+  </g>
+
+  <!-- neck -->
+  <rect x="104" y="130" width="32" height="20" fill="#3c5a80" stroke="#1d2b40" stroke-width="3"/>
+
+  <!-- head -->
+  <g transform="rotate(-4 120 84)">
+    <!-- antenna -->
+    <path d="M120 36 Q 128 20 140 14" fill="none" stroke="#1d2b40" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="142" cy="13" r="9" fill="url(#glow)" stroke="#a05a00" stroke-width="2"/>
+    <rect x="48" y="36" width="144" height="98" rx="34" fill="url(#head)" stroke="#1d2b40" stroke-width="4"/>
+    <!-- visor -->
+    <rect x="64" y="56" width="112" height="56" rx="26" fill="url(#visor)"/>
+    <!-- eyes -->
+    <ellipse cx="96" cy="82" rx="13" ry="16" fill="#7ff0ff"/>
+    <ellipse cx="144" cy="82" rx="13" ry="16" fill="#7ff0ff"/>
+    <circle cx="99" cy="85" r="7" fill="#0c1424"/>
+    <circle cx="147" cy="85" r="7" fill="#0c1424"/>
+    <circle cx="92" cy="76" r="4" fill="#ffffff"/>
+    <circle cx="140" cy="76" r="4" fill="#ffffff"/>
+    <!-- smile -->
+    <path d="M104 100 Q 120 112 136 100" fill="none" stroke="#7ff0ff" stroke-width="4" stroke-linecap="round"/>
+    <!-- ear bolts -->
+    <circle cx="46" cy="86" r="8" fill="#ffb030" stroke="#1d2b40" stroke-width="3"/>
+    <circle cx="194" cy="86" r="8" fill="#ffb030" stroke="#1d2b40" stroke-width="3"/>
+    <!-- visor highlight -->
+    <path d="M76 66 Q 90 58 110 60" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" opacity="0.35"/>
+  </g>
+</svg>

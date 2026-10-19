@@ -1,0 +1,137 @@
+// Menus: title, pause, options and game over. The layouts are scene files
+// (scenes/*.scene, built from UI nodes: DESIGN.md 4.10, 4.12); this file
+// loads them once and wires their buttons to the game.
+
+// Player settings changed in the options screen.
+class Options {
+    static var music_volume = 0.8
+    static var sfx_volume = 0.8
+    static var reduced_flashing = false
+
+    // Routes the sliders to the audio buses (DESIGN.md 4.9). `duck` lowers
+    // the music while the game is paused.
+    static fn apply_volumes(duck = false) {
+        Audio.set_volume(#music, duck ? music_volume * 0.35 : music_volume, fade = 0.15)
+        Audio.set_volume(#sfx, sfx_volume)
+        Audio.set_volume(#ui, sfx_volume)
+    }
+}
+
+// A full-screen translucent backdrop behind a menu panel.
+class Dimmer extends Control {
+    @export var color = Color.hex("03050cc8")
+
+    fn draw(g: Canvas) {
+        g.rect(position, size, fill = color)
+    }
+}
+
+class Menus extends Node {
+    var title: CanvasLayer
+    var pause: CanvasLayer
+    var options: CanvasLayer
+    var game_over: CanvasLayer
+    var options_return: Control // focused again when the options screen closes
+
+    fn ready() {
+        transient = true
+        always_process = true
+        title = open("scenes/title.scene")
+        pause = open("scenes/pause.scene")
+        options = open("scenes/options.scene")
+        game_over = open("scenes/game_over.scene")
+
+        var g = Game.main
+        on_press(title, "start", fn() { g.start_game() })
+        on_press(title, "options", fn() { show_options(button(title, "options")) })
+        on_press(title, "quit", fn() { Scene.quit() })
+        root(title).cancelled.connect(fn() { button(title, "quit").grab_focus() })
+
+        on_press(pause, "resume", fn() { g.resume() })
+        on_press(pause, "restart", fn() { g.start_game() })
+        on_press(pause, "options", fn() { show_options(button(pause, "options")) })
+        on_press(pause, "quit", fn() { g.go_to_title() })
+        root(pause).cancelled.connect(fn() { g.resume() })
+
+        on_press(game_over, "retry", fn() { g.start_game() })
+        on_press(game_over, "title", fn() { g.go_to_title() })
+
+        var music = options.find("music") as Slider
+        music.value = Options.music_volume
+        music.changed.connect(fn(v: float) {
+            Options.music_volume = v
+            Options.apply_volumes(duck = Scene.paused)
+        })
+        var sfx = options.find("sfx") as Slider
+        sfx.value = Options.sfx_volume
+        sfx.changed.connect(fn(v: float) {
+            Options.sfx_volume = v
+            Options.apply_volumes(duck = Scene.paused)
+        })
+        var flashing = options.find("flashing") as Toggle
+        flashing.on = Options.reduced_flashing
+        flashing.toggled.connect(fn(on: bool) { Options.reduced_flashing = on })
+        on_press(options, "back", fn() { close_options() })
+        Options.apply_volumes()
+        root(options).cancelled.connect(fn() { close_options() })
+    }
+
+    fn open(path: str) -> CanvasLayer {
+        var layer = Scene.load(path) as CanvasLayer
+        layer.visible = false
+        add_child(layer)
+        return layer
+    }
+
+    fn root(layer: CanvasLayer) -> Control {
+        return layer.children[0] as Control
+    }
+
+    fn button(layer: CanvasLayer, n: str) -> Button {
+        return layer.find(n) as Button
+    }
+
+    fn on_press(layer: CanvasLayer, n: str, f: fn()) {
+        button(layer, n).pressed.connect(f)
+    }
+
+    // Shows one layer (or none) with `focus` focused. The input of this tick
+    // is consumed, so the key that opened a menu doesn't also press in it.
+    fn show(layer: CanvasLayer, focus: str) {
+        title.visible = false
+        pause.visible = false
+        options.visible = false
+        game_over.visible = false
+        UI.modal = null
+        UI.consume_input()
+        UI.focused = null
+        if layer != null {
+            layer.visible = true
+            if focus != "" {
+                (layer.find(focus) as Control).grab_focus()
+            }
+        }
+    }
+
+    fn show_options(back: Control) {
+        options_return = back
+        options.visible = true
+        UI.modal = options
+        UI.consume_input()
+        (options.find("music") as Control).grab_focus()
+    }
+
+    fn close_options() {
+        options.visible = false
+        UI.modal = null
+        UI.consume_input()
+        if options_return != null {
+            options_return.grab_focus()
+        }
+    }
+
+    fn set_score(score: int, best: int) {
+        (game_over.find("score") as Label).text = "SCORE {score}"
+        (game_over.find("best") as Label).text = score >= best && score > 0 ? "NEW HIGH SCORE" : "HI {best}"
+    }
+}

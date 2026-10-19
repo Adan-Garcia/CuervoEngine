@@ -1,0 +1,5 @@
+# Scene files are binary (DESIGN.md 4.12). `git diff` shows them as text once
+# the textconv driver is configured (see docs/SCENES.md):
+#   git config diff.scene.textconv "build/debug/tools/cuervo_tools/cuervo-tools scene dump"
+*.scene binary diff=scene
+* text=auto eol=lf

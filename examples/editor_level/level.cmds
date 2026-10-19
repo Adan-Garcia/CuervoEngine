@@ -1,0 +1,92 @@
+# The level in scenes/level.scene, built with editor operations only (no
+# code): every line is what a click, drag, gizmo or command-palette entry does in
+# cuervo-editor (milestone 8.3 redid this on the gizmos and the palette). Rebuild
+# it with
+#   cuervo-editor --project examples/editor_level --script-commands examples/editor_level/level.cmds
+# The format is in editor/README.md. Reading guide:
+#   palette <words>   Ctrl+Shift+P, type the words, Enter: the best match runs
+#   move/rotate/scale what dragging the move, rotate or scale gizmo does to a node
+#   select+           Ctrl+click: add to the selection; *-selection acts on all of it
+
+new Level level
+set / title "EDITOR LEVEL 1"
+set / star_count 90
+set / backdrop "0b1020"
+
+# The player's ship, low in the middle: added from the palette, dragged into place.
+select /
+expect-palette "add node ship" Ship
+palette add node ship
+rename . ship
+move . 640 610
+
+# Two ring turrets: place one, duplicate it from the palette, drag the copy across.
+select /
+palette add node turret
+rename . left
+move . 320 200
+set /left count 14
+palette duplicate selection
+rename . right
+move . 640 0
+set /right pattern Aimed
+set /right count 5
+set /right bullet_color "7fe6ff"
+expect /right position (960.0, 200.0)
+
+# The spiral turret in the middle, bigger and tougher.
+select /
+palette add node turret
+rename . core
+move . 640 150
+set /core pattern FirePattern.Spiral
+set /core count 6
+set /core interval 0.25
+set /core bullet_color "ffc44d"
+set /core hp 60
+set /core radius 28.0
+
+# Scenery: walls around the core. One block, tilted with the rotate gizmo,
+# duplicated and tilted the other way; then both selected together and
+# wrapped in a group node.
+select /
+palette add node block
+rename . wall_l
+move . 520 260
+set /wall_l size (120.0, 18.0)
+rotate . 0.35
+palette duplicate selection
+rename . wall_r
+move . 240 0
+rotate . -0.7
+expect /wall_r position (760.0, 260.0)
+expect /wall_r rotation -0.35
+
+# A mistake on both walls at once -- one group scale, one undo step -- undone.
+select /wall_l
+select+ /wall_r
+expect-selected 2
+scale-selection 2
+expect /wall_r scale (2.0, 2.0)
+undo
+expect /wall_l position (520.0, 260.0)
+expect /wall_r rotation -0.35
+expect-palette "group sel" "Group Selection"
+palette group selection
+rename . walls
+expect /walls/wall_r rotation -0.35
+
+# HUD text through the engine's UI nodes.
+select /
+palette add node canvaslayer
+rename . hud
+palette add node label
+rename . caption
+set /hud/caption text "Built in cuervo-editor - no code"
+set /hud/caption style #dim
+set /hud/caption anchor_min (0.5, 1.0)
+set /hud/caption anchor_max (0.5, 1.0)
+set /hud/caption offset_min (0.0, -24.0)
+set /hud/caption offset_max (0.0, -24.0)
+
+save scenes/level.scene

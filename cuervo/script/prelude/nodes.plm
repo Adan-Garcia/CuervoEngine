@@ -1,0 +1,566 @@
+// Engine API, part 2b: the built-in nodes of every build (DESIGN.md 4.16,
+// milestone 8.2): shapes, paths, vector sprites, world text, the camera and
+// timers. They are ordinary prelude classes extending Node2D, configured by
+// `@export` fields, so the editor and scene files pick them up by reflection.
+// The nodes of optional features live in their feature's prelude: `Area`
+// (collision.plm), `Emitter2D` (particles.plm), `AudioPlayer` (audio.plm).
+//
+// Nodes draw in global space: at `global_position()`, turned by
+// `global_rotation()` and sized by `global_scale()` (Node2D, scene.plm). With
+// the transform hierarchy on (the default, milestone 9.1) those include the
+// parents' transforms; with it off (project.toml `[scene] transform_hierarchy
+// = false`, or `top_level` on a node) they are the node's own `position`,
+// `rotation` and `scale`, exactly as before 9.1. Nodes with nothing to draw in the
+// game (Camera2D, Timer and the feature nodes) draw a faint outline in the
+// editor's scene view, which never runs ready().
+
+// What a `Shape` draws (SDF primitives, DESIGN.md 4.4).
+enum ShapeKind {
+    Circle,  // a disc of `radius`
+    Rect,    // a `size` rectangle with `corner_radius` corners
+    Capsule, // a segment `size.x` long with round caps of `radius`
+    Ring,    // a circle of `radius` drawn as a band `thickness` wide
+    Arc,     // the band of a Ring from `start_angle` to `end_angle`
+    Sector,  // a pie slice of `radius` from `start_angle` to `end_angle`
+}
+
+// An SDF primitive centered on `position` and turned by `rotation`: sharp at
+// any zoom, one instanced draw for all of them. `filled` paints it with
+// `fill`; `stroke_width` > 0 outlines it in `stroke` (centered on the edge).
+class Shape extends Node2D {
+    // Which primitive it draws.
+    @export var kind = ShapeKind.Circle
+    // Circle, Capsule, Ring, Arc and Sector: the radius in pixels.
+    @export var radius = 16.0
+    // Rect: width and height; Capsule: the segment's length is `size.x`.
+    @export var size = vec2(32.0, 32.0)
+    // Rect: the corner radius (0 = square corners).
+    @export var corner_radius = 0.0
+    // Ring and Arc: the band's width.
+    @export var thickness = 4.0
+    // Arc and Sector: radians, clockwise from +x, before `rotation`.
+    @export var start_angle = 0.0
+    // Arc and Sector: where the arc ends (radians).
+    @export var end_angle = 3.1415927
+    // Paints the inside with `fill`.
+    @export var filled = true
+    // The fill color (Arc: the band's color).
+    @export var fill = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }
+    // The outline color, drawn when `stroke_width` > 0.
+    @export var stroke = Color { r = 0.0, g = 0.0, b = 0.0, a = 1.0 }
+    // 0 = no outline.
+    @export var stroke_width = 0.0
+
+    // Draws the node (render only).
+    fn draw(g: Canvas) {
+        var f: Color? = null
+        if filled {
+            f = fill
+        }
+        var s: Color? = null
+        if stroke_width > 0.0 {
+            s = stroke
+        }
+        if f == null && s == null {
+            return
+        }
+        var position = global_position()
+        var rotation = global_rotation()
+        var scale = global_scale()
+        var k = max(scale.x, scale.y)
+        match kind {
+            ShapeKind.Circle => g.circle(position, radius * k, fill = f, stroke = s, width = stroke_width),
+            ShapeKind.Rect => {
+                var sz = size * scale
+                g.rect(position - sz * 0.5, sz, fill = f, stroke = s, width = stroke_width, radius = corner_radius,
+                       rotation = rotation)
+            }
+            ShapeKind.Capsule => g.capsule(position, size.x * scale.x * 0.5, radius * k, rotation, fill = f, stroke = s,
+                                           width = stroke_width),
+            ShapeKind.Ring => g.ring(position, radius * k, thickness * k, fill = f, stroke = s, width = stroke_width),
+            ShapeKind.Arc => g.arc(position, radius * k, start_angle + rotation, end_angle + rotation,
+                                   stroke = f ?? stroke, width = thickness * k),
+            ShapeKind.Sector => g.arc(position, radius * k, start_angle + rotation, end_angle + rotation, fill = f,
+                                      stroke = s, width = stroke_width),
+        }
+    }
+}
+
+// How a `Path` reads its points.
+enum PathCurve {
+    // Straight segments through every point.
+    Polyline,
+    // Cubic Bezier segments, SVG style: p0, c0, c1, p1, c2, c3, p2... (each
+    // segment takes two control points and an end point). Leftover points are
+    // ignored.
+    Bezier,
+}
+
+// A stroked polyline or Bezier curve. `points` are offsets from `position`,
+// turned by `rotation` and sized by `scale`. Segments are drawn as SDF
+// capsules (round joins and caps); a translucent `color` shows the overlaps at
+// the joins.
+class Path extends Node2D {
+    // The points, as offsets from `position` (see `curve`).
+    @export var points = List<vec2>()
+    // How the points are read.
+    @export var curve = PathCurve.Polyline
+    // Joins the last point back to the first.
+    @export var closed = false
+    // The stroke width in pixels.
+    @export var width = 2.0
+    // The color.
+    @export var color = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }
+    // Bezier: straight pieces per segment (more = smoother).
+    @export var segments = 16
+
+    // `points[i]` in world coordinates.
+    fn world_point(i: int) -> vec2 {
+        return to_global(points[i])
+    }
+
+    // Draws the node (render only).
+    fn draw(g: Canvas) {
+        var n = points.len()
+        if n < 2 {
+            return
+        }
+        if curve == PathCurve.Polyline {
+            var i = 1
+            while i < n {
+                g.line(world_point(i - 1), world_point(i), color = color, width = width)
+                i += 1
+            }
+            if closed && n > 2 {
+                g.line(world_point(n - 1), world_point(0), color = color, width = width)
+            }
+            return
+        }
+        var steps = max(segments, 1)
+        var i = 0
+        while i + 3 < n {
+            var p0 = world_point(i)
+            var c0 = world_point(i + 1)
+            var c1 = world_point(i + 2)
+            var p1 = world_point(i + 3)
+            var prev = p0
+            var k = 1
+            while k <= steps {
+                var t = k as float / steps as float
+                var u = 1.0 - t
+                var p = p0 * (u * u * u) + c0 * (3.0 * u * u * t) + c1 * (3.0 * u * t * t) + p1 * (t * t * t)
+                g.line(prev, p, color = color, width = width)
+                prev = p
+                k += 1
+            }
+            i += 3
+        }
+        if closed && i > 0 {
+            g.line(world_point(i), world_point(0), color = color, width = width)
+        }
+    }
+}
+
+// An imported vector image (SVG or `.evec`, DESIGN.md 4.5): tessellated at
+// the zoom it is drawn at, so it stays sharp. `asset` is a project path such
+// as "assets/ship.svg" (exports pack it as "assets/ship.evec"; either name
+// works). The document's own units are pixels at `scale` 1.
+class Sprite extends Node2D {
+    // The image file, relative to the project ("" draws nothing).
+    @export var asset = ""
+    // Centered on `position`; false puts the image's top-left corner there.
+    @export var centered = true
+    // Mirrors the image left-right.
+    @export var flip_h = false
+    // Mirrors the image top-bottom.
+    @export var flip_v = false
+    // Multiplies every color of the image (alpha included).
+    @export var tint = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }
+
+    // Draws the node (render only).
+    fn draw(g: Canvas) {
+        if asset == "" {
+            return
+        }
+        var s = global_scale()
+        if flip_h {
+            s.x = -s.x
+        }
+        if flip_v {
+            s.y = -s.y
+        }
+        g.vector(asset, global_position(), rotation = global_rotation(), scale = s, centered = centered, tint = tint)
+    }
+}
+
+// MSDF text placed in the world (moves with the camera, unlike UI labels on
+// a CanvasLayer). `position` is the anchor `align` and `baseline` refer to.
+class Text extends Node2D {
+    // The text (may contain newlines).
+    @export var text = ""
+    // Font size in pixels (times `scale.y`).
+    @export var size = 24.0
+    // The color.
+    @export var color = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }
+    // #left, #center or #right of `position`.
+    @export var align = #left
+    // #top, #middle or #bottom.
+    @export var baseline = #top
+    // > 0 wraps lines at this width in pixels.
+    @export var max_width = 0.0
+
+    // Draws the node (render only).
+    fn draw(g: Canvas) {
+        if text != "" {
+            var gs = global_scale()
+            g.text(global_position(), text, size = size * gs.y, color = color, align = align, baseline = baseline,
+                   max_width = max_width * gs.x)
+        }
+    }
+}
+
+// The view the game renders with: the world point at the center of the
+// screen (`position`), `zoom` (> 1 magnifies) and `rotation` (radians; the
+// world turns the other way). The current camera is `Camera2D.current_camera`;
+// without one the screen shows world [0, Screen.size] as before. CanvasLayer
+// subtrees (HUDs, menus) are drawn in screen coordinates and ignore it.
+// Cameras are chosen in the simulation (ready/exit), so replays see the same
+// one; drawing only reads it.
+class Camera2D extends Node2D {
+    // Magnification: 2.0 shows half as much of the world, twice as big.
+    @export var zoom = 1.0
+    // Becomes the current camera when it enters the tree.
+    @export var current = true
+    // The camera the game draws with, or null (screen view).
+    static var current_camera: Camera2D
+
+    // Sets the node up when it enters the tree (call super.ready() when overriding).
+    fn ready() {
+        if current {
+            make_current()
+        }
+    }
+
+    // Cleans up when the node leaves the tree.
+    fn exit() {
+        if current_camera == self {
+            current_camera = null
+        }
+    }
+
+    // Makes this the camera the game draws with.
+    fn make_current() {
+        current = true
+        var old = current_camera
+        if old != null && old != self {
+            old.current = false
+        }
+        current_camera = self
+    }
+
+    // A point on the screen (virtual pixels, e.g. Input.pointer()) in world
+    // coordinates.
+    fn screen_to_world(p: vec2) -> vec2 {
+        var z = zoom > 0.0 ? zoom : 1.0
+        return global_position() + ((p - Screen.size * 0.5) / z).rotated(global_rotation())
+    }
+
+    // A world point in screen coordinates (virtual pixels).
+    fn world_to_screen(p: vec2) -> vec2 {
+        return Screen.size * 0.5 + (p - global_position()).rotated(-global_rotation()) * zoom
+    }
+
+    // Draws the node (render only).
+    fn draw(g: Canvas) {
+        if !ready_done {
+            // The editor's view: the screen this camera shows.
+            var z = zoom > 0.0 ? zoom : 1.0
+            var sz = Screen.size / z
+            g.rect(global_position() - sz * 0.5, sz, stroke = Color.rgb(1.0, 0.8, 0.3, 0.6), width = 2.0,
+                   rotation = global_rotation())
+        }
+    }
+}
+
+// Counts fixed ticks and emits `timeout` when `wait_time` has passed:
+// once (`one_shot`) or every period. The wait is rounded to whole ticks (at
+// least one), so a timer fires on the same tick in every run.
+class Timer extends Node2D {
+    // Emitted on the tick the countdown reaches zero.
+    signal timeout
+    // Seconds per period.
+    @export var wait_time = 1.0
+    // Stops after the first timeout (else restarts).
+    @export var one_shot = false
+    // Starts when the node enters the tree.
+    @export var autostart = false
+    // Holds the countdown without stopping it.
+    @export var paused = false
+    // Running: counting down.
+    var running = false
+    // Ticks until the next timeout while running.
+    var ticks_left = 0
+    // Timeouts so far.
+    var timeouts = 0
+
+    // Sets the node up when it enters the tree (call super.ready() when overriding).
+    fn ready() {
+        if autostart {
+            restart()
+        }
+    }
+
+    // Starts (or restarts) the countdown; `time` > 0 sets `wait_time` first.
+    fn restart(time = -1.0) {
+        if time > 0.0 {
+            wait_time = time
+        }
+        ticks_left = wait_ticks()
+        running = true
+    }
+
+    // Stops the countdown (no timeout).
+    fn stop() {
+        running = false
+        ticks_left = 0
+    }
+
+    // True when not counting down.
+    fn is_stopped() -> bool {
+        return !running
+    }
+
+    // Seconds until the next timeout (0 when stopped).
+    fn time_left() -> float {
+        return ticks_left as float * Time.dt
+    }
+
+    // `wait_time` in whole ticks, at least 1.
+    fn wait_ticks() -> int {
+        return max(1, round(wait_time / Time.dt) as int)
+    }
+
+    // Engine-internal: counts down before the node's update(), so update()
+    // sees this tick's timeout.
+    fn update_tree(dt: float) {
+        if !freed && running && !paused && can_process() {
+            ticks_left -= 1
+            if ticks_left <= 0 {
+                timeouts += 1
+                if one_shot {
+                    running = false
+                    ticks_left = 0
+                } else {
+                    ticks_left = wait_ticks()
+                }
+                emit timeout
+            }
+        }
+        super.update_tree(dt)
+    }
+
+    // Draws the node (render only).
+    fn draw(g: Canvas) {
+        if !ready_done {
+            var position = global_position()
+            g.circle(position, 10.0, stroke = Color.rgb(0.6, 0.9, 1.0, 0.6), width = 2.0)
+            g.line(position, position + vec2(0.0, -7.0), color = Color.rgb(0.6, 0.9, 1.0, 0.6), width = 2.0)
+        }
+    }
+}
+
+// How a `Line2D` turns at its points.
+enum LineJoin {
+    Miter, // a sharp corner (long spikes at sharp angles are cut off)
+    Round, // a circular corner
+    Bevel, // a flat corner
+}
+
+// How a `Line2D` ends (open lines only).
+enum LineCap {
+    Butt,   // ends flat at the first and last point
+    Round,  // a half circle past each end
+    Square, // a half `width` past each end
+}
+
+// A stroked polyline with a width, joints and end caps (DESIGN.md 4.17). Unlike
+// `Path` (a chain of round-ended segments) it is one tessellated outline, so a
+// translucent `color` is even and corners and caps are chosen. `points` are
+// offsets from the node, turned and sized by its global transform (the stroke
+// width scales with it). With `gradient` colors the line fades through them,
+// evenly spaced along the straight line from its first to its last point.
+class Line2D extends Node2D {
+    // The points, as offsets from the node.
+    @export var points = List<vec2>()
+    // The stroke width in pixels.
+    @export var width = 4.0
+    // The color (used when `gradient` is empty).
+    @export var color = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }
+    // Optional colors blended from the first point to the last (one color =
+    // solid). Empty uses `color`.
+    @export var gradient = List<Color>()
+    // Joins the last point back to the first (then there are no caps).
+    @export var closed = false
+    // The corner style.
+    @export var joint = LineJoin.Round
+    // The end style of an open line.
+    @export var cap = LineCap.Round
+
+    // Draws the node (render only).
+    fn draw(g: Canvas) {
+        if points.len() < 2 {
+            return
+        }
+        g.polyline(points, color = color, width = width, closed = closed, join = joint as int, cap = cap as int,
+                   gradient = gradient, pos = global_position(), rotation = global_rotation(), scale = global_scale())
+    }
+}
+
+// A filled polygon (DESIGN.md 4.17), triangulated by the engine's tessellator
+// (concave and self-crossing outlines are fine; the fill rule is non-zero).
+// `points` are offsets from the node, turned and sized by its global transform.
+class Polygon2D extends Node2D {
+    // The outline's corners, as offsets from the node (at least 3).
+    @export var points = List<vec2>()
+    // The fill color.
+    @export var color = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }
+    // The outline color, drawn when `outline_width` > 0.
+    @export var outline = Color { r = 0.0, g = 0.0, b = 0.0, a = 1.0 }
+    // 0 = no outline.
+    @export var outline_width = 0.0
+    // false skips the fill (an outline only).
+    @export var filled = true
+
+    // Draws the node (render only).
+    fn draw(g: Canvas) {
+        if points.len() < 3 {
+            return
+        }
+        var f: Color? = null
+        if filled {
+            f = color
+        }
+        var s: Color? = null
+        if outline_width > 0.0 {
+            s = outline
+        }
+        if f == null && s == null {
+            return
+        }
+        g.polygon(points, fill = f, stroke = s, width = outline_width, pos = global_position(),
+                  rotation = global_rotation(), scale = global_scale())
+    }
+}
+
+// A named point in the scene: it has no effect in the game. The editor shows
+// it as a cross, so it can mark spawn points, anchors and waypoints that
+// scripts read with `global_position()` (find it by name with `Node.find`).
+class Marker2D extends Node2D {
+    // The size of the editor's cross in pixels.
+    @export var gizmo_size = 10.0
+
+    // Draws the cross in the editor only (the preview never runs ready()).
+    fn draw(g: Canvas) {
+        if !ready_done {
+            var p = global_position()
+            var c = Color.rgb(0.9, 0.9, 0.4, 0.8)
+            g.line(p - vec2(gizmo_size, 0.0), p + vec2(gizmo_size, 0.0), color = c, width = 2.0)
+            g.line(p - vec2(0.0, gizmo_size), p + vec2(0.0, gizmo_size), color = c, width = 2.0)
+        }
+    }
+}
+
+// Tells scripts when a rectangle is on screen: `screen_entered` when it starts
+// overlapping the view of the current Camera2D (or the screen rectangle
+// [0, Screen.size] when there is no camera), `screen_exited` when it stops.
+// It is evaluated in the simulation, at the start of the node's update in tick
+// order, from the camera's data, so the signals fire on the same ticks in
+// every run and replay; nothing is read back from rendering. The rectangle is
+// `rect_size` big, starts `rect_position` from the node and is turned and
+// sized by the node's global transform. The first tick it is in the tree
+// emits `screen_entered` if it is already visible.
+class VisibleOnScreenNotifier2D extends Node2D {
+    // Emitted on the tick the rectangle starts overlapping the view.
+    signal screen_entered
+    // Emitted on the tick it stops overlapping the view.
+    signal screen_exited
+    // The rectangle's top-left corner, relative to the node.
+    @export var rect_position = vec2(-16.0, -16.0)
+    // The rectangle's size in pixels.
+    @export var rect_size = vec2(32.0, 32.0)
+    // false stops the checks (and the signals); `on_screen` keeps its value.
+    @export var enabled = true
+    // Whether the rectangle overlapped the view at the last check.
+    var on_screen = false
+
+    // True while the rectangle overlaps the view.
+    fn is_on_screen() -> bool {
+        return on_screen
+    }
+
+    // The overlap test against the current view, now (what the per-tick check
+    // uses).
+    fn overlaps_view() -> bool {
+        // The rectangle as a center and two half-extent vectors in the world.
+        var gs = global_scale()
+        var rot = global_rotation()
+        var hx = vec2(rect_size.x * 0.5 * gs.x, 0.0).rotated(rot)
+        var hy = vec2(0.0, rect_size.y * 0.5 * gs.y).rotated(rot)
+        var c = to_global(rect_position + rect_size * 0.5)
+        // The view as the same kind of box.
+        var vc = Screen.size * 0.5
+        var vx = vec2(Screen.size.x * 0.5, 0.0)
+        var vy = vec2(0.0, Screen.size.y * 0.5)
+        if Camera2D.current_camera? cam {
+            var z = cam.zoom > 0.0 ? cam.zoom : 1.0
+            var cr = cam.global_rotation()
+            vc = cam.global_position()
+            vx = vec2(Screen.size.x * 0.5 / z, 0.0).rotated(cr)
+            vy = vec2(0.0, Screen.size.y * 0.5 / z).rotated(cr)
+        }
+        // Separating axis test on the four box axes.
+        var axes = List<vec2>()
+        axes.push(hx.normalized())
+        axes.push(hy.normalized())
+        axes.push(vx.normalized())
+        axes.push(vy.normalized())
+        var d = vc - c
+        for u in axes {
+            if u.length_squared() == 0.0 {
+                continue
+            }
+            var r1 = abs(hx.dot(u)) + abs(hy.dot(u))
+            var r2 = abs(vx.dot(u)) + abs(vy.dot(u))
+            if abs(d.dot(u)) > r1 + r2 {
+                return false
+            }
+        }
+        return true
+    }
+
+    // Engine-internal: checks the view before the node's own update().
+    fn update_tree(dt: float) {
+        if !freed && enabled {
+            var now = overlaps_view()
+            if now != on_screen {
+                on_screen = now
+                if now {
+                    emit screen_entered
+                } else {
+                    emit screen_exited
+                }
+            }
+        }
+        super.update_tree(dt)
+    }
+
+    // Draws the rectangle in the editor only (the preview never runs ready()).
+    fn draw(g: Canvas) {
+        if !ready_done {
+            var gs = global_scale()
+            var sz = rect_size * gs
+            var c = to_global(rect_position + rect_size * 0.5)
+            g.rect(c - sz * 0.5, sz, stroke = Color.rgb(0.5, 0.8, 1.0, 0.6), width = 1.5, rotation = global_rotation())
+        }
+    }
+}

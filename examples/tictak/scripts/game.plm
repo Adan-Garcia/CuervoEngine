@@ -1,0 +1,319 @@
+class Game extends Node {
+    static var main: Game
+    
+    // --- GLOBAL SETTINGS ---
+    static var grid_size = 10
+    static var rounds_to_win = 2
+    static var turn_length = 5.0
+    
+    // --- MATCH STATE ---
+    var p1_wins = 0
+    var p2_wins = 0
+    var connections_to_win = 3
+    
+    // --- ROUND STATE ---
+    var board = List<int>()
+    var current_player = 1 
+    var time_left = 0.0
+    var round_over = false
+    var match_over = false
+    
+    // --- POWER-UPS ---
+    var active_power = #none // #none, #wall, #eraser, #double
+    var is_spinning = false
+    var spin_angle = 0.0
+    
+    // --- WIN VISUALS ---
+    var win_start_cell = vec2(0.0)
+    var win_end_cell = vec2(0.0)
+    
+    fn ready() {
+        // Dynamic win scaling based on grid size
+        var c_float = Game.grid_size as float
+        connections_to_win = round(2.231 * pow(c_float,0.2887)) as int
+        rebuild()
+    }
+    
+    fn rebuild() {
+        board.clear()
+        for i in 0..(Game.grid_size * Game.grid_size) {
+            board.push(0)
+        }
+        current_player = 1
+        time_left = Game.turn_length
+        round_over = false
+        active_power = #none
+        win_start_cell = vec2(0.0)
+        win_end_cell = vec2(0.0)
+    }
+    
+    fn update(dt: float) {
+        if match_over || round_over || is_spinning { return }
+        
+        // Turn Timer countdown
+        time_left -= dt
+        if time_left <= 0.0 {
+            // Active player ran out of time; opponent wins the round
+            var winner = current_player == 1 ? 2 : 1
+            win_round(winner)
+        }
+    }
+    
+    // Safely get a cell value, returning -1 if out of bounds
+    fn get_cell(x: int, y: int) -> int {
+        if x < 0 || x >= Game.grid_size || y < 0 || y >= Game.grid_size {
+            return -1
+        }
+        return board[x + (y * Game.grid_size)]
+    }
+
+    fn count_in_direction(start_x: int, start_y: int, dx: int, dy: int, player: int) -> int {
+        var count = 0
+        var cx = start_x + dx
+        var cy = start_y + dy
+
+        while get_cell(cx, cy) == player {
+            count += 1
+            cx += dx
+            cy += dy
+        }
+        return count
+    }
+
+    fn check_win(x: int, y: int, player: int) {
+        // Walls (value 3) cannot win
+        if player == 3 { return }
+        
+        var directions = [
+            vec2(1.0, 0.0), vec2(0.0, 1.0), 
+            vec2(1.0, 1.0), vec2(1.0, -1.0)
+        ]
+
+        for dir in directions {
+            var dx = dir.x as int
+            var dy = dir.y as int
+            
+            var f_steps = count_in_direction(x, y, dx, dy, player)
+            var b_steps = count_in_direction(x, y, -dx, -dy, player)
+
+            if (f_steps + b_steps + 1) >= connections_to_win {
+                win_start_cell = vec2((x - b_steps * dx) as float, (y - b_steps * dy) as float)
+                win_end_cell = vec2((x + f_steps * dx) as float, (y + f_steps * dy) as float)
+                win_round(player)
+                return
+            }
+        }
+    }
+    
+    fn win_round(winner: int) {
+        round_over = true
+        if winner == 1 { p1_wins += 1 }
+        else if winner == 2 { p2_wins += 1 }
+        
+        if p1_wins >= Game.rounds_to_win || p2_wins >= Game.rounds_to_win {
+            match_over = true
+            print("Match Over! Player {winner} wins the game!")
+        } else {
+            print("Player {winner} wins the round!")
+            start(next_round_delay())
+        }
+    }
+    
+    fn next_round_delay() {
+        await wait(2.0)
+        if !match_over {
+            rebuild()
+        }
+    }
+    
+    // Coroutine for the Gamble Spinner
+    fn gamble() {
+        is_spinning = true
+        active_power = #none
+        
+        var TWO_PI = 6.2831853
+        
+        // Random spin speed in radians (e.g., 0.5 to 1.5 radians per frame)
+        var base_spin_speed = 0.5 + Random.range(0.0, 1.0) 
+        
+        // Spin animation
+        for i in 0..40 {
+            spin_angle += base_spin_speed * (1.0 - (i as float / 40.0))
+            await wait_ticks(1)
+        }
+        
+        // Map spin_angle to wedge ranges based on total weight of TWO_PI
+        var normalized_angle = spin_angle % TWO_PI
+        
+        if normalized_angle < 2.5132741 { // 40%
+            active_power = #lose_turn
+            print("Power: Lose a turn!")
+            advance_turn()
+        } else if normalized_angle < 3.7699112 { // + 20% (60% total)
+            active_power = #wall
+            print("Power: Place a Wall!")
+        } else if normalized_angle < 5.0265482 { // + 20% (80% total)
+            active_power = #eraser
+            print("Power: Eraser!")
+        } else { // Remaining 20% (100% total)
+            active_power = #double
+            print("Power: Double Turn!")
+        }
+        
+        is_spinning = false
+    }
+    
+    fn advance_turn() {
+        if active_power == #double {
+            active_power = #none // Consume double turn, player goes again
+        } else {
+            active_power = #none
+            current_player = current_player == 1 ? 2 : 1
+        }
+        time_left = Game.turn_length
+    }
+    
+    fn draw(g: Canvas) {
+        var c = Game.grid_size
+        var square_size = 32.0
+        var line_width = 4.0
+        
+        var cell_step = square_size + line_width
+        var grid_size_px = (c as float) * cell_step
+        var offset = -grid_size_px / 2.0 
+        var center = Screen.size / 2.0
+        // --- DRAW SPINNER OVERLAY ---
+        if is_spinning {
+            // Dim the background
+            g.rect(vec2(0.0), Screen.size, fill = Color.hex("00000088"), stroke = Color.hex("00000000"), width = 0.0, radius = 0.0, rotation = 0.0)
+            
+            var radius = 150.0
+            var rot = spin_angle
+            
+            // Draw a background circle/border
+            g.circle(center, radius = radius + 10.0, fill = Color.hex("ffffff"), stroke = Color.hex("00000000"), width = 0.0)
+            
+            // Draw wedges directly in radians. Each one reaches `seam` under the
+            // wedge drawn after it, so the background never shows through where
+            // two anti-aliased edges meet.
+            var seam = 0.01
+            g.arc(center, radius, rot - seam, rot + 2.5132741 + seam, fill = Color.hex("f60919"))   // Lose a turn (40%)
+            g.arc(center, radius, rot + 2.5132741, rot + 3.7699112 + seam, fill = Color.hex("1d1d23"))   // Wall (20%)
+            g.arc(center, radius, rot + 3.7699112, rot + 5.0265482 + seam, fill = Color.hex("a9abbc"))   // Eraser (20%)
+            g.arc(center, radius, rot + 5.0265482, rot + 6.2831853, fill = Color.hex("424244"))          // Double Turn (20%)
+            
+            // Draw the indicator needle on the right side
+            g.line(vec2(center.x + radius, center.y), vec2(center.x + radius + 30.0, center.y), color = Color.hex("ffff00"), width = 8.0)
+            
+            g.text(vec2(center.x - 40.0, center.y - radius - 40.0), "SPINNING...", color = Color.hex("ffffff"))
+            return // Skip drawing the interactive grid while spinning
+        }
+        // --- DRAW UI STATS ---
+        g.text(vec2(20.0, 20.0), "P1 Wins: {p1_wins} / {Game.rounds_to_win}", color = Color.hex("ff5555"))
+        g.text(vec2(20.0, 60.0), "P2 Wins: {p2_wins} / {Game.rounds_to_win}", color = Color.hex("5555ff"))
+        g.text(vec2(20.0, 100.0), "Time: {time_left}", color = Color.hex("ffffff"))
+        g.text(vec2(20.0, 140.0), "Target: {connections_to_win} in a row", color = Color.hex("ffffff"))
+        
+        if active_power != #none {
+            g.text(vec2(20.0, 180.0), "Active Power: {active_power}", color = Color.hex("ffff00"))
+        }
+        
+        // --- DRAW GRID ---
+        for i in 1..c { 
+            var i_float = i as float
+            var local_pos = offset + (i_float * cell_step)
+            
+            g.line(vec2(center.x + local_pos, center.y + offset), vec2(center.x + local_pos, center.y + offset + grid_size_px), color = Color.hex("ffffff"), width = line_width)
+            g.line(vec2(center.x + offset, center.y + local_pos), vec2(center.x + offset + grid_size_px, center.y + local_pos), color = Color.hex("ffffff"), width = line_width)
+        }
+
+        var grid_origin = vec2(center.x + offset, center.y + offset)
+        
+        // --- HANDLE INPUT & HIGHLIGHT ---
+        if !round_over && !match_over && !is_spinning {
+            var mouse_pos = Input.pointer()
+            var local_x = mouse_pos.x - grid_origin.x
+            var local_y = mouse_pos.y - grid_origin.y
+            
+            var grid_x = (local_x / cell_step) as int
+            var grid_y = (local_y / cell_step) as int
+            var is_hovering = grid_x >= 0 && grid_x < c && grid_y >= 0 && grid_y < c
+            
+            // Gamble Button Trigger
+            if Input.pressed(#right_click) {
+                is_spinning = true
+                start(gamble())
+            }
+            
+            if is_hovering {
+                var cell_index = grid_x + (grid_y * c)
+                var current_val = board[cell_index]
+                var cursor = vec2(grid_origin.x + (grid_x as float * cell_step) + (line_width / 2.0), grid_origin.y + (grid_y as float * cell_step) + (line_width / 2.0))
+                
+                // Allow interactions based on active power
+                var can_place = (current_val == 0 && active_power != #eraser)
+                var can_erase = (current_val != 0 && active_power == #eraser)
+                
+                if can_place || can_erase {
+                    g.rect(cursor, vec2(square_size, square_size), fill = Color.hex("ffffff10"), stroke = Color.hex("ffffff"), width = 0.0, radius = 0.0, rotation = 0.0)
+                    
+                    if Input.pressed(#click) {
+                        if can_erase {
+                            board[cell_index] = 0
+                            advance_turn()
+                        } else {
+                            // Place piece or wall
+                            var piece_to_place = active_power == #wall ? 3 : current_player
+                            board[cell_index] = piece_to_place
+                            check_win(grid_x, grid_y, piece_to_place)
+                            
+                            if !round_over {
+                                // Check for tie condition (board full)
+                                var empty_count = 0
+                                for val in board {
+                                    if val == 0 { empty_count += 1 }
+                                }
+                                
+                                if empty_count == 0 {
+                                    rebuild()
+                                } else {
+                                    advance_turn()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // --- DRAW PIECES ---
+        for x in 0..c {
+            for y in 0..c {
+                var cell_index = x + (y * c)
+                var val = board[cell_index]
+                if val == 0 { continue }
+                
+                var cell_center = vec2(grid_origin.x + (x as float * cell_step) + (square_size / 2.0) + (line_width / 2.0), grid_origin.y + (y as float * cell_step) + (square_size / 2.0) + (line_width / 2.0))
+                var padding = square_size / 4.0
+                var half_size = (square_size / 2.0) - padding
+                
+                if val == 1 {
+                    g.line(vec2(cell_center.x - half_size, cell_center.y - half_size), vec2(cell_center.x + half_size, cell_center.y + half_size), color = Color.hex("ff5555"), width = line_width)
+                    g.line(vec2(cell_center.x + half_size, cell_center.y - half_size), vec2(cell_center.x - half_size, cell_center.y + half_size), color = Color.hex("ff5555"), width = line_width)
+                } else if val == 2 {
+                    g.circle(cell_center, radius = half_size, fill = Color.hex("00000000"), stroke = Color.hex("5555ff"), width = line_width)
+                } else if val == 3 {
+                    // Draw Wall
+                    g.rect(vec2(cell_center.x - half_size, cell_center.y - half_size), vec2(half_size * 2.0, half_size * 2.0), fill = Color.hex("aaaaaa"), stroke = Color.hex("00000000"), width = 0.0, radius = 0.0, rotation = 0.0)
+                }
+            }
+        }
+        
+        // --- DRAW WINNING LINE ---
+        if round_over && win_start_cell != vec2(-10.0) {
+            var start_pos = vec2(grid_origin.x + (win_start_cell.x * cell_step) + (square_size / 2.0) + (line_width / 2.0), grid_origin.y + (win_start_cell.y * cell_step) + (square_size / 2.0) + (line_width / 2.0))
+            var end_pos = vec2(grid_origin.x + (win_end_cell.x * cell_step) + (square_size / 2.0) + (line_width / 2.0), grid_origin.y + (win_end_cell.y * cell_step) + (square_size / 2.0) + (line_width / 2.0))
+            g.line(start_pos, end_pos, color = Color.hex("ffff00"), width = line_width * 2.0)
+        }
+    }
+}
