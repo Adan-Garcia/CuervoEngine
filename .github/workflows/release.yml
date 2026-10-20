@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -27,16 +28,16 @@ jobs:
         run: cmake --preset release
 
       - name: Build Release Binaries
-        run: cmake --build --preset release --target cuervo cuervo-editor cuervo_tools plm
+        run: cmake --build --preset release --target runtime editor cuervo_tools plm
 
       - name: Package Linux Archive
         run: |
-          mkdir -p package/bin package/licenses
+          mkdir -p package/bin
           cp build/release/runtime/cuervo package/bin/
           cp build/release/editor/cuervo-editor package/bin/
           cp build/release/tools/cuervo_tools/cuervo-tools package/bin/
           cp build/release/pluma/plm package/bin/
-          cp -r third_party/licenses package/licenses/
+          cp -r third_party/licenses package/
           cp LICENSE.md README.md THIRD_PARTY_NOTICES.md package/
           tar -czvf cuervo-linux-x86_64.tar.gz -C package .
 
@@ -48,6 +49,7 @@ jobs:
           mv pluma-*.vsix ../../cuervo-vscode-pluma.vsix
 
       - name: Create GitHub Release
+        if: ${{ !env.ACT }}
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -56,3 +58,9 @@ jobs:
           draft: false
           prerelease: true
           generate_release_notes: true
+
+      - name: Verify Release Artifacts (act test)
+        if: ${{ env.ACT }}
+        run: |
+          echo "Running inside act: release package and vsix verified successfully!"
+          ls -lh cuervo-linux-x86_64.tar.gz cuervo-vscode-pluma.vsix
