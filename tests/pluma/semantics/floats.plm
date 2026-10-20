@@ -1,0 +1,89 @@
+// Float arithmetic must round the same way in the VM and in native code
+// (no fused multiply-add, no extended precision): accumulations, mixed
+// widths, vectors, casts and the builtin math functions.
+var s32: float = 0.0
+var s64: f64 = 0.0
+for i in 1..=2000 {
+    s32 += 1.0 / (i as float)
+    s64 += 1.0 / (i as f64)
+}
+print(s32)
+print(s64)
+
+var p32: float = 1.0
+var p64: f64 = 1.0
+for i in 1..=40 {
+    p32 *= 1.1
+    p64 *= 1.1
+}
+print(p32)
+print(p64)
+
+// a * b + c written out must not be contracted into one rounding.
+var a: float = 0.1
+var b: float = 3.0
+var c: float = -0.3
+print(a * b + c)
+var da: f64 = 0.1
+var db: f64 = 3.0
+var dc: f64 = -0.3
+print(da * db + dc)
+
+var t: f64 = 0.0
+for i in 0..1000 {
+    t = t * 0.999 + (i as f64) * 0.001
+}
+print(t)
+
+var seed: float = 1.0
+for i in 0..100 {
+    seed = (seed * 1.5 + 0.25) % 7.0
+}
+print(seed)
+
+// Casts between widths.
+var wide: f64 = 0.1
+var narrow = wide as float
+print(narrow)
+print(narrow as f64)
+print((16777217 as f64) as float)
+print(1.0e10 as float)
+print(3.4e38 as float * 10.0)
+print(1.0e-30 as float * 1.0e-30)
+
+// Builtin math: transcendental functions go through the host's math hooks.
+var acc: float = 0.0
+for i in 0..64 {
+    var x = (i as float) * 0.1
+    acc += sin(x) * cos(x) + sqrt(x) + atan2(x, 1.5) + exp(x * 0.1) + log(x + 1.0) + pow(x, 1.5)
+}
+print(acc)
+print(floor(-2.5) + ceil(-2.5) + round(-2.5) + round(2.5))
+print(lerp(1.0, 3.0, 0.3))
+print(smoothstep(0.0, 1.0, 0.3))
+
+// Vectors.
+var v = vec3(0.1, 0.2, 0.3)
+var w = vec3(1.5, -2.5, 3.5)
+print(v * 3.0 + w)
+print(v.dot(w))
+print(w.normalized())
+print(w.length())
+print(vec2(3.0, 4.0).rotated(0.5))
+print(v.cross(w))
+print(v.lerp(w, 0.25))
+var acc2 = vec2(0.0, 0.0)
+for i in 0..100 {
+    acc2 += vec2(0.1, 0.01) * (i as float)
+}
+print(acc2)
+
+// min/max/clamp/abs on floats, including -0.0 and NaN.
+var nan = 0.0 / 0.0
+print(min(-0.0, 0.0))
+print(max(-0.0, 0.0))
+print(abs(-0.0))
+print(clamp(nan, 0.0, 1.0))
+print(min(1.0, nan))
+print(max(nan, 1.0))
+print(clamp(2.5, 0.0, 1.0))

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <set>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -145,7 +146,8 @@ struct OptionalPrelude {
     const char* path;
     const char* text;
 };
-// All of them, whether or not this engine was built with the feature.
+// All of them, whether or not this engine was built with the feature. A long
+// file spans consecutive entries with the same path (cuervo_append_prelude).
 constexpr OptionalPrelude optional_preludes[] = {
 #include "cuervo_optional_preludes.inc"
 };
@@ -157,9 +159,13 @@ struct FeatureNames {
 
 FeatureNames feature_names() {
     FeatureNames f;
-    for (const OptionalPrelude& part : optional_preludes) {
-        std::vector<std::string> names = prelude_declarations(part.text);
-        const std::string_view path = part.path;
+    for (std::size_t i = 0; i < std::size(optional_preludes);) {
+        const std::string_view path = optional_preludes[i].path;
+        std::string text;
+        for (; i < std::size(optional_preludes) && optional_preludes[i].path == path; ++i) {
+            text += optional_preludes[i].text;
+        }
+        std::vector<std::string> names = prelude_declarations(text);
         if (path == "cuervo/audio.plm") {
             f.audio = std::move(names);
         } else if (path == "cuervo/ui.plm") {

@@ -1,0 +1,154 @@
+// Strings, UTF-8 and conversions (LANGUAGE.md 1.5, 9.17).
+{
+    // strings basic
+    var s = "héllo wörld ☃ 😀"
+    print(s.len())
+    print(s.char_count())
+    print(s.chars())
+    print(s.to_upper())
+    print(s.find("wö"))
+    print(s.find("zz"))
+    print(s.find("o", 5))
+    print(s.byte_at(1))
+    print(s.substr(0, 1))
+    print(s.contains("☃"))
+    print(s.starts_with("hé"))
+    print(s.ends_with("😀"))
+    print(s.pad_left(20, "*"))
+    print("ab".pad_right(5, "é") + "|")
+}
+{
+    // substr clamps
+    print("abc".substr(2, 10))
+    print("abc".substr(5))
+    print("abc".substr(-1))
+}
+{
+    // split
+    print("a,b,,c".split(","))
+    print("".split(","))
+    print(",".split(","))
+    print("abc".split("abc"))
+    print("a--b--".split("--"))
+}
+{
+    // join replace
+    print(",".join(["a", "b"]))
+    print(",".join([]))
+    print("aaa".replace("aa", "b"))
+    print("abc".replace("", "x"))
+    print("abc".replace("b", ""))
+}
+{
+    // trim lines
+    print("  \t hi \n".trim() + "|")
+    print("  hi ".trim_start() + "|")
+    print("  hi ".trim_end() + "|")
+    print("a\r\nb\n\nc\n".lines())
+    print("".lines())
+    print("\n".lines())
+    print("a".lines())
+}
+{
+    // repeat
+    print("ab".repeat(3))
+    print("ab".repeat(0))
+}
+{
+    // compare
+    print("a" < "b")
+    print("é" > "z")
+    print("abc" < "abd")
+    print("ab" < "abc")
+    print("" < "a")
+    print("a" == "a")
+}
+{
+    // parse
+    print(parse_int("42"))
+    print(parse_int("-42"))
+    print(parse_int("+7"))
+    print(parse_int(" 7"))
+    print(parse_int("0x10"))
+    print(parse_int("ff", 16))
+    print(parse_int("FF", 16))
+    print(parse_int("2147483648"))
+    print(parse_int("-2147483648"))
+    print(parse_int(""))
+    print(parse_int("-"))
+    print(parse_int("1_000"))
+    print(parse_float("1.5"))
+    print(parse_float("1e3"))
+    print(parse_float("inf"))
+    print(parse_float("nan"))
+    print(parse_float("-inf"))
+    print(parse_float(".5"))
+    print(parse_float("5."))
+    print(parse_float("1.5x"))
+    print(parse_float(""))
+    print(parse_float("1e999"))
+}
+{
+    // interpolation
+    var x = 5
+    print("{x}{x}")
+    print("{{x}}")
+    print("{x + 1}")
+    print("{"nested"}")
+    print("{[1,2]}")
+    print("{x > 3}")
+    print("{1.0}")
+    print("{#foo}")
+    print("tab\there")
+    print("quote\"q")
+    print("\u{1F600}")
+    print("\u{e9}")
+    print("nul\0x".len())
+}
+{
+    // name
+    var n = #hello
+    print(n)
+    print("{n}")
+    print(n == #hello)
+    print(#a == #b)
+}
+{
+    // to_hex radix
+    print(255.to_hex())
+    print((-255).to_hex())
+    print(255.to_radix(2))
+    print((-255).to_radix(36))
+    print(0.to_hex())
+    var m = -2147483647 - 1
+    print(m.to_hex())
+    print(m.to_radix(2))
+}
+{
+    // str ops
+    var a = "x"
+    a += "y"
+    print(a)
+    print(a + "z")
+    print(a.len())
+    print(a.is_empty())
+    print("".is_empty())
+}
+{
+    // multiline
+    var h = """
+        Usage:
+          go
+        """
+    print(h)
+    print(h.len())
+    print(r"a\nb{x}")
+    
+}
+{
+    // Constants with an embedded NUL or a trigraph-looking sequence survive AOT.
+    var t = "a\0b??/c??=d"
+    print(t.len())
+    print(t.byte_at(1))
+    print(t.replace("\0", "0"))
+}

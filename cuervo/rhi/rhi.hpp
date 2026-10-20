@@ -113,7 +113,10 @@ enum class BufferKind { Vertex, Index, Uniform };
 // Dynamic: updated now and then; contents persist across frames. Updates never
 //   race the GPU (the backend renames the storage, copying the rest forward).
 // Stream: rewritten every frame. Updates never race the GPU, but bytes not
-//   written since the frame's first update are undefined.
+//   written since the frame's first update are undefined. Updates in one frame
+//   to byte ranges beside each other (a batcher's per-layer flush) are cheap on
+//   both backends; rewriting bytes a recorded draw already reads is correct
+//   but may copy.
 // Updates follow GL semantics on both backends: draws recorded before an
 // update see the old data, draws after it see the new data.
 enum class BufferUsage { Static, Dynamic, Stream };

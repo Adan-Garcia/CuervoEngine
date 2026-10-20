@@ -3,9 +3,9 @@
 The engine runs a script project in the browser through Emscripten: the GL
 backend's GLES 3.0 path *is* WebGL2, the frame loop is driven by the browser,
 and the project is preloaded into an in-memory file system. Only projects with
-`render_tier = "compatible"` can be exported (DESIGN.md 4.4).
+`render_tier = "compatible"` can be exported; a `full` project is refused ([STATUS.md](STATUS.md) "Render tiers").
 
-Status (Phase 5): **built and verified** with the pinned toolchain below — the
+Status: **built and verified** with the pinned toolchain below — the
 shmup (`examples/shmup`) builds to WASM, loads, renders and plays in headless
 Chrome (SwiftShader WebGL2), and its simulation is bit-identical to the native
 build at tick 240 (same state hash).
@@ -54,7 +54,7 @@ Cache variables (`cmake/Web.cmake`):
 | `CUERVO_WEB_FONT_SOURCE` | `assets/fonts/LiberationSans-Regular.ttf` | converted at build time to `/fonts/default.efont` (an `.efont` is used as is) |
 | `CUERVO_WEB_PACK` | empty | run an exported pack instead of `CUERVO_WEB_GAME`: `fetch` (preset `web-pack`) builds a game-independent runtime that fetches `game.pak` next to the page; a `.pak` path preloads that pack (docs/EXPORT.md "Web") |
 
-### Shipping a game (Phase 7C)
+### Shipping a game
 
 The preloaded project directory above is the development build. A release
 ships a pack (docs/EXPORT.md):
@@ -104,9 +104,7 @@ and saves a mid-game screenshot. Determinism against a native build:
 node tools/web/smoke_test.mjs --args "--screenshot /tmp/w.ppm" --expect "state hash H"
 ```
 
-(Verified on this machine: `a3e57e79964421d3` at tick 240 on GL and WASM since
-milestone 5.5, which changed the hash once (DESIGN.md 4.15); before it,
-`13cd5d06434bf435` on GL, GLES, Vulkan and WASM.) The web build compiles the
+(Verified: `a3e57e79964421d3` at tick 240 on GL and WASM.) The web build compiles the
 WASM SIMD128 paths (`-msimd128`, `CUERVO_SIMD=simd128`, the web default) and
 runs the job system inline on one thread; neither changes the hash. Manual check: serve as above, open in a desktop browser, play with
 keyboard and gamepad, and watch the console.
@@ -126,7 +124,9 @@ keyboard and gamepad, and watch the console.
 | Exceptions | native | `-fwasm-exceptions` (the language compiler reports limits with exceptions) | `cmake/Web.cmake` |
 | Demos (`--demo`, `--svg`) | yes | no (blocking loops); the web runtime always runs `--game` | `runtime/main.cpp` |
 
-## Threads (Phase 10)
+## Threads (experimental)
+
+Opt-in and less widely verified than the default single-threaded build ([STATUS.md](STATUS.md)).
 
 `cmake --preset web-threads` (raw project) and `web-pack-threads` (pack-loading,
 for `cuervo-tools export --platform web --runtime build/web-pack-threads/runtime`)
@@ -157,23 +157,26 @@ side at this load. Emscripten warns that `-pthread` with memory growth slows
 JavaScript-side memory access (WebGL calls go through JS); the render CPU time
 above shows no visible cost.
 
-## Decisions (recorded in DESIGN.md 4.4 / 4.14 "Clarified (Phase 5)")
+## Decisions (recorded in DESIGN.md 4.4 and 4.14)
 
 - Single-threaded WASM by default, so hosting needs no special headers; WASM
   threads are opt-in (`CUERVO_WEB_THREADS`, "Threads" above).
 - One project per web build, preloaded (`--preload-file`), not fetched lazily:
   the shmup is 1.9 MB of `.data` (1.1 MB of it the font atlas) next to a 2.6 MB
-  `.wasm`. A packed archive (DESIGN.md 4.11) will replace the raw preload.
+  `.wasm`. That is the development build; a release ships a packed archive instead
+  (DESIGN.md 4.11, "Shipping a game" above).
 - The default framebuffer has no MSAA (`antialias: false`); the engine renders
   into its own 4x MSAA renderbuffer and blits, exactly like desktop GL.
 - Release builds only in practice (Debug WASM works but is slow).
 
-## Not done yet
+## Limitations
 
 - Compressed downloads: the pack is stored uncompressed (docs/EXPORT.md "Pack
   format"); gzip/brotli is up to the web server.
-- Persistent saves (IDBFS) for `Scene.save` / future `Save` data.
-- AudioWorklet output (needs WASM threads); ScriptProcessorNode is deprecated but universal.
-- Firefox/Safari are untested here (headless Chrome, SwiftShader or the real GPU with `--gpu`).
+- Persistent saves (IDBFS) for `Scene.save` and the planned `Save` API (milestone 11.4) are
+  not implemented: writes vanish on reload.
+- Audio uses the main-thread ScriptProcessorNode backend (deprecated but universal); an
+  AudioWorklet backend (needs WASM threads) is planned.
+- Firefox and Safari are untested (headless Chrome, SwiftShader or the real GPU with `--gpu`).
 - The engine's doctest suites are not run under Node (they need the real file
   system: `-sNODERAWFS`); determinism is checked through the state hash instead.

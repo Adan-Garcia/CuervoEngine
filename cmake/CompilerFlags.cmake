@@ -20,7 +20,17 @@ else()
     if(APPLE)
         target_link_options(project_flags INTERFACE -Wl,-dead_strip)
     elseif(WIN32)
-        target_link_options(project_flags INTERFACE -Wl,/OPT:REF -Wl,/OPT:ICF)
+        target_link_options(project_flags INTERFACE -Wl,/OPT:REF -Wl,/OPT:ICF -Wl,/STACK:8388608)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            execute_process(
+                COMMAND ${CMAKE_CXX_COMPILER} --rtlib=compiler-rt --print-libgcc-file-name
+                OUTPUT_VARIABLE _cuervo_builtins
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+            )
+            if(EXISTS "${_cuervo_builtins}")
+                target_link_libraries(project_flags INTERFACE "${_cuervo_builtins}")
+            endif()
+        endif()
     else()
         target_link_options(project_flags INTERFACE -Wl,--gc-sections)
     endif()

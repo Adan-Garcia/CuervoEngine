@@ -1,0 +1,3 @@
+-2147483648
+test.plm:5:7: panic: shift amount 32 is out of range for 'int'
+    at <top level> (test.plm:5:7)

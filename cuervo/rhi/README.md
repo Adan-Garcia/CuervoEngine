@@ -2,7 +2,7 @@
 
 The render hardware interface (`rhi.hpp`, DESIGN.md 4.4) has two backends,
 Vulkan (`vulkan/`) and GL (`gl/`: GL 3.3 core, GLES 3.0, WebGL2). Both
-implement every feature in the same change; this page is the Phase 5 parity
+implement every feature in the same change; this page is the parity
 audit and the rules for tiers.
 
 ## Tiers and capabilities
@@ -38,7 +38,7 @@ Compatible limits (what the tier promises everywhere): textures 4096 px,
 aligned to 256 bytes. The GLES 3.0 spec minimums are lower for textures
 (2048) and uniform blocks; DESIGN.md 4.4 "Clarified (Phase 5)" explains the choice.
 
-## Parity audit (Phase 5)
+## Parity audit
 
 Every `Device` entry point, checked against both backends. "Scene" names the
 `tools/rhi_parity` capture that exercises it; the `rhi_parity` test renders all
@@ -49,7 +49,7 @@ of them on GL 3.3, GLES 3.0 and (with a display) Vulkan and compares the images.
 | `begin_frame` resets viewport, scissor and all bindings | **fixed**: GL kept uniform ranges bound across frames; now unbinds them like Vulkan | every scene |
 | `clear` honors the scissor | same | `clear_scissor_viewport` |
 | `set_viewport` / `set_scissor`, top-left origin | same | `clear_scissor_viewport` |
-| `create/update/destroy_buffer`, Static/Dynamic/Stream, GL ordering (draws see data as of recording) | same | `buffer_update_order` |
+| `create/update/destroy_buffer`, Static/Dynamic/Stream, GL ordering (draws see data as of recording) | same; Stream: GL rotates three buffers behind a bounded frame fence ring, Vulkan writes disjoint ranges in place | `buffer_update_order` |
 | `bind_uniform_buffer` offsets and ranges | same | `uniform_offsets` |
 | `create/update/destroy_texture`, formats, filters, zero-initialized | same | `textures` |
 | `create_pipeline`: blend modes | same factors | `blend_modes` |

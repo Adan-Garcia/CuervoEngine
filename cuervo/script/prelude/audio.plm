@@ -41,12 +41,16 @@ class Audio {
     @native static fn music(track: name, fade = 0.0, volume = 1.0) {}
     // Fades the current track out while `track` fades in.
     @native static fn crossfade(track: name, seconds = 1.5) {}
+    // Fades the current track out over `fade` seconds and stops it.
     @native static fn stop_music(fade = 1.0) {}
 
     // Bus volume (linear gain, 1.0 = unchanged), ramped over `fade` seconds.
     @native static fn set_volume(bus: name, volume: float, fade = 0.0) {}
+    // The bus's current linear gain.
     @native static fn volume(bus: name) -> float {}
+    // Mutes or unmutes `bus` without changing its volume.
     @native static fn set_muted(bus: name, muted: bool) {}
+    // True if `bus` is muted.
     @native static fn muted(bus: name) -> bool {}
 }
 

@@ -7,7 +7,11 @@
 //                 [--theme light|dark] [--splash|--no-splash] [--accept-eula] [--layout <name>]
 //                 [--screen eula|welcome] [--tool select|move|rotate|scale] [--select </a,/b>] [--palette [query]]
 //   cuervo-editor --project <dir> --replay-verify <file.replay> [--jobs <n>]
+//   cuervo-editor --new-project <dir> [--template empty|walker] [--name <name>]
 //
+// --new-project makes a project the way the welcome screen's "New project" does and exits
+// (headless, so it follows the command-line EULA rules); --template defaults to empty and
+// --name to the folder's name.
 // --script-commands applies a file of editor operations (headless: no
 // window), saves and exits; with --screenshot it then opens the window and
 // captures it. --replay-verify plays a replay back headless and exits 1 at
@@ -15,6 +19,7 @@
 
 #include <charconv>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
 #include <string_view>
 
@@ -24,6 +29,7 @@
 #include "cuervo/platform/platform.hpp"
 #include "cuervo/platform/eula.hpp"
 #include "editor/app.hpp"
+#include "editor/projects.hpp"
 
 namespace {
 
@@ -46,7 +52,8 @@ int usage() {
               "[--script-commands <file>] [--screenshot <file.ppm>] [--quit-after <seconds>] [--size <w>x<h>] "
               "[--font <file.ttf>] [--view <x>,<y>,<zoom>] [--jobs <n>] [--no-audio] [--tabs <Panel,...>] [--replay-verify <file.replay>] [--profile] "
               "[--theme light|dark] [--splash|--no-splash] [--accept-eula] [--layout <name>] [--screen eula|welcome] "
-              "[--tool select|move|rotate|scale] [--select </a,/b>] [--palette [query]]");
+              "[--tool select|move|rotate|scale] [--select </a,/b>] [--palette [query]]\n"
+              "       cuervo-editor --new-project <dir> [--template empty|walker] [--name <name>]");
     return EXIT_FAILURE;
 }
 
@@ -68,6 +75,28 @@ int main(int argc, char** argv) {
     if (o.screen != "" && o.screen != "eula" && o.screen != "welcome") {
         LOG_ERROR("Unknown --screen '{}' (expected eula or welcome)", o.screen);
         return EXIT_FAILURE;
+    }
+    if (has_flag(argc, argv, "--new-project")) {
+        const std::string_view dir = arg_value(argc, argv, "--new-project");
+        if (dir.empty()) {
+            LOG_ERROR("--new-project needs the folder to create. Nothing was created. "
+                      "Example: cuervo-editor --new-project mygame --template walker");
+            return EXIT_FAILURE;
+        }
+        if (!eula::require_acceptance(argc, argv, "cuervo-editor")) return EXIT_FAILURE;
+        const std::filesystem::path folder = std::filesystem::absolute(std::filesystem::path(std::string(dir)));
+        std::string_view name = arg_value(argc, argv, "--name");
+        const std::string fallback = folder.filename().string();
+        if (name.empty()) name = fallback;
+        std::string_view tmpl = arg_value(argc, argv, "--template");
+        if (tmpl.empty()) tmpl = "empty";
+        std::string error;
+        if (!editor::create_project(tmpl, folder, name, error)) {
+            LOG_ERROR("{}", error);
+            return EXIT_FAILURE;
+        }
+        LOG_INFO("Created project '{}' ({} template) in {}", name, tmpl, folder.string());
+        return EXIT_SUCCESS;
     }
     // Headless runs (no window to show the agreement in) follow the command-line rules.
     if (((!o.script_commands.empty() && o.screenshot.empty()) || !o.replay_verify.empty()) &&

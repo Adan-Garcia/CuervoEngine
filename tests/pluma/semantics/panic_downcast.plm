@@ -1,0 +1,7 @@
+class A {}
+class B extends A {}
+class C extends A {}
+var a: A = C()
+print(a is C)
+var b = a as B
+print(b)

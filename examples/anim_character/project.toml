@@ -1,0 +1,16 @@
+# An animated character (DESIGN.md 4.17, milestone 9.4): a Node2D hierarchy whose
+# AnimationPlayer animations (idle / walk / jump, saved in scenes/character.scene)
+# are blended by an AnimationTree state machine driven by input.
+#   cuervo --game examples/anim_character
+name = "Anim Character"
+main = "Demo"
+virtual_size = [1280, 720]
+tick_rate = 60
+seed = 20261019
+clear_color = "10131c"
+render_tier = "compatible"
+
+[input.actions]
+left = ["Key.Left", "Key.A", "Pad.DpadLeft"]
+right = ["Key.Right", "Key.D", "Pad.DpadRight"]
+jump = ["Key.Space", "Key.Up", "Key.W", "Pad.South"]

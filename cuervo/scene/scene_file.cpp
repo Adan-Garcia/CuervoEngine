@@ -148,10 +148,20 @@ std::uint64_t schema_hash(const SceneDoc& doc) {
 namespace {
 
 // v1 nodes had no names; name them after their type (DESIGN.md 4.12: old
-// files always load).
+// files always load). Siblings of one type would all get the same name, so the
+// later ones are numbered like the editor numbers a new node ("Shape", "Shape2"):
+// every node stays reachable by its path.
 void migrate_v1_names(SceneDoc& doc) {
+    std::set<std::pair<std::int32_t, std::string>> taken; // (parent, name)
     for (Node& n : doc.nodes) {
-        if (n.name.empty()) n.name = n.type;
+        if (!n.name.empty()) {
+            taken.emplace(n.parent, n.name);
+            continue;
+        }
+        std::string name = n.type;
+        for (int i = 2; taken.contains({n.parent, name}); ++i) name = std::format("{}{}", n.type, i);
+        taken.emplace(n.parent, name);
+        n.name = std::move(name);
     }
 }
 

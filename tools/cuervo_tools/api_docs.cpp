@@ -428,4 +428,49 @@ std::optional<std::string> generate_api_docs(const std::vector<SourceFile::Part>
     return out;
 }
 
+// Doc coverage (DESIGN.md 4.16 "Clarified (Milestone 8.4)"): every public item
+// the reference lists must have a description, i.e. what `describe` finds.
+std::optional<ApiCoverage> check_api_coverage(const std::vector<SourceFile::Part>& preludes, std::string& error) {
+    ApiCoverage cov;
+    for (const SourceFile::Part& part : preludes) {
+        SourceFile src(part.path, part.text);
+        Arena arena;
+        DiagnosticSink diags(src);
+        Module module = parse_module(src, arena, diags);
+        if (diags.has_errors()) {
+            error = render_all(diags.all(), src);
+            return std::nullopt;
+        }
+        auto note = [&](std::string_view what, bool documented, std::uint32_t offset) {
+            ++cov.total;
+            if (documented) {
+                ++cov.documented;
+                return;
+            }
+            cov.missing.push_back(std::string(part.path) + ":" + std::to_string(src.line_col(offset).line) + ": " +
+                                  std::string(what));
+        };
+        for (const Decl* d : module.decls) {
+            if (is_private(d->name.name)) continue;
+            const std::string top(d->name.name);
+            note(top, !describe(src, d).empty(), d->span.begin);
+            if (auto e = as<EnumDecl>(d)) {
+                for (const EnumVariant& v : e->variants) {
+                    std::vector<std::string> vdoc = leading_doc(src, v.span.begin).lines;
+                    if (auto t = trailing_doc(src, v.span)) vdoc.push_back(*t);
+                    note(top + "." + std::string(v.name.name), !vdoc.empty(), v.span.begin);
+                }
+            }
+            const List<Decl*>* members = members_of(d);
+            if (members == nullptr) continue;
+            for (const Decl* m : *members) {
+                if (is_private(m->name.name)) continue;
+                if (m->kind != DeclKind::Var && m->kind != DeclKind::Fn && m->kind != DeclKind::Signal) continue;
+                note(top + "." + std::string(m->name.name), !describe(src, m).empty(), m->span.begin);
+            }
+        }
+    }
+    return cov;
+}
+
 } // namespace cuervo::tools

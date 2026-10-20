@@ -13,6 +13,7 @@
 #include "cuervo/assets/pack.hpp"
 #include "cuervo/input/devices.hpp"
 #include "cuervo/script/game_session.hpp"
+#include "cuervo/script/tier_check.hpp"
 #include "tools/cuervo_tools/export.hpp"
 
 using namespace cuervo;
@@ -139,6 +140,27 @@ TEST_CASE("pack_project: the tier check gates the export") {
     // A broken project.toml fails before anything is packed.
     write_text(dir / "game/project.toml", "name = \n");
     CHECK_FALSE(tools::pack_project(dir / "game", options(), s, error));
+}
+
+TEST_CASE("pack_project: a claim the target does not provide is refused (support matrix)") {
+    const fs::path dir = temp_dir("claims");
+    fs::copy(shmup_dir, dir / "game", fs::copy_options::recursive);
+    std::string error;
+    tools::PackSummary s;
+    // render_tier = "full" is desktop Vulkan only: the web export is refused with the reason.
+    REQUIRE_MESSAGE(script::write_project_tier(dir / "game", rhi::Tier::Full, error), error);
+    CHECK_FALSE(tools::pack_project(dir / "game", options(assets::PackPlatform::Web), s, error));
+    CHECK(error.find("render_tier = \"full\" is not supported on Web") != std::string::npos);
+    CHECK(error.find("docs/STATUS.md") != std::string::npos);
+    // ...while the desktop export of the same project is accepted.
+    CHECK_MESSAGE(tools::pack_project(dir / "game", options(assets::PackPlatform::Linux), s, error), error);
+    // The tier gate being off (format tests) skips the claims too.
+    tools::PackOptions ungated = options(assets::PackPlatform::Web);
+    ungated.tier_gate = false;
+    CHECK_MESSAGE(tools::pack_project(dir / "game", ungated, s, error), error);
+    // A compatible project still exports to the web.
+    REQUIRE_MESSAGE(script::write_project_tier(dir / "game", rhi::Tier::Compatible, error), error);
+    CHECK_MESSAGE(tools::pack_project(dir / "game", options(assets::PackPlatform::Web), s, error), error);
 }
 
 #if CUERVO_FEATURE_AUDIO && CUERVO_FEATURE_UI && CUERVO_FEATURE_PARTICLES && CUERVO_FEATURE_COLLISION

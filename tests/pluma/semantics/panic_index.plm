@@ -1,0 +1,6 @@
+var xs = [1, 2, 3]
+var i = 0
+while true {
+    print(xs[i])
+    i += 1
+}

@@ -1,0 +1,3 @@
+start
+test.plm:3:7: panic: integer overflow in '/' (i64)
+    at <top level> (test.plm:3:7)

@@ -37,6 +37,7 @@
 
 #include "cuervo/core/log.hpp"
 #include "cuervo/platform/window.hpp"
+#include "cuervo/rhi/gl/gl_device.hpp"
 #include "cuervo/rhi/rhi.hpp"
 #include "shaders/parity_color_frag.hpp"
 #include "shaders/parity_color_vert.hpp"
@@ -307,6 +308,7 @@ public:
             {"uniform_offsets", [this] { uniform_offsets(); }},
             {"textures", [this] { textures(); }},
             {"buffer_update_order", [this] { buffer_updates(); }},
+            {"stream_large", [this] { stream_large(); }},
             {"base_vertex", [this] { base_vertex(true); }},
             {"base_vertex_reference", [this] { base_vertex(false); }},
         };
@@ -534,6 +536,49 @@ private:
         d_.draw(3);
     }
 
+    // A stream buffer past the GL backend's upload slice (1.2 MB in one
+    // update) plus a second update beside it in the same frame: the batcher
+    // pattern at a size that exercises sliced uploads and, on GL, the
+    // rotating buffer versions (checked across frames by `frames`).
+    void stream_large() {
+        constexpr int cells = 128;
+        constexpr std::size_t base_vertices = static_cast<std::size_t>(cells) * cells * 6;
+        constexpr std::size_t overlay_vertices = static_cast<std::size_t>(cells) * cells / 4 * 3;
+        if (!big_stream_) {
+            big_stream_ = d_.create_buffer({rhi::BufferKind::Vertex, rhi::BufferUsage::Stream,
+                                            (base_vertices + overlay_vertices) * sizeof(ColorVertex), nullptr});
+            owned_buffers_.push_back(big_stream_);
+        }
+        std::vector<ColorVertex> base;
+        std::vector<ColorVertex> overlay;
+        base.reserve(base_vertices);
+        overlay.reserve(overlay_vertices);
+        for (int cy = 0; cy < cells; ++cy) {
+            for (int cx = 0; cx < cells; ++cx) {
+                const float x = static_cast<float>(cx * 2);
+                const float y = static_cast<float>(cy * 2);
+                const std::uint32_t h = static_cast<std::uint32_t>(cx * 73 + cy * 151 + (cx ^ cy) * 31);
+                const std::uint32_t rgba = ((h * 2654435761u) & 0xffffff00u) | 0xffu;
+                for (const ColorVertex& v : {cv(x, y, rgba), cv(x + 2, y, rgba), cv(x, y + 2, rgba), cv(x + 2, y, rgba),
+                                             cv(x + 2, y + 2, rgba), cv(x, y + 2, rgba)}) {
+                    base.push_back(v);
+                }
+                if (cx % 2 == 0 && cy % 2 == 0) {
+                    for (const ColorVertex& v : {cv(x, y, 0xffffffff), cv(x + 1, y, 0xffffffff), cv(x, y + 1, 0xffffffff)}) {
+                        overlay.push_back(v);
+                    }
+                }
+            }
+        }
+        d_.bind_pipeline(blend_[0]);
+        use_params(0, 0, 0, 1, 1);
+        d_.update_buffer(big_stream_, 0, bytes(base));
+        d_.bind_vertex_buffer(0, big_stream_);
+        d_.draw(static_cast<std::uint32_t>(base_vertices));
+        d_.update_buffer(big_stream_, base.size() * sizeof(ColorVertex), bytes(overlay));
+        d_.draw(static_cast<std::uint32_t>(overlay.size()), 1, static_cast<std::uint32_t>(base_vertices));
+    }
+
     // Two quads packed into one vertex buffer; the second is drawn with
     // 0-based indices plus base_vertex = 4 (or, for the reference, with
     // indices pre-offset by 4).
@@ -562,7 +607,7 @@ private:
     rhi::Device& d_;
     std::array<rhi::PipelineHandle, 4> blend_{};
     rhi::PipelineHandle strip_, points_, lines_, line_strip_, instanced_, textured_;
-    rhi::BufferHandle params_, palette_, quad_, uv_quad_, dynamic_, stream_, bv_vertices_, bv_indices_;
+    rhi::BufferHandle params_, palette_, quad_, uv_quad_, dynamic_, stream_, big_stream_, bv_vertices_, bv_indices_;
     std::array<rhi::TextureHandle, 2> checker_{};
     rhi::TextureHandle mask_, blank_;
     std::vector<rhi::BufferHandle> owned_buffers_;
@@ -752,9 +797,74 @@ int compare(int argc, char** argv) {
     return failures == 0 ? 0 : 1;
 }
 
+// Renders the large-stream scene for --count frames on one device, as a game
+// does, and checks that the first and last frames are identical (the rotating
+// stream versions must not leak stale data) and, on GL, that the fence ring
+// never let more than the bound queue up.
+int frames(int argc, char** argv) {
+    DeviceArgs args;
+    if (!parse_device_args(argc, argv, args)) return 2;
+    const fs::path out(arg_value(argc, argv, "--out"));
+    if (out.empty()) {
+        LOG_ERROR("--out <dir> is required");
+        return 2;
+    }
+    int count = 24;
+    if (const std::string_view value = arg_value(argc, argv, "--count"); !value.empty()) {
+        count = std::max(2, std::atoi(std::string(value).c_str()));
+    }
+    std::error_code ec;
+    fs::create_directories(out, ec);
+    Window window;
+    auto device = open(window, args);
+    if (!device) return 1;
+    Scenes scenes(*device);
+    if (!scenes.init()) return 1;
+    std::function<void()> draw;
+    for (auto& [name, fn] : scenes.list()) {
+        if (name == "stream_large") draw = fn;
+    }
+    const fs::path first = out / "frames_first.ppm";
+    const fs::path last = out / "frames_last.ppm";
+    fs::remove(first, ec);
+    fs::remove(last, ec);
+    for (int frame = 1; frame <= count + 6; ++frame) {
+        DeviceState devices;
+        window.poll_events(devices);
+        device->begin_frame(window.pixel_size());
+        device->clear({0.08f, 0.09f, 0.12f, 1.0f});
+        draw();
+        // A Vulkan swapchain may need a frame or two to settle: retry the captures.
+        if (frame >= 2 && !fs::exists(first) && frame < count) device->capture_frame(first.string());
+        if (frame >= count && !fs::exists(last)) device->capture_frame(last.string());
+        device->end_frame();
+    }
+    int failures = 0;
+    const auto a = read_ppm(first);
+    const auto b = read_ppm(last);
+    const Diff d = a && b ? diff_images(*a, *b, 0) : Diff{};
+    if (!a || !b || !d.same_size || d.differing != 0) {
+        LOG_ERROR("An early frame and frame {} differ ({} pixels): stream versions leaked data", count, d.differing);
+        ++failures;
+    }
+    if (args.backend == rhi::Backend::OpenGL) {
+        const std::size_t peak = gl::peak_frames_in_flight(*device);
+        LOG_INFO("GL frames in flight: peak {} (bound {})", peak, gl::frame_limit());
+        if (peak > gl::frame_limit()) {
+            LOG_ERROR("The GL device let {} frames queue (bound {})", peak, gl::frame_limit());
+            ++failures;
+        }
+    }
+    scenes.shutdown();
+    device.reset();
+    window.destroy();
+    return failures == 0 ? 0 : 1;
+}
+
 int usage() {
     std::fputs("usage:\n"
                "  rhi_parity render --backend gl|vulkan [--gl-es] [--tier compatible|full] --out <dir>\n"
+               "  rhi_parity frames --backend gl|vulkan [--gl-es] [--count <n>] --out <dir>\n"
                "  rhi_parity compare <a.ppm|dirA> <b.ppm|dirB> [--tolerance <0-255>] [--max-fraction <f>]\n"
                "  rhi_parity features --backend gl|vulkan [--gl-es]\n",
                stderr);
@@ -767,6 +877,7 @@ int main(int argc, char** argv) {
     if (argc < 2) return usage();
     const std::string_view cmd = argv[1];
     if (cmd == "render") return render(argc, argv);
+    if (cmd == "frames") return frames(argc, argv);
     if (cmd == "compare") return argc >= 4 ? compare(argc, argv) : usage();
     if (cmd == "features") return features(argc, argv);
     return usage();

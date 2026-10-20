@@ -555,7 +555,11 @@
         std::string_view word = is_break ? "break" : "continue";
         ir::Stmt* target = nullptr;
         if (cx_->loops.empty()) {
-            error(s->span, std::format("'{}' outside of a loop", word));
+            if (cx_->defer_depth > 0) {
+                error(s->span, std::format("'{}' is not allowed inside 'defer' (it cannot leave the deferred code)", word));
+            } else {
+                error(s->span, std::format("'{}' outside of a loop", word));
+            }
             return nullptr;
         }
         if (label.empty()) {

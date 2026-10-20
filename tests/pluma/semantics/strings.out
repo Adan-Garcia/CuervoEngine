@@ -1,0 +1,100 @@
+22
+15
+["h", "é", "l", "l", "o", " ", "w", "ö", "r", "l", "d", " ", "☃", " ", "😀"]
+HéLLO WöRLD ☃ 😀
+7
+-1
+5
+195
+h
+true
+true
+true
+*****héllo wörld ☃ 😀
+abééé|
+c
+
+abc
+["a", "b", "", "c"]
+[""]
+["", ""]
+["", ""]
+["a", "b", ""]
+a,b
+
+ba
+abc
+ac
+hi|
+hi |
+  hi|
+["a", "b", "", "c"]
+[]
+[""]
+["a"]
+ababab
+
+true
+true
+true
+true
+true
+true
+42
+-42
+7
+null
+null
+255
+255
+null
+-2147483648
+null
+null
+null
+1.5
+1000.0
+inf
+nan
+-inf
+0.5
+5.0
+null
+null
+inf
+55
+{x}
+6
+nested
+[1, 2]
+true
+1.0
+#foo
+tab	here
+quote"q
+😀
+é
+5
+#hello
+#hello
+true
+false
+ff
+-ff
+11111111
+-73
+0
+-80000000
+-10000000000000000000000000000000
+xy
+xyz
+2
+false
+true
+Usage:
+  go
+11
+a\nb{x}
+11
+0
+a0b??/c??=d

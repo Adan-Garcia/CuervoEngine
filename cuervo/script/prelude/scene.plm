@@ -36,13 +36,22 @@ class Node {
     // Engine bookkeeping, read-only for scripts: in the tree now, ready() has
     // run, queue_free() was called.
     var in_tree = false
+    // True once ready() has run.
     var ready_done = false
+    // True after queue_free() was called.
     var freed = false
 
     // The lifecycle (see the top of this file): override these.
     fn ready() {}
+    // Called every tick with the fixed step `dt` in seconds, parent before children.
     fn update(dt: float) {}
+    // Called every frame to draw this node with `g`; draw only, never change game state here.
     fn draw(g: Canvas) {}
+    // Drawn after everything else, above all canvas layers, when the node
+    // queued itself in `Scene.overlays` from draw_tree (popups, tooltips).
+    fn draw_overlay(g: Canvas) {}
+
+    // Called once when the node leaves the tree (freed or removed).
     fn exit() {}
     // `count` particles of the emitter tagged `tag` hit this node's hitboxes
     // this tick.
@@ -60,6 +69,14 @@ class Node {
         if in_tree {
             child.enter_tree()
         }
+    }
+
+    // A Tween (animation.plm) that runs with this node, in ticks, and stops
+    // when the node leaves the tree. Chain tweeners on the result.
+    fn create_tween() -> Tween {
+        var tw = Tween()
+        tw.task = start(tw.run())
+        return tw
     }
 
     // Removes the node (and its children) at the end of the tick.
@@ -162,8 +179,11 @@ class Node {
 // `set_global_transform` takes. Applying it scales a point, turns it, then
 // moves it (the order Node2D composes with).
 struct NodeTransform {
+    // Translation, applied last.
     var position = vec2(0.0, 0.0)
+    // Rotation in radians, applied after scaling.
     var rotation = 0.0
+    // Scale per axis, applied first.
     var scale = vec2(1.0, 1.0)
 
     // `p` (in the transform's own frame) in the outer frame.
@@ -205,6 +225,7 @@ class Node2D extends Node {
     // hierarchy is on: `position`, `rotation` and `scale` are world values.
     @export var top_level = false
 
+    // Draws the node and its children, or nothing while `visible` is false.
     fn draw_tree(g: Canvas) {
         if visible {
             super.draw_tree(g)
@@ -357,6 +378,7 @@ class SceneInstance extends Node2D {
     // The instanced scene's root (a transient child) once loaded.
     var instance: Node
 
+    // Instantiates `scene` as a child when the node enters the tree.
     fn ready() {
         instantiate()
     }
@@ -395,8 +417,10 @@ class SceneInstance extends Node2D {
 class CanvasLayer extends Node {
     // Layers draw in increasing `layer`: higher is on top.
     @export var layer = 1
+    // Hides the layer and everything under it when false.
     @export var visible = true
 
+    // Draws the layer's children unless it is hidden.
     fn draw_tree(g: Canvas) {
         if visible {
             super.draw_tree(g)
@@ -404,6 +428,7 @@ class CanvasLayer extends Node {
     }
 }
 
+// Access to the running scene tree: the root and tree-wide operations.
 class Scene {
     // The tree's root: an instance of project.toml's `main` class, or the root
     // of its `main_scene`.
@@ -414,6 +439,9 @@ class Scene {
     static var paused = false
     // Engine-internal: the canvas layers drawn this frame.
     static var layers = List<CanvasLayer>()
+    // Engine-internal: nodes whose draw_overlay() runs after the layers, in
+    // order, each covering what came before. draw_tree adds them.
+    static var overlays = List<Node>()
 
     // Whether Node2D transforms are relative to the parent (project.toml
     // `[scene] transform_hierarchy`, default true), fixed for the run: false
@@ -439,6 +467,7 @@ class Scene {
     // canvas layers in screen coordinates.
     static fn draw_frame(g: Canvas) {
         layers.clear()
+        overlays.clear()
         if Camera2D.current_camera? cam {
             g.set_view(cam.global_position(), zoom = cam.zoom > 0.0 ? cam.zoom : 1.0, rotation = cam.global_rotation())
         }
@@ -464,6 +493,14 @@ class Scene {
             l.draw_tree(g)
         }
         layers.clear()
+        // Overlays may queue more overlays while they draw (a popup in a popup).
+        var o = 0
+        while o < overlays.len() {
+            g.new_layer()
+            overlays[o].draw_overlay(g)
+            o += 1
+        }
+        overlays.clear()
     }
 
     // End of tick: removes queued nodes from the tree.

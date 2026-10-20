@@ -298,7 +298,8 @@ std::optional<std::pair<std::uint32_t, std::uint32_t>> image_size(std::span<cons
 }
 
 std::optional<TierCheckReport> check_project_tier(const fs::path& dir, std::optional<rhi::Tier> target,
-                                                  std::string& error, const TierRules& rules) {
+                                                  std::string& error, const TierRules& rules,
+                                                  std::optional<support::Target> platform, bool native_scripts) {
     std::optional<Project> project = load_project(dir, error);
     if (!project) return std::nullopt;
     TierCheckReport report;
@@ -318,6 +319,14 @@ std::optional<TierCheckReport> check_project_tier(const fs::path& dir, std::opti
         out.push_back(issue(Severity::Note, "project.toml", static_cast<std::uint32_t>(project->render_tier_line), 0,
                             "the full tier runs on desktop Vulkan only: no web export, and the OpenGL backend refuses "
                             "to run the project"));
+    }
+
+    // The platform must provide what the project claims (docs/support.json).
+    if (platform) {
+        for (TierIssue& i : support::check_claims({to, native_scripts}, *platform)) {
+            i.line = static_cast<std::uint32_t>(project->render_tier_line);
+            out.push_back(std::move(i));
+        }
     }
 
     // shaders/

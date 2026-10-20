@@ -1,0 +1,5 @@
+class A { var other: A = null
+  var v = 1 }
+var a = A()
+print(a.v)
+print(a.other.v)

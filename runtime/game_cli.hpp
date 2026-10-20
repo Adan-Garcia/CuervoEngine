@@ -6,7 +6,8 @@
 //
 //   cuervo --game <dir> | --pack <file.pak> [--backend vulkan|gl] [--quit-after <seconds>] [--vsync on|off]
 //                        [--screenshot <file.ppm>] [--font <file>] [--scale fit|integer|stretch]
-//                        [--no-hot-reload] [--press <tick:action,...>] [--gl-es] [--no-audio]
+//                        [--no-hot-reload] [--press <tick:action,...>] [--pointer <tick:x:y,...>]
+//                        [--type <tick:text,...>] [--gl-es] [--no-audio]
 //                        [--record <file.replay>] [--bench <seconds> [--bench-warmup <seconds>]]
 //                        [--profile]
 //
@@ -14,7 +15,9 @@
 // CUERVO_SCREENSHOT_TICK), writes that frame and exits, so captures are
 // reproducible and comparable across backends. --press (or CUERVO_PRESS)
 // holds project actions on given ticks, e.g. "60:ui_accept,300:pause", so
-// automated runs can reach menus. --gl-es (or CUERVO_GL_ES=1) asks the GL
+// automated runs can reach menus ("10-20:ui_click" holds for a range of ticks).
+// --pointer ("tick:x:y") puts the pointer somewhere from that tick on, and --type
+// ("tick:text") types text into a focused text field, a character per tick. --gl-es (or CUERVO_GL_ES=1) asks the GL
 // backend for an OpenGL ES 3.0 context, the API WebGL2 exposes, so desktop
 // runs exercise the web's shaders (GLSL ES 300) and limits.
 // --record writes the run as a replay (every tick's input and state hash,

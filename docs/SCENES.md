@@ -69,3 +69,29 @@ false` in project.toml makes them world values), and `top_level` (saved like any
 exported field) opts one node out. An instanced scene's root inherits the
 `SceneInstance`'s transform with the hierarchy on. Existing scene files need no change:
 what they contain is the same numbers, read as local ones.
+
+## Animations in scenes
+
+Animations are **part of the scene file**: an `AnimationPlayer` node exports its
+`animations` list, an `AnimationTree` exports its `states` and `transitions`, and a track's
+target is a path of node names under the player's parent (`"Torso/Head:rotation"`). There is
+no separate `.anim` file and the scene format version does not change: the values are
+ordinary exported structs, lists and enums, so scene files, the text view, migrations and
+`scene dump` diffs treat them like any other field. A scene with animations instances them
+with its nodes; renaming or moving a node means editing the track paths that name it.
+
+```
+node AnimationPlayer "Anim" {
+    animations: List<Animation> = [Animation { name = "idle", length = 120, mode = AnimLoop.Loop, tracks = [AnimTrack { path = "Torso:position", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (0.0, -70.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, ...] }, ...] }]
+    autoplay: str = ""
+}
+```
+
+The dump prints the whole list on one line (the text view keeps a field to a line), so
+animations are easier to write with the builders (`Animation.key_float(...)`) in a script
+that calls `Scene.save`, or with a small generator that writes the text view:
+`examples/anim_character/make_scene.py` writes `authoring/character.txt`, and
+`cuervo-tools scene build` turns it into `scenes/character.scene` (the `anim_character`
+ctest checks both directions). A key's `value` is a vec4 holding the field's value (a
+float in `x`, a `vec2` in `xy`, a `Color` in `rgba`, an enum's discriminant in `x`);
+`text` is the name for a `name` track and the event name of an event track.

@@ -6,6 +6,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Use ccache if available to accelerate builds across worktrees
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    message(STATUS "Using ccache: ${CCACHE_PROGRAM}")
+endif()
+
 option(CUERVO_BUILD_TESTS "Build Cuervo Engine and Pluma tests" ON)
 
 # Vulkan is the desktop backend (DESIGN.md 4.4); the web build is GL-only.
@@ -46,6 +54,7 @@ include(CompilerFlags)
 include(Dependencies)
 include(Shaders)
 include(Eula)
+include(SupportData)
 # The EULA version (LICENSE.md) the programs ask users to accept: cuervo/platform/eula.hpp,
 # and pluma/repl's own copy of the gate (pluma never depends on cuervo/).
 cuervo_eula_version()

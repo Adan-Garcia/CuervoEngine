@@ -10,6 +10,7 @@
 
 #include "cuervo/core/log.hpp"
 #include "cuervo/platform/window.hpp"
+#include "cuervo/rhi/frame_fence_ring.hpp"
 #include "cuervo/rhi/gl/gl_loader.hpp"
 #include "cuervo/rhi/rhi_internal.hpp"
 
@@ -17,13 +18,35 @@ namespace cuervo::gl {
 
 namespace {
 
+// Stream buffers rotate through this many GL buffers, one per submitted frame
+// that can still be reading (frames_in_flight + the one being recorded), so a
+// frame's first update never waits on, or reallocates, storage the GPU uses.
+constexpr std::uint32_t stream_versions = 3;
+
 struct BufferInfo {
-    GLuint name = 0;
+    std::array<GLuint, stream_versions> names{};
+    std::uint32_t version_count = 1;
+    std::uint32_t current = 0;
+    GLuint name() const { return names[current]; }
     GLenum target = 0;
     rhi::BufferUsage usage = rhi::BufferUsage::Static;
     std::size_t size = 0;
-    std::uint64_t written_frame = 0; // Stream: frame of the last orphaning update
+    std::uint64_t written_frame = 0; // Stream: frame of the first update (the one that rotated)
 };
+
+// Bytes per glBufferSubData call.
+constexpr std::size_t upload_slice = 1024 * 1024;
+// Submitted frames the driver may queue (DESIGN.md 4.4). The version count
+// above relies on it.
+constexpr std::size_t max_frames_in_flight = 2;
+static_assert(stream_versions >= max_frames_in_flight + 1);
+#ifdef __EMSCRIPTEN__
+// WebGL2 forbids blocking waits on the browser's main thread, so no fences:
+// streams orphan their storage instead of rotating.
+constexpr bool frame_fences = false;
+#else
+constexpr bool frame_fences = true;
+#endif
 
 struct StreamInfo {
     std::uint32_t stride = 0;
@@ -190,9 +213,10 @@ public:
     }
 
     ~GlDevice() override {
+        fences_.drain([this](GLsync fence) { gl_.glDeleteSync(fence); });
         destroy_msaa_target();
         for (auto& [id, buffer] : buffers_) {
-            gl_.glDeleteBuffers(1, &buffer.name);
+            gl_.glDeleteBuffers(static_cast<GLsizei>(buffer.version_count), buffer.names.data());
         }
         for (auto& [id, pipeline] : pipelines_) {
             gl_.glDeleteProgram(pipeline.program);
@@ -252,16 +276,47 @@ public:
         }
 #endif
         SDL_GL_SwapWindow(window_);
+        limit_frames_in_flight();
+    }
+
+    std::size_t peak_frames_in_flight() const { return fences_.peak(); }
+
+    // One fence per presented frame, and a wait on the one from
+    // max_frames_in_flight frames ago. WebGL2 forbids blocking waits on the
+    // browser's main thread, and the browser already paces frames, so the web
+    // build keeps none.
+    void limit_frames_in_flight() {
+        if constexpr (frame_fences) {
+            GLsync fence = gl_.glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+            if (fence == nullptr) {
+                gl_.glFinish(); // no fence to wait on later: the bound must still hold
+                return;
+            }
+            fences_.push(fence, [this](GLsync oldest) {
+                // Bounded so a lost context cannot hang the process; 100 ms slices.
+                GLenum status = GL_TIMEOUT_EXPIRED;
+                for (int slice = 0; slice < 50 && status == GL_TIMEOUT_EXPIRED; ++slice) {
+                    status = gl_.glClientWaitSync(oldest, GL_SYNC_FLUSH_COMMANDS_BIT, 100'000'000);
+                }
+                gl_.glDeleteSync(oldest);
+            });
+        }
     }
 
     ivec2 framebuffer_size() const override { return framebuffer_size_; }
 
     rhi::BufferHandle create_buffer(const rhi::BufferDesc& desc) override {
-        BufferInfo buffer{0, to_gl_target(desc.kind), desc.usage, desc.size};
-        gl_.glGenBuffers(1, &buffer.name);
-        gl_.glBindBuffer(buffer.target, buffer.name);
-        gl_.glBufferData(buffer.target, static_cast<GLsizeiptr>(desc.size), desc.initial_data,
-                         to_gl_usage(desc.usage));
+        BufferInfo buffer;
+        buffer.target = to_gl_target(desc.kind);
+        buffer.usage = desc.usage;
+        buffer.size = desc.size;
+        buffer.version_count = desc.usage == rhi::BufferUsage::Stream && frame_fences ? stream_versions : 1;
+        gl_.glGenBuffers(static_cast<GLsizei>(buffer.version_count), buffer.names.data());
+        for (std::uint32_t v = 0; v < buffer.version_count; ++v) {
+            gl_.glBindBuffer(buffer.target, buffer.names[v]);
+            gl_.glBufferData(buffer.target, static_cast<GLsizeiptr>(desc.size), desc.initial_data,
+                             to_gl_usage(desc.usage));
+        }
         gl_.glBindBuffer(buffer.target, 0);
 
         rhi::BufferHandle handle{next_id_++};
@@ -281,24 +336,39 @@ public:
                       buffer.size);
             return;
         }
-        gl_.glBindBuffer(buffer.target, buffer.name);
-        if (buffer.usage == rhi::BufferUsage::Stream && buffer.written_frame != frame_) {
-            // Orphan on the frame's first update: the driver hands us fresh
-            // storage instead of stalling on draws that still read the old
-            // contents. Bytes not written this frame become undefined, which is
-            // exactly the Stream contract (and what the Vulkan backend's rename does).
-            gl_.glBufferData(buffer.target, static_cast<GLsizeiptr>(buffer.size), nullptr, GL_STREAM_DRAW);
+        if (buffer.usage == rhi::BufferUsage::Stream) {
+            const bool first = buffer.written_frame != frame_;
+            if (first && buffer.version_count > 1) {
+                // The version last written stream_versions updates ago is
+                // finished on the GPU (the fence ring waited for it), so it can
+                // be written without a sync and without reallocating.
+                buffer.current = (buffer.current + 1) % buffer.version_count;
+            }
+            gl_.glBindBuffer(buffer.target, buffer.name());
+            if (first && buffer.version_count == 1) {
+                // No fences (web): orphan, so the driver hands out fresh storage
+                // instead of stalling on draws that still read the old contents.
+                gl_.glBufferData(buffer.target, static_cast<GLsizeiptr>(buffer.size), nullptr, GL_STREAM_DRAW);
+            }
             buffer.written_frame = frame_;
+        } else {
+            gl_.glBindBuffer(buffer.target, buffer.name());
         }
-        gl_.glBufferSubData(buffer.target, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(data.size()),
-                            data.data());
+        // Large uploads go in slices: one 76 MB glBufferSubData made the driver
+        // stage the whole range at once, which cost 3-4x as much past ~1.9M
+        // instances (and ~2x the resident memory) as the same bytes in slices.
+        for (std::size_t done = 0; done < data.size(); done += upload_slice) {
+            const std::size_t count = std::min(upload_slice, data.size() - done);
+            gl_.glBufferSubData(buffer.target, static_cast<GLintptr>(offset + done), static_cast<GLsizeiptr>(count),
+                                data.data() + done);
+        }
         gl_.glBindBuffer(buffer.target, 0);
     }
 
     void destroy_buffer(rhi::BufferHandle handle) override {
         // GL keeps the storage alive until queued commands that use it finish.
         if (auto it = buffers_.find(handle.id); it != buffers_.end()) {
-            gl_.glDeleteBuffers(1, &it->second.name);
+            gl_.glDeleteBuffers(static_cast<GLsizei>(it->second.version_count), it->second.names.data());
             buffers_.erase(it);
         }
     }
@@ -521,7 +591,7 @@ public:
         }
         const BufferInfo& buffer = it->second;
         const std::size_t range = size ? size : buffer.size - std::min(offset, buffer.size);
-        gl_.glBindBufferRange(GL_UNIFORM_BUFFER, binding, buffer.name, static_cast<GLintptr>(offset),
+        gl_.glBindBufferRange(GL_UNIFORM_BUFFER, binding, buffer.name(), static_cast<GLintptr>(offset),
                               static_cast<GLsizeiptr>(range));
         uniform_bound_ |= 1u << binding;
     }
@@ -562,7 +632,7 @@ public:
             return;
         }
         // The element binding is VAO state that buffer uploads may have changed.
-        gl_.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, it->second.name);
+        gl_.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, it->second.name());
         const bool u16 = index_format_ == rhi::IndexFormat::UInt16;
         gl_.glDrawElementsInstanced(pipeline->topology, static_cast<GLsizei>(index_count),
                                     u16 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT,
@@ -625,7 +695,7 @@ private:
                 LOG_ERROR("draw: no vertex buffer bound to stream {}", s);
                 return nullptr;
             }
-            gl_.glBindBuffer(GL_ARRAY_BUFFER, buffer->second.name);
+            gl_.glBindBuffer(GL_ARRAY_BUFFER, buffer->second.name());
             const bool per_instance = stream.rate == rhi::VertexRate::PerInstance;
             std::size_t base = vertex_bindings_[s].offset;
             if (per_instance) {
@@ -745,6 +815,7 @@ private:
     ivec2 msaa_size_{0, 0};
     ivec2 framebuffer_size_{0, 0};
     std::uint64_t frame_ = 1; // > every BufferInfo::written_frame default
+    rhi::FenceRing<GLsync> fences_{max_frames_in_flight};
 
     std::unordered_map<std::uint32_t, BufferInfo> buffers_;
     std::unordered_map<std::uint32_t, PipelineInfo> pipelines_;
@@ -790,5 +861,12 @@ std::unique_ptr<rhi::Device> create_device(Window& window, const rhi::DeviceOpti
              device->info().msaa_samples, rhi::tier_name(device->info().tier));
     return device;
 }
+
+std::size_t peak_frames_in_flight(const rhi::Device& device) {
+    const auto* gl_device = dynamic_cast<const GlDevice*>(&device);
+    return gl_device ? gl_device->peak_frames_in_flight() : 0;
+}
+
+std::size_t frame_limit() { return max_frames_in_flight; }
 
 } // namespace cuervo::gl

@@ -36,7 +36,11 @@ struct GameOptions {
     // Scripted input for automated runs: "tick:action,tick:action" holds each
     // action during that tick (e.g. "60:ui_accept,300:pause"), so headless
     // captures can reach menus. Added on top of the devices' input.
-    std::string presses;
+    std::string presses;   // a tick may be a range: "10-20:ui_click"
+    // More scripted input (GameSession::set_pointer_script / set_typed):
+    // "tick:x:y,..." moves the pointer, "tick:text,..." types characters.
+    std::string pointers;
+    std::string typed;
     std::string font_path;        // TTF/OTF or .efont for Canvas.text
     bool hot_reload = true;
     render::ScaleMode scale = render::ScaleMode::Fit;

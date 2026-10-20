@@ -1,0 +1,4 @@
+fn bad() -> Result<int, str> { return Err("bad") }
+defer print("not run")
+print("go")
+print(bad().expect("context"))

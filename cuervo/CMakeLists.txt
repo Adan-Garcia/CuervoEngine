@@ -42,13 +42,19 @@ add_library(cuervo STATIC
     script/project.cpp
     script/script_host.cpp
     script/script_host_scene.cpp
+    script/anim_bindings.cpp
     script/scene_bridge.cpp
     script/game_runner.cpp
     script/game_session.cpp
     script/vector_cache.cpp
     script/tier_check.cpp
+    script/support.cpp
     script/project_edit.cpp
 )
+
+# docs/support.json compiled in (milestone 8.8): the tier and export checks read the support matrix.
+cuervo_generate_support_data(${CMAKE_CURRENT_BINARY_DIR}/generated/support_data.inc)
+target_include_directories(cuervo PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
 if(CUERVO_FEATURE_AUDIO)
     target_sources(cuervo PRIVATE
@@ -115,6 +121,7 @@ set(CUERVO_PRELUDE_FILES
     script/prelude/core.plm
     script/prelude/scene.plm
     script/prelude/nodes.plm
+    script/prelude/animation.plm
 )
 if(CUERVO_FEATURE_COLLISION)
     list(APPEND CUERVO_PRELUDE_FILES script/prelude/collision.plm)
@@ -128,15 +135,39 @@ endif()
 if(CUERVO_FEATURE_AUDIO)
     list(APPEND CUERVO_PRELUDE_FILES script/prelude/audio.plm)
 endif()
+# One embedded prelude as .inc entries {"path", R"(text)"}. A file longer than
+# ~60 KB becomes several consecutive entries with the same path, split at line
+# ends: compilers only promise string literals up to 65536 bytes (clang warns,
+# -Woverlength-strings), and the consumers join same-path entries.
+function(cuervo_append_prelude out path text)
+    set(_entries "${${out}}")
+    while(TRUE)
+        string(LENGTH "${text}" _len)
+        if(_len LESS_EQUAL 60000)
+            break()
+        endif()
+        string(SUBSTRING "${text}" 60000 -1 _rest)
+        string(FIND "${_rest}" "\n" _nl)
+        if(_nl EQUAL -1)
+            break()
+        endif()
+        math(EXPR _cut "60000 + ${_nl} + 1")
+        string(SUBSTRING "${text}" 0 ${_cut} _head)
+        string(APPEND _entries "{\"${path}\", R\"__prelude__(${_head})__prelude__\"},\n")
+        string(SUBSTRING "${text}" ${_cut} -1 text)
+    endwhile()
+    string(APPEND _entries "{\"${path}\", R\"__prelude__(${text})__prelude__\"},\n")
+    set(${out} "${_entries}" PARENT_SCOPE)
+endfunction()
 set(_prelude_inc "")
 # The language's math library (pluma/std/math.plm, LANGUAGE.md 9.20 - 9.24) comes first.
 file(READ "${PROJECT_SOURCE_DIR}/pluma/std/math.plm" _text)
-string(APPEND _prelude_inc "{\"pluma/math.plm\", R\"__prelude__(${_text})__prelude__\"},\n")
+cuervo_append_prelude(_prelude_inc "pluma/math.plm" "${_text}")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/pluma/std/math.plm")
 foreach(_file IN LISTS CUERVO_PRELUDE_FILES)
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${_file}" _text)
     get_filename_component(_name "${_file}" NAME)
-    string(APPEND _prelude_inc "{\"cuervo/${_name}\", R\"__prelude__(${_text})__prelude__\"},\n")
+    cuervo_append_prelude(_prelude_inc "cuervo/${_name}" "${_text}")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${_file}")
 endforeach()
 file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/cuervo_script_preludes.inc" CONTENT "${_prelude_inc}"
@@ -148,7 +179,7 @@ foreach(_file IN ITEMS script/prelude/collision.plm script/prelude/particles.plm
                       script/prelude/audio.plm)
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${_file}" _text)
     get_filename_component(_name "${_file}" NAME)
-    string(APPEND _optional_inc "{\"cuervo/${_name}\", R\"__prelude__(${_text})__prelude__\"},\n")
+    cuervo_append_prelude(_optional_inc "cuervo/${_name}" "${_text}")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${_file}")
 endforeach()
 file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/cuervo_optional_preludes.inc" CONTENT "${_optional_inc}"

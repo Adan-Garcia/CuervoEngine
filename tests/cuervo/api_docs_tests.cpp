@@ -115,3 +115,33 @@ TEST_CASE("api docs: parse errors are reported, and the engine prelude documents
     CHECK(has(*md, "- `static fn pressed(action: name) -> bool`\n"));
     CHECK(has(*md, "class Node2D extends Node\n"));
 }
+
+// DESIGN.md 4.16 "Clarified (Milestone 8.4)": every public prelude symbol is
+// documented, so a new field or method without a comment fails here.
+TEST_CASE("api docs coverage: finds exactly the undocumented public symbols") {
+    std::string error;
+    auto cov = cuervo::tools::check_api_coverage({{"cuervo/toy.plm", toy_prelude}}, error);
+    REQUIRE_MESSAGE(cov.has_value(), error);
+    CHECK(cov->total > cov->documented);
+    bool saw_pair = false, saw_secret = false, saw_answer = false;
+    for (const std::string& m : cov->missing) {
+        saw_pair = saw_pair || has(m, ": Pair");
+        saw_secret = saw_secret || has(m, "_secret") || has(m, "_hidden");
+        saw_answer = saw_answer || has(m, "ANSWER");
+    }
+    CHECK(saw_pair);
+    CHECK_FALSE(saw_answer); // has a comment
+    CHECK_FALSE(saw_secret); // private members are not part of the API
+
+    CHECK_FALSE(cuervo::tools::check_api_coverage({{"cuervo/bad.plm", "class {\n"}}, error).has_value());
+}
+
+TEST_CASE("api docs coverage: the engine prelude documents every public symbol") {
+    std::string error;
+    auto cov = cuervo::tools::check_api_coverage(cuervo::script::engine_preludes(), error);
+    REQUIRE_MESSAGE(cov.has_value(), error);
+    std::string list;
+    for (const std::string& m : cov->missing) list += "\n  " + m;
+    CHECK_MESSAGE(cov->missing.empty(), "undocumented prelude symbols:" << list);
+    CHECK(cov->total > 100);
+}

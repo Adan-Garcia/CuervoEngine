@@ -1,0 +1,203 @@
+// Closures, defer, default arguments, ranges, short circuit and evaluation
+// order (LANGUAGE.md 9.4, 9.8).
+fn counter() -> fn() -> int {
+    var c = 0
+    return fn() -> int {
+        var d = fn() { c += 10 }
+        d()
+        c += 1
+        return c
+    }
+}
+
+fn make_const(n: int) -> fn() -> int {
+    return fn() -> int { return n }
+}
+
+struct P { var x: int }
+
+fn read_x(s: P) -> int { return s.x }
+
+fn deferred() {
+    defer print("a")
+    defer print("b")
+    for i in 0..3 {
+        defer print("loop {i}")
+        if i == 1 { continue }
+        print("body {i}")
+    }
+    print("end")
+}
+
+fn deferred_value() -> int {
+    var x = 1
+    defer print("deferred sees {x}")
+    x = 2
+    return x
+}
+
+var n_calls = 0
+fn next_value() -> int {
+    n_calls += 1
+    return n_calls
+}
+fn with_default(a: int = next_value()) -> int { return a }
+
+fn named(a: int, b: int = 2, c: int = 3) -> int { return a * 100 + b * 10 + c }
+
+fn t() -> bool {
+    print("t")
+    return true
+}
+fn f() -> bool {
+    print("f")
+    return false
+}
+
+fn ea() -> int {
+    print("a")
+    return 1
+}
+fn eb() -> int {
+    print("b")
+    return 2
+}
+fn ec() -> int {
+    print("c")
+    return 3
+}
+fn take3(x: int, y: int, z: int) {}
+
+// A local may be redeclared, also over a parameter: the new variable shadows and
+// closures made earlier keep the old one.
+fn shadow() -> int {
+    var a = 1
+    var h = fn() -> int { return a }
+    var a = 5
+    a += 1
+    return h() * 100 + a
+}
+fn shadow_param(x: int) -> int {
+    var x = x + 1
+    return x
+}
+
+var idx_calls = 0
+fn idx() -> int {
+    idx_calls += 1
+    return 1
+}
+
+// Each iteration binds a fresh loop variable; vars are captured by reference.
+var fs: List<fn() -> int> = []
+for i in 0..3 {
+    fs.push(fn() -> int { return i })
+}
+for g in fs { print(g()) }
+var x = 0
+var inc = fn() { x += 1 }
+inc()
+inc()
+print(x)
+var c1 = counter()
+var c2 = counter()
+print(c1())
+print(c1())
+print(c2())
+
+var ks: List<fn() -> int> = []
+var j = 0
+while j < 3 {
+    var k = j * 2
+    ks.push(fn() -> int {
+        k += 1
+        return k
+    })
+    j += 1
+}
+print(ks[0]())
+print(ks[0]())
+print(ks[1]())
+print(ks[2]())
+
+print(make_const(3)() + make_const(4)())
+
+var p = P { x = 1 }
+var bump = fn() { p.x += 5 }
+bump()
+print(p.x)
+var q = p
+q.x = 100
+print(p.x)
+print(read_x(p))
+
+deferred()
+print(deferred_value())
+
+// Default arguments run at each call.
+print(with_default())
+print(with_default())
+print(with_default(10))
+print(with_default())
+print(named(1))
+print(named(1, c = 9))
+print(named(b = 5, a = 7))
+print(named(1, 2, 3))
+
+// Range loops: bounds and step are evaluated once; the end value never overflows.
+for i in 3..=1 step -1 { print(i) }
+for i in 5..0 { print(i) }
+for i in 0..0 { print(i) }
+for i in 0..=0 { print(i) }
+var m: i32 = 2147483647
+for i in m - 1..=m { print(i) }
+for i in 0..10 step 4 { print(i) }
+for i in 10..0 step -4 { print(i) }
+var u: u8 = 255
+for i in u - 1..=u { print(i) }
+
+// `for x in list` checks the length on every step.
+var grow = [1, 2, 3]
+for v in grow {
+    if v == 1 { grow.push(4) }
+    print(v)
+}
+var shrink = [1, 2, 3, 4]
+for v in shrink {
+    print(v)
+    shrink.pop()
+}
+
+var found = 0
+for a in 0..5 {
+    for b in 0..5 {
+        if b == 3 { break }
+        if b == 1 { continue }
+        found += 1
+    }
+}
+print(found)
+
+// Short circuit && and ||; & and | on bool evaluate both sides.
+print(f() && t())
+print(t() || f())
+print(t() & f())
+print(f() | t())
+
+// Operands, array elements and arguments evaluate left to right.
+print(ea() + eb() * ec())
+var items = [ea(), eb(), ec()]
+take3(ec(), eb(), ea())
+
+// A compound assignment evaluates its place once.
+var xs = [1, 2, 3]
+xs[idx()] += 10
+print(xs)
+print(idx_calls)
+
+print(shadow())
+print(shadow_param(1))
+
+var a = 5
+print(a > 3 ? "y" : "n")
+print(a > 9 ? 1 : a > 4 ? 2 : 3)

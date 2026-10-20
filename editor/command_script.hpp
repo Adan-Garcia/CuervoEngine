@@ -26,8 +26,9 @@ class ProjectEnv;
 //   save [path]                            expect <node> <field> <value>
 //   instance <parent> <scene> [x y]
 //   play [scene] | play-record [scene] | pause | resume | stop | step [n]
-//   hold <action> | release <action> | expect-tick <n> | expect-hash <hex>
+//   hold <action> | release <action> | expect-tick <n> | expect-hash <hex> | print-hash
 //   expect-state <state> | expect-panic <text> | expect-clean
+//   append-file <path> <text> | reload     (edit a project file; force a hot reload)
 //   record start|stop|save <path>          replay load|seek|verify|expect-mismatch
 //   input add-action|remove-action|rename-action|bind|unbind|add-axis|
 //         remove-axis|axis-source|remove-axis-source|undo|redo|save|expect ...

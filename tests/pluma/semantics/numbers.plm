@@ -1,0 +1,133 @@
+// Integer and float edge cases (LANGUAGE.md 9.2).
+// Division and remainder truncate toward zero; the remainder takes the dividend's sign.
+print(-7 / 2)
+print(7 / -2)
+print(-7 % 3)
+print(7 % -3)
+print(-7 % -3)
+var mn = -2147483647 - 1
+print(mn % -1)
+var m64: i64 = -9223372036854775807 - 1
+print(m64 % -1)
+print(m64 + 1)
+
+// Shifts: arithmetic on signed types, logical on unsigned; counts 0 ..< width.
+var one: i64 = 1
+print(one << 62)
+print(one << 63)
+print((-1 as i64) >> 63)
+print(-16 >> 2)
+print(1 << 31)
+var u32max: u32 = 4294967295
+print(u32max >> 31)
+print(u32max << 31)
+var b: u8 = 1
+print(b << 7)
+print(~b)
+print(~0)
+print(5 ^ 3)
+
+// Integer to integer conversions wrap (two's complement).
+print(-1 as u8)
+print(256 as u8)
+print(-129 as i8)
+print(-1 as u32)
+print(-1 as u64)
+print(-1 as i64)
+var big: i64 = 4294967296 + 5
+print(big as i32)
+print(big as u8)
+print(255u8 as i8)
+
+// Float to integer truncates toward zero and saturates; NaN gives 0.
+var nan = 0.0 / 0.0
+var inf = 1.0 / 0.0
+print(3.99 as int)
+print(-3.99 as int)
+print(-0.9 as int)
+print(1e30 as int)
+print(-1e30 as int)
+print(nan as int)
+print(nan as u8)
+print(300.7 as u8)
+print(-5.5 as u8)
+print(3e9 as i32)
+print(-3e9 as i32)
+print(inf as int)
+print(-inf as int)
+print(inf as u64)
+print(1e19 as i64)
+print(-1e30 as i64)
+print(2.5e9 as u32)
+
+// Integer to float rounds to nearest.
+var a: i64 = 9007199254740993
+print(a as f64)
+print(a as float)
+var u: u64 = 18446744073709551615
+print(u as f64)
+print(u as float)
+print(u / 2)
+print(u % 10)
+print(u > 5)
+print(16777217 as float)
+print(true as int)
+print(false as int)
+
+// Bool operators without short circuit.
+print(true & false)
+print(true | false)
+print(true ^ true)
+
+// IEEE 754 behaviour.
+print(1.0 / 0.0)
+print(-1.0 / 0.0)
+print(nan)
+print(-nan)
+print(nan == nan)
+print(nan != nan)
+print(nan < 1.0)
+print(nan >= 1.0)
+print(nan <= nan)
+print(5.5 % 2.0)
+print(-5.5 % 2.0)
+print(5.0 % 0.0)
+print(0.0 == -0.0)
+print(-0.0)
+print(0.0 * -1.0)
+print(1.0 / (0.0 * -1.0))
+print("{nan} {inf} {-inf}")
+
+// Float formatting is the shortest round-trip form, with ".0" for whole values.
+print(1.0)
+print(0.1 + 0.2)
+print(0.1f64 + 0.2f64)
+print(100.0 / 3.0)
+print(100.0f64 / 3.0f64)
+print(1e21)
+print(1e-7)
+print(123456789.0)
+print(0.5f32)
+print(0.1f32)
+print(16777217.0f32)
+print(1.0e15)
+print(3.4028235e38)
+print(1e30 * 1e30)
+print(2.5.to_fixed(0))
+print(3.5.to_fixed(0))
+print(0.125.to_fixed(2))
+print((-0.0).to_fixed(1))
+
+// Literal typing.
+var f: float = 3
+print(f / 2)
+var g: f64 = 1 + 2.5
+print(g)
+print(1 + 2.0)
+print(7 / 2.0)
+print(7 / 2)
+print(0xff)
+print(0b1010)
+print(1_000_000)
+print(255u8)
+print(45deg)

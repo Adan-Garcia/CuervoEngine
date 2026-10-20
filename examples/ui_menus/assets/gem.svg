@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A cut gem, the inventory's item picture. Original artwork made for this
+     repository; same license as the engine. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <polygon points="64,8 112,40 64,120 16,40" fill="#9fe8ff" stroke="#e8f8ff" stroke-width="4" stroke-linejoin="round"/>
+  <polygon points="64,8 88,40 64,120 40,40" fill="#5cc2e8"/>
+  <polygon points="16,40 112,40 88,40 40,40" fill="#d6f6ff" stroke="#e8f8ff" stroke-width="3"/>
+  <polygon points="40,40 88,40 64,120" fill="#3a8fc4" opacity="0.8"/>
+</svg>

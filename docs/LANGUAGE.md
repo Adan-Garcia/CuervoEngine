@@ -1,10 +1,10 @@
 # Pluma Grammar Specification
 
-> Status: v0.2. Companion to [DESIGN.md](DESIGN.md) §5, which covers
+> Status: Beta (v0.1). Companion to [DESIGN.md](DESIGN.md) §5, which covers
 > semantics (memory, types, execution). This document covers **syntax**.
 > Pluma is the scripting language of Cuervo Engine; script files use the extension `.plm`.
 >
-> Notes marked **Decided:** record design decisions and syntax rules.
+> Notes marked **Decision:** record design decisions and syntax rules.
 > Notes marked **Clarified:** resolve ambiguities found while implementing the parser
 > (`pluma/parser.cpp`).
 > §9 records the semantics clarified while implementing the type checker and VM
@@ -90,13 +90,13 @@ Escapes in strings: `\n \t \r \\ \" \0 \u{1F600}`. Interpolation takes any expre
 
 Colors are not literals: `Color.hex("ff4060")`.
 
-**Decided:** angles are radians everywhere. The `deg` suffix works on integer and float
+**Decision:** angles are radians everywhere. The `deg` suffix works on integer and float
 literals (`45deg`, `12.5deg`) and produces a `float` holding the value in radians,
 converted at compile time (`45deg` is `0.7853982`). It does not combine with other
 suffixes or with hex/binary literals. Use it as `-90deg` for negative angles (unary
 minus applies as usual).
 
-**Decided:** integer overflow (arithmetic on any integer type, including literal
+**Decision:** integer overflow (arithmetic on any integer type, including literal
 suffixes like `u8`) panics in development builds and wraps (two's complement) in
 release builds. The type checker and VM implement this; the parser only rejects
 literals that don't fit in 64 bits.
@@ -472,7 +472,7 @@ p.x; p.yx; q.xy                // swizzles, N <= 4
 s[4]                           // index, any N
 p * 2.0;  p + q.xy;  p.dot(q.xy);  p.length();  p.normalized()
 ```
-**Decided:** world coordinates are Y-down with the origin at the top left
+**Decision:** world coordinates are Y-down with the origin at the top left
 (DESIGN.md §7.1): `vec2(0.0, -1.0)` points up the screen, and a positive rotation
 turns clockwise. Examples in this document follow that convention.
 
@@ -484,7 +484,7 @@ if node is Boss b { b.rage() } // test + bind
 ```
 
 ## 5. `foreach` batch loops
-**Decided:** there is no dedicated bullet system. The engine has a general particle
+**Decision:** there is no dedicated bullet system. The engine has a general particle
 system (DESIGN.md §4.6) whose emitters own SoA particle pools; bullets and other
 projectiles are built on it. `foreach` is how scripts run custom per-particle behavior.
 ```
@@ -645,7 +645,7 @@ class Player extends Node2D: Damageable {
 }
 ```
 
-## 9. Semantics clarified by the checker and VM (Phase 1B)
+## 9. Semantics clarified by the checker and VM
 
 These follow DESIGN.md §5 and the decisions above; each can be revisited.
 
@@ -779,7 +779,7 @@ These follow DESIGN.md §5 and the decisions above; each can be revisited.
   is null`), an index out of bounds, `pop()` on an empty list, a failed `assert`,
   `panic()`, a failed downcast, and recursion deeper than 4096 calls.
 
-### 9.10 Coroutines and signals (Phase 3)
+### 9.10 Coroutines and signals
 DESIGN.md 5.9 has the model; these are the language rules.
 - A function or method whose body uses `await` or `yield` (outside nested lambdas) is a
   **coroutine**. It can only run as `start(f(args))` (any function; returns a `Task`) or
@@ -802,7 +802,7 @@ DESIGN.md 5.9 has the model; these are the language rules.
   `obj.name.connect(f: fn(T, ...))`; `disconnect(f)` removes the first handler that is the
   same function object.
 
-### 9.11 Vectors (Phase 3)
+### 9.11 Vectors
 - `vec1` ... `vec64` are value types of `float` components (integer vectors `ivec2`..`ivec4` are prelude structs, 9.20). Construction: `vec3(x, y, z)`, `vec3(v2, z)` (floats and vectors whose sizes
   add up), `vec4(0.0)` (splat); int literals adapt to `float`. A `vecN` variable without an
   initializer is zero.
@@ -828,7 +828,7 @@ DESIGN.md 5.9 has the model; these are the language rules.
   (DESIGN.md 4.1).
 - Vectors cannot be constants yet (`const` needs a constant expression).
 
-### 9.12 Native bindings and projects (Phase 3)
+### 9.12 Native bindings and projects
 - `@native` on a function or method declares one implemented by the host
   (`pluma/bindings.hpp`); its body must be empty and a host function must be bound under its
   qualified name (`Canvas.circle`), or it is an error. Everything else (types, defaults,
@@ -839,7 +839,7 @@ DESIGN.md 5.9 has the model; these are the language rules.
 - A project's files are checked as one unit (names are global, so files may refer to each
   other in any order); diagnostics and panics name the original file and line.
 
-### 9.13 `@export` (Phase 4)
+### 9.13 `@export`
 DESIGN.md 4.12 has the scene-file side; these are the language rules.
 - `@export` marks an **instance field** of a class or struct as saved in scene files (and,
   later, shown in the inspector). On a static variable, constant, signal, function,
@@ -857,7 +857,7 @@ DESIGN.md 4.12 has the scene-file side; these are the language rules.
   accepted without effect.
 - `step` is a keyword, so it can't name a field (`Slider` uses `increment`).
 
-### 9.14 Memory (Phase 7A)
+### 9.14 Memory
 DESIGN.md 5.10 has the runtime model; these are the language rules.
 - `weak var` is allowed only on **instance fields of a class** whose type is a class or
   `List<T>` (not locals, globals, statics, or struct fields). A weak field does not keep its
@@ -883,7 +883,7 @@ DESIGN.md 5.10 has the runtime model; these are the language rules.
   (a global, a captured variable, a coroutine `start` argument/receiver, a signal handler,
   or a field/list element of a non-`frame` object) or a `new(scene)` value into a global.
 
-### 9.15 Formatter & Language Server (Phase 8)
+### 9.15 Formatter & Language Server
 - **Formatter (`pluma/format.hpp`, `plm fmt`, `cuervo-tools fmt`):** AST-based pretty-printer
   that enforces §6 (4-space indentation, K&R braces on the same line, no trailing semicolons,
   preserved intentional same-line `;` statements, trailing commas on multiline lists/maps/calls/enums/struct
@@ -904,7 +904,7 @@ DESIGN.md 5.10 has the runtime model; these are the language rules.
   scope locals/fields/globals/keywords), signature help, document and workspace symbols,
   formatting, and quickfix code actions from diagnostic `FixIt`s.
 
-### 9.16 Collections (Milestone 9.2a)
+### 9.16 Collections
 DESIGN.md 4.17 (9.2a) lists them; these are the rules. Iteration order is always defined
 (insertion order for maps and sets), so scripts stay deterministic (DESIGN.md 4.1).
 - **`Map<K, V>`** (reference type): `Map<str, int>()`, or a literal `{"a": 1, "b": 2}` (types
@@ -953,7 +953,7 @@ DESIGN.md 4.17 (9.2a) lists them; these are the rules. Iteration order is always
 - `List<T>()`-style constructors infer type arguments from the expected type
   (`var m: Map<str, int> = Map()`), else they must be written.
 
-### 9.17 List, str and number methods, conversions (Milestone 9.2a)
+### 9.17 List, str and number methods, conversions
 - **List** (also see 9.9): `sort()` (by `<`) or `sort(less)` with a `fn(T, T) -> bool`;
   `sort_by(key)` (key computed once per element; key needs `<`); `reverse`; `index_of(x)` (-1 if
   absent); `slice(start, end = len)` (a copy, bounds clamped); `extend(other)`; `swap(i, j)`;
@@ -989,7 +989,7 @@ DESIGN.md 4.17 (9.2a) lists them; these are the rules. Iteration order is always
   `str` methods) return null when the whole string is not a number: an optional `+`/`-` then
   digits of the radix (2..36, case-insensitive), no spaces or `0x` prefixes; values outside
   `int` are null. `parse_float` takes decimal and exponent forms, `inf` and `nan`, correctly
-  rounded to `float`. **Decided by this milestone:** they return an optional, not a Result
+  rounded to `float`. **Decision:** they return an optional, not a Result
   (the only failure is "not a number"); `?`, `??`, `if x? v` and `unwrap_or` all apply.
 - **Number formatting:** integers have `to_hex()` (lower case) and `to_radix(base)` (2..36; a
   negative number gets a leading `-`); floats have `to_fixed(digits)` (0..32), exact and
@@ -997,7 +997,7 @@ DESIGN.md 4.17 (9.2a) lists them; these are the rules. Iteration order is always
   exact binary value) on every platform. Default `"{x}"` formatting is unchanged (shortest
   round-trip).
 
-### 9.18 Result, `?` and optionals (Milestone 9.2a)
+### 9.18 Result, `?` and optionals
 DESIGN.md 5.8: expected failures return `Result<T, E>`; bugs panic.
 - `Result<T, E>` is a **value type** (immutable; never null unless written `Result<T, E>?`).
   `Ok(v)` and `Err(e)` build one; their type comes from the expected type (a return value, an
@@ -1020,7 +1020,7 @@ DESIGN.md 5.8: expected failures return `Result<T, E>`; bugs panic.
   always nullable (DESIGN.md 5.7) and keep using `??`, `?.` and `if x? v`; they don't get these
   methods (they could clash with the class's own).
 
-### 9.19 Property accessors and method values (Milestone 9.2a)
+### 9.19 Property accessors and method values
 - **Accessors** (syntax in 2.5) work on instance fields of classes and structs. A read of the
   field calls `get` when there is one; an assignment calls `set(v)`; a compound assignment
   (`x.hp -= 3`) reads through the getter and writes through the setter, evaluating the object
@@ -1040,7 +1040,7 @@ DESIGN.md 5.8: expected failures return `Result<T, E>`; bugs panic.
   when the class still has the method (its thunk's stable key is `<bound Class.method on
   Type>`).
 
-### 9.20 Math library (Milestone 9.2b)
+### 9.20 Math library
 DESIGN.md 4.17 (9.2b) lists the scope. Everything here is deterministic (DESIGN.md 4.1): the
 exact operations (`+ - * / sqrt floor ceil round`) and integer arithmetic are identical
 everywhere, and the transcendentals (`sin`, `cos`, `atan2`, `exp`, `log`, `pow`) go through
@@ -1087,7 +1087,7 @@ Its API reference is in `docs/API.md` (generated from the doc comments).
   componentwise (`*` multiplies two vectors; `scaled(k)` by an `int`), `dot`, `length_squared`,
   `abs`, `min`, `max`, `clamp`, `==`. No swizzles, no indexing, and no `ivec5`+ (**cut**).
 
-### 9.21 Rect2 and Transform2D (Milestone 9.2b)
+### 9.21 Rect2 and Transform2D
 - **`Rect2`** (struct: `pos`, `size`; y down): `Rect2.of(x, y, w, h)`, `Rect2.from_corners(a, b)`,
   `end()`, `center()`, `area()`, `has_area()`, `contains(p)` (half-open: `pos` is in, `end()`
   is out), `encloses(r)`, `intersects(r)` (touching edges don't count), `intersection(r)` (a
@@ -1100,7 +1100,7 @@ Its API reference is in `docs/API.md` (generated from the doc comments).
   `t1 * t2` (applies `t2` first), `origin()`, `rotation()`, `==`. `rotate` uses `cos`/`sin`, so in
   the engine it is bit-for-bit `Affine2::rotate` (tests/cuervo/math_tests.cpp).
 
-### 9.22 Geometry (Milestone 9.2b)
+### 9.22 Geometry
 Functions over `vec2` and `List<vec2>` polygons (the closing edge is implied; "clockwise" is on
 screen, y down): `cross3(a, b, c)`, `closest_point_on_segment(p, a, b)`, `point_in_polygon(p,
 poly)` (even-odd; points on an edge may go either way), `segment_intersection(p1, p2, p3, p4) ->
@@ -1114,7 +1114,7 @@ winding: triangle index triples into `poly`, each clockwise; collinear vertices 
 libtess2, which lives on the engine side; it is **not** exposed to scripts yet (the ear clipper
 needs no engine code, so `pluma/` stays free of `cuervo/`).
 
-### 9.23 Hashing and noise (Milestone 9.2b)
+### 9.23 Hashing and noise
 - `hash(x, seed = 0)`, `hash2(x, y, seed)`, `hash3(x, y, z, seed)`, `hash_str(s, seed)` give a
   stable 32-bit hash as an `int` (it can be negative; murmur3's finalizer, FNV-1a for strings);
   `hash_float(x, seed)` is the same in `[0, 1)`.
@@ -1124,7 +1124,7 @@ needs no engine code, so `pluma/` stays free of `cuervo/`).
   seed)`, and `fractal_perlin2(x, y, octaves = 4, lacunarity = 2.0, gain = 0.5, seed)`
   (normalized). **Cut:** 3D simplex and other noise variants.
 
-### 9.24 Random streams (Milestone 9.2b)
+### 9.24 Random streams
 - **`Rng`** (class) is the engine's PCG32 (`cuervo/core/rng.hpp`) as a seeded local stream beside
   the global `Random`, never touching it: `Rng.seeded(seed)`, `Rng.with_sequence(state,
   sequence)`, and `Rng.derive(parent_seed, system, id, index)` which is exactly `derive_stream`
@@ -1141,3 +1141,55 @@ needs no engine code, so `pluma/` stays free of `cuervo/`).
   advance the simulation's one seeded PCG32. In the engine `List.shuffle` also draws from it
   (`VmOptions::random_below`); without a host it uses the VM's own PCG32 (9.17). Wall-clock
   time and unseeded randomness do not exist in the language.
+
+### 9.25 Clarified (Milestone 8.7)
+The rules below were checked against the VM and the AOT-to-C backend, which agree on all of
+them (`tests/pluma/semantics/`, `tests/pluma/intmodel_tests.cpp`).
+- **Source text (1.1):** a UTF-8 byte order mark at the start of a file is ignored, and `\r\n`
+  line endings are the same as `\n` (also inside multiline strings). The compiler does not
+  validate UTF-8: a string literal holding invalid bytes keeps them, and `str` methods treat
+  each invalid byte as one character. A non-ASCII character outside a string or comment is one
+  error, not one per byte.
+- **Integers (9.2):** `/` and `%` truncate toward zero and `%` takes the dividend's sign.
+  `MIN / -1` overflows (panic in development, wraps to `MIN` in release); `MIN % -1` is 0.
+  `-MIN` and `abs(MIN)` overflow the same way. `<<` discards the bits shifted out and does not
+  panic on them (`1 << 31` is `INT_MIN` for `int`); only the count is checked. In release
+  builds the count is masked with `width - 1` (for a negative count too).
+- **Floats (9.2):** a float to integer conversion truncates, saturates and maps NaN to 0 for
+  every integer type, including `u64`. Printing never shows a NaN's sign bit: every NaN prints
+  as `nan` (so `-(0.0 / 0.0)` and `0.0 / 0.0` print alike on every platform), infinities as
+  `inf` / `-inf`, and `-0.0` as `-0.0`. A float literal that would round to infinity
+  (`1e39` for `float`) is an error; write `INF` or `1.0 / 0.0`. `f32` and `f64` arithmetic
+  round after every operation in both back ends (no fused multiply-add, no extended precision).
+- **`min` / `max` / `clamp` (9.9):** `min(a, b)` is `b` only when `b < a`, and `max(a, b)` is
+  `b` only when `a < b`, so with a NaN or with `-0.0` against `0.0` the first argument wins
+  (`min(1.0, nan)` is `1.0`, `max(nan, 1.0)` is `nan`). `clamp(x, lo, hi)` is
+  `min(max(x, lo), hi)`: with `lo > hi` the result is `hi`. (The `List` methods use the order
+  of 9.17 instead.)
+- **Globals (9.3, 9.8):** top-level code and global initializers run in declaration order, so
+  reading a global above its `var` in top-level code is an error (`'b' is used before its
+  declaration`). Functions and lambdas may name any global. A function that is *called*
+  during initialization and reads a global declared later sees no value yet; avoid that
+  order.
+- **`==` and null (9.2):** on a class that implements `Eq`, `a == b` calls `eq` only when both
+  references are non-null; otherwise it compares the references (`null == null` is true,
+  `x == null` never calls `eq`). `eq` therefore never receives `null`. Lists, `contains` and
+  generic code with an `Eq` bound behave the same way.
+- **Shadowing (9.3, 9.4):** a `var` may redeclare a local of the same scope or a parameter;
+  the new variable shadows the old one from that line on, and closures created earlier keep
+  the old one (`var x = x + 1` reads the old `x`). Globals cannot be redeclared.
+- **Privacy (9.3):** `_private` applies to fields, methods and statics, whether named
+  explicitly (`a._p`), implicitly (`_p`, `_helper()`) or through `super._helper()`; a subclass
+  cannot reach them.
+- **Value types (9.5):** a struct cannot contain itself by value, directly or through other
+  structs and fixed arrays (`struct A { var b: B }` with `struct B { var a: A }` is an error:
+  it would have infinite size). An optional (`A?`), a class or a `List` breaks the cycle.
+- **Enums (9.7):** an implicit discriminant must fit the backing type (`enum L: u8 { A = 255,
+  B }` is an error at `B`).
+- **Conversions (9.17):** `parse_float` rounds like IEEE 754: `"1e39"` is `inf`, `"1e-50"` is
+  `0.0` (the sign is kept), never null. Hex floats, spaces and `_` give null; `inf`,
+  `infinity` and `nan` (any case, optional sign) are accepted.
+- **Panics (9.9):** the stack trace printed for a panic keeps the 16 innermost and 8 outermost
+  frames of a long one and says how many it left out (`... 4072 more frames ...`);
+  `PanicInfo::trace` and `frames` keep all of them. `break` and `continue` inside `defer` get
+  their own error.

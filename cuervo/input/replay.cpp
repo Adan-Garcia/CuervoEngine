@@ -13,8 +13,10 @@ namespace cuervo {
 namespace {
 
 constexpr char magic[4] = {'C', 'R', 'P', 'L'};
-// Bytes per stored frame: held (8), axes (8 x 2), pointer (2 x 2).
-constexpr std::size_t frame_bytes = 8 + InputFrame::max_axes * 2 + 2 * 2;
+// Bytes per stored frame: held (8), axes (8 x 2), pointer (2 x 2), and from
+// version 2 the typed text code point (4).
+constexpr std::size_t frame_bytes_v1 = 8 + InputFrame::max_axes * 2 + 2 * 2;
+constexpr std::size_t frame_bytes_v2 = frame_bytes_v1 + 4;
 
 } // namespace
 
@@ -38,6 +40,7 @@ std::vector<std::byte> write_replay(const Replay& replay) {
         w.u64(f.held);
         for (std::int16_t a : f.axes) w.raw(&a, 2);
         for (std::int16_t p : f.pointer) w.raw(&p, 2);
+        w.u32(f.text);
     }
     w.u32(static_cast<std::uint32_t>(replay.hashes.size()));
     for (std::uint64_t h : replay.hashes) w.u64(h);
@@ -69,12 +72,13 @@ std::optional<Replay> read_replay(std::span<const std::byte> data, std::string& 
     out.start_scene = r.str();
     out.scene.resize(r.count(1));
     r.raw(out.scene.data(), out.scene.size());
-    const std::uint32_t frames = r.count(frame_bytes);
+    const std::uint32_t frames = r.count(version >= 2 ? frame_bytes_v2 : frame_bytes_v1);
     out.frames.resize(frames);
     for (InputFrame& f : out.frames) {
         f.held = r.u64();
         for (std::int16_t& a : f.axes) r.raw(&a, 2);
         for (std::int16_t& p : f.pointer) r.raw(&p, 2);
+        if (version >= 2) f.text = r.u32();
     }
     const std::uint32_t hashes = r.count(8);
     out.hashes.resize(hashes);

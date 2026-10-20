@@ -163,7 +163,10 @@ bool SdfBatcher::ensure_capacity(std::size_t count) {
     if (instance_buffer_ && count <= capacity_) {
         return true;
     }
-    const std::size_t capacity = std::max({count, capacity_ * 2, std::size_t{256}});
+    // Grows by a quarter, not double: the buffer exists in several versions per
+    // backend, so doubling past 2^21 instances (84 MB) meant 168 MB x 3 of
+    // mostly unused memory, which also pushed Vulkan out of the 256 MB BAR.
+    const std::size_t capacity = std::max({count, capacity_ + capacity_ / 4, std::size_t{256}});
     // Deferred destroy: draws already recorded keep the old buffer alive.
     device_->destroy_buffer(instance_buffer_);
     instance_buffer_ = device_->create_buffer(

@@ -1,0 +1,32 @@
+# Milestone 9.3's "done when" (DESIGN.md 4.17, 6): a settings menu and an
+# inventory built from the UI widgets, driven by keyboard, gamepad and pointer
+# and replayable (tests/ui_menus.cmake).
+#   cuervo --game examples/ui_menus
+name = "UI Menus"
+main = "Main"
+virtual_size = [1280, 720]
+tick_rate = 60
+seed = 20261019
+clear_color = "070a14"
+render_tier = "compatible"
+
+[input.actions]
+# Arrows, Enter and Escape type no characters, so they work while a LineEdit
+# has the focus; the pad mirrors them.
+ui_up = ["Key.Up", "Pad.DpadUp", "Pad.LeftStickUp"]
+ui_down = ["Key.Down", "Pad.DpadDown", "Pad.LeftStickDown"]
+ui_left = ["Key.Left", "Pad.DpadLeft", "Pad.LeftStickLeft"]
+ui_right = ["Key.Right", "Pad.DpadRight", "Pad.LeftStickRight"]
+ui_accept = ["Key.Enter", "Pad.South"]
+ui_cancel = ["Key.Escape", "Pad.East"]
+ui_click = ["Mouse.Left"]
+# Text editing.
+ui_backspace = ["Key.Backspace"]
+ui_delete = ["Key.Delete"]
+ui_home = ["Key.Home"]
+ui_end = ["Key.End"]
+# Scroll areas: the wheel and the right stick. Tabs: shoulders and Page Up/Down.
+ui_scroll_up = ["Wheel.Up", "Pad.RightStickUp"]
+ui_scroll_down = ["Wheel.Down", "Pad.RightStickDown"]
+ui_tab_prev = ["Pad.LeftShoulder", "Key.PageUp"]
+ui_tab_next = ["Pad.RightShoulder", "Key.PageDown"]

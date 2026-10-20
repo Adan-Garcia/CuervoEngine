@@ -1,0 +1,3 @@
+go
+test.plm:4:7: panic: context: "bad"
+    at <top level> (test.plm:4:7)

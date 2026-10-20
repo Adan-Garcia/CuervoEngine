@@ -15,12 +15,15 @@ struct Shot {
     // Pixels per second along the heading. Each `*_jitter` adds a uniform
     // random amount in [-jitter, jitter] per particle.
     var speed = 120.0
+    // Random speed spread per particle, in pixels per second.
     var speed_jitter = 0.0
     var life = 6.0           // seconds; <= 0: until it leaves the screen
+    // Random lifetime spread per particle, in seconds.
     var life_jitter = 0.0
     // Radius in pixels (also the collision radius when the emitter's
     // `radius` is 0).
     var size = 4.0
+    // Particle color; the emitter's fade can tint it further.
     var color = Color {}
     // Rotation speed in radians per second.
     var spin = 0.0

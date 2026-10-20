@@ -55,6 +55,11 @@ public:
     // The embedded Cuervo app icon (create() does this unless desc.brand_icon is off).
     bool set_brand_icon();
 
+    // Asks the OS for text events (SDL text input: IME, layouts, dead keys).
+    // The game turns it on while a text field has the focus (UI.wants_text),
+    // which also raises the on-screen keyboard on touch devices.
+    void set_text_input(bool on);
+
     ivec2 pixel_size() const;
     GraphicsApi graphics() const { return graphics_; }
     // The GL context requested is OpenGL ES 3.0 (WindowDesc::gl_es or web).

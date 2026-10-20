@@ -10,6 +10,7 @@ Reference material:
 
 | Document | What's in it |
 |---|---|
+| [STATUS.md](STATUS.md) | What is stable, experimental, planned or unsupported, by platform and system |
 | [API.md](API.md) | Every engine class and function scripts can use (generated from the engine prelude) |
 | [LANGUAGE.md](LANGUAGE.md) | The Pluma language: syntax, types, built-ins |
 | [SCENES.md](SCENES.md) | Scene files and their text form |
@@ -26,11 +27,12 @@ Reference material:
 Cuervo Engine is **source-available**, not open source. Before you build it, read the
 [Cuervo Engine Fair-Code License Agreement (EULA)](../LICENSE.md). **By downloading,
 building, running or otherwise using the Engine you agree to its terms**; if you don't
-agree, don't build or use it. In short: it is free for learning, modding, non-commercial
-forks and games under $30,000 in trailing 12-month revenue; from $30,000 a game pays
-US$1,000 per seat per year, and from $200,000 the greater of a 1.5% royalty or the seat
-fees (the EULA's Schedule A has the exact terms). Your
-own game's code and assets stay yours.
+agree, don't build or use it. In short: during Beta (before Version 1.0) the engine is free
+for learning, modding, non-commercial forks and commercial games, with no royalties, seat fees
+or reports. Commercial licensing terms will be introduced with Version 1.0; a game developed
+or released with a Beta version is grandfathered at $0 and never owes retroactive fees (the
+EULA's Section 3 and Schedule A have the exact terms). Your own game's code and assets stay
+yours.
 
 The engine also includes third-party components under their own licenses (zlib, MIT,
 Apache-2.0, ...), listed in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) with
@@ -50,6 +52,7 @@ players.
 Cuervo builds with CMake presets. You need:
 
 - CMake 3.24+ and Ninja, and GCC 13+ or Clang 17+
+- `glslangValidator` (the engine's shaders are compiled with it)
 - SDL3 (if it isn't installed, CMake downloads and builds it)
 - A Vulkan 1.3 driver for the Vulkan renderer. It is optional: without one the engine
   uses OpenGL 3.3 (or OpenGL ES 3.0 / WebGL2).
@@ -58,13 +61,13 @@ Cuervo builds with CMake presets. You need:
 On Arch Linux (the engine's development machine):
 
 ```sh
-sudo pacman -S cmake ninja sdl3 vulkan-validation-layers   # validation layers: debug builds
+sudo pacman -S cmake ninja glslang sdl3 vulkan-validation-layers   # validation layers: debug builds
 ```
 
-On Ubuntu 25.04+ / Debian: `sudo apt install cmake ninja-build libsdl3-dev` (and your
-GPU's Vulkan driver). Elsewhere, any Linux with the tools above works. Windows builds
-are reviewed but not tested yet ([WINDOWS.md](WINDOWS.md)); the web build is in
-[WEB.md](WEB.md).
+On Ubuntu 25.04+ / Debian: `sudo apt install cmake ninja-build glslang-tools libsdl3-dev` (and
+your GPU's Vulkan driver). Elsewhere, any Linux with the tools above works. Linux and the web are
+the supported targets ([STATUS.md](STATUS.md)); Windows is experimental and still being
+validated ([WINDOWS.md](WINDOWS.md)); the web build is in [WEB.md](WEB.md).
 
 Build and run the tests:
 
@@ -104,6 +107,20 @@ runs the GL backend headless.
 
 ## 2. A project
 
+**Make one.** The editor's welcome screen has *New project* (Empty 2D or Walker). The same
+thing from a terminal, which is what scripts and CI use:
+
+```sh
+cuervo-editor --new-project starfall --template walker --name "Starfall"   # --template empty|walker
+cuervo-editor --project starfall      # edit it; cuervo --game starfall runs it; section 9 ships it
+```
+
+It refuses a folder that already has files, so nothing is overwritten. Like every program
+here it needs the license accepted first (section 1); `CUERVO_ACCEPT_EULA=<version>`
+does for one run. `tests/workflow_smoke.cmake` runs this whole path (new project, edit and save a
+scene, play, add a script, hot reload, export, launch the shipped game from another
+directory) on every build.
+
 A game is a directory:
 
 ```
@@ -126,7 +143,10 @@ starfall/
 | `tick_rate` | Simulation ticks per second (default 60) |
 | `seed` | The seed of the simulation's random numbers |
 | `clear_color` | Background color, hex |
-| `render_tier` | `"compatible"` (Vulkan, GL, web) or `"full"` (desktop Vulkan only) |
+| `jobs` | Job-system threads (0 = automatic); `--jobs` and `CUERVO_JOBS` override it. Results are identical for any count |
+| `[scene]` / `transform_hierarchy` | `true` (default): child nodes use parent-relative transforms; `false`: every transform is a world transform |
+| `[features]` | Overrides which optional engine features (audio, ui, particles, collision) an export keeps ([EXPORT.md](EXPORT.md)) |
+| `render_tier` | `"compatible"` (default) or `"full"`; what each promises and refuses is in [STATUS.md](STATUS.md) "Render tiers" |
 | `[input.actions]` | Named actions and the keys/buttons that trigger them |
 | `[input.axes]` | Named 2D axes: `Keys.Arrows`, `Keys.WASD`, `Pad.LeftStick`, `Pad.RightStick`, `Pad.Dpad` |
 
@@ -226,6 +246,9 @@ tick_rate = 60
 seed = 20261018
 clear_color = "0b1026"
 render_tier = "compatible"     # runs on Vulkan, GL and the web
+
+[scene]
+transform_hierarchy = false   # script-driven world-space scene (DESIGN.md 4.17)
 
 [input.actions]
 pause = ["Key.Escape", "Key.P", "Pad.Start"]
@@ -695,6 +718,46 @@ the open scene, F7 pauses, F10 steps one tick, Shift+F5 stops and puts the scene
 it was. Saving a script while playing hot-reloads it. *Play and Record* records a replay
 you can scrub through later ([REPLAYS.md](REPLAYS.md)). Details: [editor/README.md](../editor/README.md).
 
+### UI widgets
+
+Menus are `Control` trees on a `CanvasLayer`. Besides `VBox`, `HBox`, `Margin`, `Panel`,
+`Center`, `Label`, `Button`, `Toggle` and `Slider`, the widget set also has:
+
+| Widget | Use |
+|---|---|
+| `GridContainer` | `columns`; inventory slots, forms (label, field pairs) |
+| `FlowContainer` | tags and wrapping rows of equal things |
+| `SplitContainer` | two panes with a draggable, focusable bar |
+| `AspectRatioContainer` | keeps a child at `ratio` (`#fit` or `#cover`) |
+| `ScrollContainer` | one child in a clipped view; wheel, `ui_scroll_up/down`, bar, drag, focus follows |
+| `Image` / `TextureRect` | a vector asset in a layout rect (`stretch`, `tint`) |
+| `ProgressBar` | `value` between `min_value` and `max_value` |
+| `LineEdit` | one line of text typed from the input frame (so it replays) |
+| `OptionButton` | a dropdown of `items`; `item_selected(index)` |
+| `TabBar`, `TabContainer` | tabs; children of a `TabContainer` are the pages |
+| `Popup`, `PopupMenu`, `ConfirmDialog` | floating panels that trap the focus while open |
+
+```
+var tabs = TabContainer()
+tabs.add_child(audio_page())   // a VBox named "Audio"
+var name = LineEdit()
+name.max_length = 12
+name.text_changed.connect(fn(t: str) { Player.name = t })
+var dialog = ConfirmDialog()
+dialog.message = "Apply these settings?"
+dialog.confirmed.connect(fn() { apply() })
+layer.add_child(dialog)
+dialog.popup_centered()
+```
+
+Bind the optional actions you need in `project.toml`: `ui_scroll_up = ["Wheel.Up",
+"Pad.RightStickUp"]`, `ui_backspace`, `ui_delete`, `ui_home`, `ui_end`, `ui_tab_prev`,
+`ui_tab_next`. Keep `ui_*` navigation on keys that type no characters (arrows, Enter, Escape)
+if the menu has a `LineEdit`. Give controls an explicit `min_size` where recorded replays
+click them: text-measured sizes differ between hosts with and without a font.
+`examples/ui_menus` is a settings menu and inventory built from all of them; the
+`tests/ui_menus.cmake` test drives it by keyboard, gamepad and pointer.
+
 ### Built-in nodes
 
 Besides `Node`, `Node2D`, `SceneInstance`, `CanvasLayer` and the UI controls, the
@@ -731,6 +794,71 @@ world transform (the old behavior; the example games written that way set it).
 their signals like any other: `(find("beat") as Timer).timeout.connect(fn() { ... })`. If you subclass one and
 override `ready()` or `on_hit()`, call `super.ready()` / `super.on_hit(tag, count)`.
 The full reference is [API.md](API.md).
+
+### Animation
+
+Everything animated is measured in **ticks** (60 per second by default), so animations
+replay bit for bit. `Anim.ticks(0.5)` turns seconds into ticks. `examples/anim_character`
+is a character whose body is a node hierarchy (torso, head, arms, legs) animated by an
+`AnimationPlayer` and blended by an `AnimationTree`.
+
+**`AnimationPlayer`** plays `Animation`s: tracks over any `@export` field of any node
+under the player's parent (`root_path` changes the root). A property track is
+`"NodePath:field"`, e.g. `"Torso/Head:rotation"`; a key has a tick, a value and how it
+reaches the next key (`Step`, `Linear`, `EaseIn`/`EaseOut`/`EaseInOut` with an `Ease`
+family, or `Curve` with a power exponent), so each key can ease differently. `float`,
+`int`, `bool`, `vec2`/`vec3`/`vec4`, `Color`, enum and `name` fields work; the field's own
+type decides how the value is written.
+
+```
+var wave = Animation { name = "wave", length = 60, mode = AnimLoop.Loop }
+wave.key_float("Arm:rotation", 0, -0.5, AnimInterp.EaseInOut, Ease.Sine)
+wave.key_float("Arm:rotation", 30, 0.5, AnimInterp.EaseInOut, Ease.Sine)
+wave.key_float("Arm:rotation", 60, -0.5)
+wave.key_color("Arm/Hand:fill", 0, Color.hex("ffffff"))
+wave.key_call("Arm:flash", 30)           // calls Arm.flash() when tick 30 is crossed
+wave.key_event(30, "wave_peak")          // emits player.event("wave_peak")
+player.animations.push(wave)
+player.play("wave")                      // or set `autoplay = "wave"` before it enters the tree
+```
+
+`mode` is `None` (stops on the last tick and emits `animation_finished(name)`), `Loop` or
+`PingPong`. `speed` scales ticks (negative plays backwards), `play(name, speed)` scales
+one play, `queue(name)` plays after the current animation finishes, and there are
+`seek(t)` and `stop()`. The player advances before its siblings' `update()`, so scripts see
+the animated values.
+
+**`Tween`**: `create_tween()` on a node returns a chainable tween that runs with that node
+and stops when it leaves the tree. Steps run in sequence, `parallel()` runs the next one
+with the previous (or `set_parallel(true)` runs all together), `set_loops(n)` repeats,
+`kill()` cancels, and a coroutine can `await tween.finished`.
+
+```
+create_tween()
+    .tween_vec2(coin, "position", vec2(300.0, 200.0), 30).with_ease(AnimInterp.EaseOut, Ease.Cubic)
+    .tween_float(coin, "rotation", TAU, 30).parallel()
+    .interval(10)
+    .tween_callback(fn() { coin.queue_free() })
+```
+
+**`AnimationTree`** is a state machine over a player's animations. Each state plays one
+animation; transitions carry conditions on parameters and a cross-fade length in ticks, and
+the animated properties of the outgoing and incoming animations are blended while it runs
+(numbers, vectors and colors blend; bools, enums and names switch half way).
+
+```
+tree.set_bool("moving", true)    // parameters: set_param / set_bool
+tree.trigger("jump")             // a one-evaluation pulse that a Trigger condition consumes
+tree.goto("idle", 6)             // jump to a state, fading over 6 ticks (0 = cut)
+tree.travel("run")               // walk the shortest chain of transitions
+```
+
+Animations, the player and the tree are saved in the scene file as exported fields, so
+they can be built in code and saved, or written in the scene's text view
+([SCENES.md](SCENES.md)). A track that one state animates and another doesn't keeps the
+other side's value while blending, so give the animations of one character the same set
+of tracks. The rules, and how other track kinds (cutout, skeletal, morph) plug in, are in
+DESIGN.md 4.17.
 
 ## 8. Debugging and profiling
 
@@ -777,6 +905,8 @@ code, so inspecting can't change the game. Debugging works on the bytecode VM (`
 
 **Profiling.** `cuervo --game <dir> --profile` prints a per-function script profile
 and engine phase timings at exit; the editor has a Profiler panel.
+`tools/bench.py` records repeatable frame, simulation, memory and export-size baselines and
+finds how many particles hold 60 fps ([PERFORMANCE.md](PERFORMANCE.md)).
 
 **Editor support.** The same extension gives `.plm` files highlighting and the language
 server (`cuervo-tools lsp`): errors as you type, completion including the engine API,
@@ -790,14 +920,15 @@ cuervo-tools export starfall --platform linux -o dist/ --strip
 ./dist/starfall
 ```
 
-`dist/` holds the player (named after the project) and `game.pak`, one archive with the
+`dist/` holds the player (named after the project, lowercased, spaces as `-`: `My Game` ships as
+`my-game`; `--name` picks another) and `game.pak`, one archive with the
 scripts, scenes and sounds; nothing else is needed. On Linux the player is built for the
 game: subsystems it doesn't use (audio, UI, particles, Vulkan, ...) are left out, which
 makes it 20-40% smaller ([EXPORT.md](EXPORT.md) "Stripped players"; `--engine full`
 ships the complete player instead). Export from a **release** build
 (`cmake --preset release && cmake --build --preset release`, then use
 `build/release/tools/cuervo_tools/cuervo-tools`) so you ship an optimized player. The
-export checks the project's render tier first (`cuervo-tools tier check starfall`) and
+export checks the project's render tier and target first (`cuervo-tools tier check starfall --platform web`) and
 leaves out engine features the game doesn't use.
 
 - `--aot` compiles the scripts to native code (faster; needs a C compiler).
@@ -809,6 +940,9 @@ leaves out engine features the game doesn't use.
 - [API.md](API.md): everything the engine offers scripts, generated from the source.
 - The examples: `examples/shmup` (waves, bosses, menus from scene files, options, music),
   `examples/tictak` (a board game with mouse input), `examples/editor_level` (a level made
-  only in the editor, no main script), `examples/bench` (a stress test).
+  only in the editor, no main script), `examples/node_level` (every built-in node, no
+  scripts), `examples/ui_menus` (a settings and inventory menu from the UI widgets),
+  `examples/bench` (a stress test) and `examples/tutorial` (the game from this guide).
+- [STATUS.md](STATUS.md): what is stable, experimental, planned or unsupported.
 - [LANGUAGE.md](LANGUAGE.md) for enums and `match`, structs, traits, generics, `foreach`
   batch loops and manual memory.

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <format>
+#include <fstream>
 #include <optional>
 #include <vector>
 
@@ -394,6 +395,18 @@ ScriptResult run_command_script(std::string_view text, CommandContext& ctx) {
             auto index = ctx.play->session()->input_map().action_index(Name(*action));
             if (!index) return fail(std::format("no input action '{}'", *action));
             ctx.play->hold(*index, *cmd == "hold");
+        } else if (*cmd == "append-file") {
+            // Edits a project file the way saving a script would (the hook that makes hot reload testable headless).
+            auto path = in.word();
+            if (!path) return fail("append-file <path> <text>");
+            const std::string line_text(in.rest());
+            std::ofstream f(env.resolve(*path), std::ios::app | std::ios::binary);
+            if (!f || !(f << line_text << '\n')) return fail(std::format("append-file: can't write '{}'", *path));
+        } else if (*cmd == "reload") {
+            if (ctx.play == nullptr || !ctx.play->active()) return fail("reload: nothing is playing");
+            using Reload = script::GameSession::Reload;
+            const Reload r = ctx.play->reload(true);
+            if (r != Reload::Reloaded) return fail("reload: the scripts did not reload (see the log)");
         } else if (*cmd == "expect-tick" || *cmd == "expect-hash") {
             if (ctx.play == nullptr || !ctx.play->active()) return fail(std::format("{}: nothing is playing", *cmd));
             auto w = in.word();
@@ -408,6 +421,11 @@ ScriptResult run_command_script(std::string_view text, CommandContext& ctx) {
                                                      ctx.play->tick())
                                        : std::format("expected tick {}, got {}", want, got));
             }
+            continue;
+        } else if (*cmd == "print-hash") {
+            if (ctx.play == nullptr || !ctx.play->active()) return fail("print-hash: nothing is playing");
+            // The runtime's wording, so a test can compare a play in the editor with an exported game's run.
+            LOG_INFO("at tick {} (state hash {:016x})", ctx.play->tick(), ctx.play->state_hash());
             continue;
         } else if (*cmd == "expect-state") {
             if (ctx.play == nullptr) return fail("expect-state is not available here");

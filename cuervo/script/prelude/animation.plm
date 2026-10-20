@@ -1,0 +1,1583 @@
+// Engine API: animation (DESIGN.md 4.17 "Clarified (Milestone 9.4)").
+//
+// Three layers, all measured in simulation *ticks* (never wall-clock time) so
+// they replay bit for bit:
+//
+//   Animation / AnimationPlayer   keyframed property tracks over any `@export`
+//                                 field of any node, method-call and event
+//                                 tracks, loop modes, speed, a queue.
+//   Tween                         scripted, chainable tweens (sequence and
+//                                 parallel), owned by a node.
+//   AnimationTree                 a state machine over a player's animations
+//                                 with condition-driven, cross-fading
+//                                 transitions and a travel / goto API.
+//
+// A property track is "NodePath:field" (e.g. "Body/Head:position") with a
+// list of keys. Values travel as a vec4 (float, int, bool, enum, vec2/3/4 and
+// Color pack into it); the field's own type decides how a value is written
+// (`Anim.write`, the only native piece). Every written value also folds into
+// the state hash, so replays notice animation drift.
+//
+// Cutout, skeletal and morph animation plug in as more track kinds: a track is
+// "a path that samples to a vec4 per tick", so a bone transform or a blend
+// shape weight is another path scheme resolved by `AnimBinder`.
+
+// Reflection helpers and tick conversion.
+class Anim {
+    // How the field `field` of `node` can be driven: 0 = missing or not
+    // `@export`, 1 float, 2 int, 3 bool, 4 vec2, 5 vec3, 6 vec4, 7 Color,
+    // 8 enum, 9 name, 10 other (not animatable).
+    @native static fn kind(node: Node, field: str) -> int {}
+    // The field's value packed into a vec4 (zero for an unusable field).
+    @native static fn read(node: Node, field: str) -> vec4 {}
+    // Writes `value` into the field according to its type (rounded for ints,
+    // >= 0.5 for bools, `text` for names). False when it can't be driven.
+    @native static fn write(node: Node, field: str, value: vec4, text: str) -> bool {}
+    // Calls a method of `node` that takes no arguments.
+    @native static fn call(node: Node, method: str) -> bool {}
+
+    // `seconds` as whole ticks, at least 1.
+    static fn ticks(seconds: float) -> int {
+        return max(1, round(seconds / Time.dt) as int)
+    }
+
+    // A Color packed for color tracks.
+    static fn pack_color(c: Color) -> vec4 {
+        return vec4(c.r, c.g, c.b, c.a)
+    }
+}
+
+// How a key reaches the next one.
+enum AnimInterp {
+    Step,      // holds its value until the next key
+    Linear,    // straight line
+    EaseIn,    // `ease_kind` curve, slow start
+    EaseOut,   // `ease_kind` curve, slow end
+    EaseInOut, // `ease_kind` curve, slow at both ends
+    Curve,     // Godot-style power ease with `curve` (see `ease`)
+}
+
+// What an animation does at its end.
+enum AnimLoop {
+    None,     // stops on the last tick and finishes
+    Loop,     // wraps to the start
+    PingPong, // runs back and forth
+}
+
+// What a track does.
+enum AnimTrackKind {
+    Property, // sets `Node:field` to the sampled value
+    Method,   // calls `Node:method()` (no arguments) when a key is crossed
+    Event,    // emits the player's `event(key.text)` when a key is crossed
+}
+
+// The 0..1 progress `u` shaped by an interpolation mode.
+fn anim_shape(interp: AnimInterp, kind: Ease, curve: float, u: float) -> float {
+    match interp {
+        AnimInterp.Step => return 0.0
+        AnimInterp.Linear => return u
+        AnimInterp.EaseIn => return ease_in(kind, u)
+        AnimInterp.EaseOut => return ease_out(kind, u)
+        AnimInterp.EaseInOut => return ease_in_out(kind, u)
+        AnimInterp.Curve => return ease(u, curve)
+    }
+}
+
+// One keyframe. `interp` (with `ease_kind` or `curve`) shapes the segment from
+// this key to the next one, so every key can ease differently.
+struct AnimKey {
+    // Tick of the key within the animation.
+    var time = 0
+    // The packed value (see Anim.write). Unused by method and event tracks.
+    var value = vec4(0.0)
+    // Name tracks: the name to set. Event tracks: the event name.
+    var text = ""
+    // How this key reaches the next.
+    var interp = AnimInterp.Linear
+    // The easing family for EaseIn / EaseOut / EaseInOut.
+    var ease_kind = Ease.Sine
+    // The exponent of AnimInterp.Curve.
+    var curve = 1.0
+}
+
+// The values of one pose: which fields are set and to what. A player or tree
+// samples animations into poses and blends poses during cross-fades.
+class AnimPose {
+    // Track path -> slot in `paths`/`values`/`texts`.
+    var index = Map<str, int>()
+    // Track paths ("NodePath:field") in first-set order.
+    var paths = List<str>()
+    // The value of each set field (numbers and vectors, widened to vec4).
+    var values = List<vec4>()
+    // The text of each set field, for fields that hold text.
+    var texts = List<str>()
+
+    // Forgets everything.
+    fn clear() {
+        index.clear()
+        paths.clear()
+        values.clear()
+        texts.clear()
+    }
+
+    // Sets the value of `path`.
+    fn put(path: str, v: vec4, text: str) {
+        if index.has(path) {
+            var i = index[path]
+            values[i] = v
+            texts[i] = text
+        } else {
+            index[path] = paths.len()
+            paths.push(path)
+            values.push(v)
+            texts.push(text)
+        }
+    }
+
+    // Becomes a copy of `o`.
+    fn copy_from(o: AnimPose) {
+        clear()
+        for i in 0..o.paths.len() {
+            put(o.paths[i], o.values[i], o.texts[i])
+        }
+    }
+
+    // True when `path` has a value.
+    fn has(path: str) -> bool {
+        return index.has(path)
+    }
+
+    // The value of `path` (zero when missing).
+    fn value_of(path: str) -> vec4 {
+        if index.has(path) {
+            return values[index[path]]
+        }
+        return vec4(0.0)
+    }
+}
+
+// One track: a path and its keys, sorted by time.
+struct AnimTrack {
+    // "NodePath:field" relative to the animation's root; event tracks ignore it.
+    var path = ""
+    // What the track drives: a property, a method call or an event.
+    var kind = AnimTrackKind.Property
+    // The keys, sorted by time.
+    var keys = List<AnimKey>()
+
+    // Samples a property track at tick `t` into `pose`.
+    fn sample_into(t: float, pose: AnimPose) {
+        var n = keys.len()
+        if n == 0 {
+            return
+        }
+        var first = keys[0]
+        if n == 1 || t <= (first.time as float) {
+            pose.put(path, first.value, first.text)
+            return
+        }
+        var last = keys[n - 1]
+        if t >= (last.time as float) {
+            pose.put(path, last.value, last.text)
+            return
+        }
+        var lo = 0
+        var hi = n - 1
+        while hi - lo > 1 {
+            var mid = (lo + hi) / 2
+            if (keys[mid].time as float) <= t {
+                lo = mid
+            } else {
+                hi = mid
+            }
+        }
+        var a = keys[lo]
+        var b = keys[hi]
+        var span = (b.time - a.time) as float
+        var u = 1.0
+        if span > 0.0 {
+            u = (t - (a.time as float)) / span
+        }
+        var w = anim_shape(a.interp, a.ease_kind, a.curve, u)
+        pose.put(path, a.value.lerp(b.value, w), a.text)
+    }
+}
+
+// A keyframed animation: tracks over a length in ticks. Saved in scene files as
+// part of AnimationPlayer.animations (docs/SCENES.md).
+struct Animation {
+    // Looked up by AnimationPlayer.play and AnimStateDef.animation.
+    var name = ""
+    // Length in ticks.
+    var length = 60
+    // What happens at the end.
+    var mode = AnimLoop.None
+    // The animation's tracks.
+    var tracks = List<AnimTrack>()
+
+    // Index of the track with `path` and `kind`, or -1.
+    fn track_index(path: str, kind: AnimTrackKind) -> int {
+        for i in 0..tracks.len() {
+            if tracks[i].path == path && tracks[i].kind == kind {
+                return i
+            }
+        }
+        return -1
+    }
+
+    // Adds `key` to the track `path` (created when missing), keeping keys
+    // sorted by time; a key at the same time as another goes after it.
+    fn add_key(path: str, key: AnimKey, kind: AnimTrackKind = AnimTrackKind.Property) {
+        var i = track_index(path, kind)
+        if i < 0 {
+            tracks.push(AnimTrack { path = path, kind = kind })
+            i = tracks.len() - 1
+        }
+        var at = tracks[i].keys.len()
+        while at > 0 && tracks[i].keys[at - 1].time > key.time {
+            at -= 1
+        }
+        tracks[i].keys.insert(at, key)
+    }
+
+    // A key with a raw packed value (enum discriminants, anything).
+    fn key_value(path: str, time: int, value: vec4, interp: AnimInterp = AnimInterp.Linear,
+                 ease_kind: Ease = Ease.Sine, curve: float = 1.0) {
+        add_key(path, AnimKey { time = time, value = value, interp = interp, ease_kind = ease_kind, curve = curve })
+    }
+
+    // Float field key.
+    fn key_float(path: str, time: int, v: float, interp: AnimInterp = AnimInterp.Linear,
+                 ease_kind: Ease = Ease.Sine, curve: float = 1.0) {
+        key_value(path, time, vec4(v, 0.0, 0.0, 0.0), interp, ease_kind, curve)
+    }
+
+    // Integer field key (interpolated as a float, rounded when written).
+    fn key_int(path: str, time: int, v: int, interp: AnimInterp = AnimInterp.Step,
+               ease_kind: Ease = Ease.Sine, curve: float = 1.0) {
+        key_value(path, time, vec4(v as float, 0.0, 0.0, 0.0), interp, ease_kind, curve)
+    }
+
+    // Bool field key (a bool changes at its key: use Step).
+    fn key_bool(path: str, time: int, v: bool) {
+        key_value(path, time, vec4(v ? 1.0 : 0.0, 0.0, 0.0, 0.0), AnimInterp.Step)
+    }
+
+    // vec2 field key.
+    fn key_vec2(path: str, time: int, v: vec2, interp: AnimInterp = AnimInterp.Linear,
+                ease_kind: Ease = Ease.Sine, curve: float = 1.0) {
+        key_value(path, time, vec4(v.x, v.y, 0.0, 0.0), interp, ease_kind, curve)
+    }
+
+    // vec3 field key.
+    fn key_vec3(path: str, time: int, v: vec3, interp: AnimInterp = AnimInterp.Linear,
+                ease_kind: Ease = Ease.Sine, curve: float = 1.0) {
+        key_value(path, time, vec4(v.x, v.y, v.z, 0.0), interp, ease_kind, curve)
+    }
+
+    // vec4 field key.
+    fn key_vec4(path: str, time: int, v: vec4, interp: AnimInterp = AnimInterp.Linear,
+                ease_kind: Ease = Ease.Sine, curve: float = 1.0) {
+        key_value(path, time, v, interp, ease_kind, curve)
+    }
+
+    // Color field key.
+    fn key_color(path: str, time: int, c: Color, interp: AnimInterp = AnimInterp.Linear,
+                 ease_kind: Ease = Ease.Sine, curve: float = 1.0) {
+        key_value(path, time, Anim.pack_color(c), interp, ease_kind, curve)
+    }
+
+    // Name field key (a name changes at its key).
+    fn key_name(path: str, time: int, text: str) {
+        add_key(path, AnimKey { time = time, text = text, interp = AnimInterp.Step })
+    }
+
+    // Calls `Node:method()` at `time` (path is "NodePath:method").
+    fn key_call(path: str, time: int) {
+        add_key(path, AnimKey { time = time }, AnimTrackKind.Method)
+    }
+
+    // Emits the player's `event(event_name)` at `time`.
+    fn key_event(time: int, event_name: str) {
+        add_key("", AnimKey { time = time, text = event_name }, AnimTrackKind.Event)
+    }
+
+    // Samples every property track at tick `t` into `pose` (not cleared).
+    fn sample(t: float, pose: AnimPose) {
+        for i in 0..tracks.len() {
+            if tracks[i].kind == AnimTrackKind.Property {
+                tracks[i].sample_into(t, pose)
+            }
+        }
+    }
+}
+
+// A method or event key a playhead crossed.
+struct AnimFired {
+    // Whether a method key or an event key fired.
+    var kind = AnimTrackKind.Method
+    // The key's track path (the method's target).
+    var path = ""
+    // The key's text: the method name or the event text.
+    var text = ""
+}
+
+// Where an animation is playing: a position in ticks and a direction, moved by
+// `advance` with the loop mode applied. Shared by AnimationPlayer and
+// AnimationTree.
+class AnimPlayhead {
+    // The player's animation list and the animation's index in it.
+    var animations = List<Animation>()
+    // Index of the animation in `animations`.
+    var index = 0
+    // Position in ticks, 0 .. length.
+    var pos = 0.0
+    // +1, or -1 while a ping-pong runs back.
+    var dir = 1.0
+    // A non-looping animation reached its end.
+    var finished = false
+    // A looping animation wrapped on the last advance.
+    var wrapped = false
+
+    // Starts the playhead on animation `i` of `list`.
+    fn init(list: List<Animation>, i: int) {
+        animations = list
+        index = i
+    }
+
+    // The animation's length in ticks.
+    fn length() -> float {
+        return animations[index].length as float
+    }
+
+    // True when the animation ended (non-looping) or wrapped (looping) on the
+    // last advance.
+    fn at_end() -> bool {
+        return finished || wrapped
+    }
+
+    // Collects the method and event keys with time in the range.
+    fn collect(lo: float, hi: float, lo_inc: bool, hi_inc: bool, fired: List<AnimFired>) {
+        var anim = animations[index]
+        for ti in 0..anim.tracks.len() {
+            if anim.tracks[ti].kind == AnimTrackKind.Property {
+                continue
+            }
+            for k in anim.tracks[ti].keys {
+                var t = k.time as float
+                var above = lo_inc ? t >= lo : t > lo
+                var below = hi_inc ? t <= hi : t < hi
+                if above && below {
+                    fired.push(AnimFired { kind = anim.tracks[ti].kind, path = anim.tracks[ti].path, text = k.text })
+                }
+            }
+        }
+    }
+
+    // Moves `step` ticks (negative runs backwards; the ping-pong direction
+    // applies on top), appending the method / event keys it crossed to `fired`.
+    fn advance(amount: float, fired: List<AnimFired>) {
+        wrapped = false
+        if finished {
+            return
+        }
+        var len = length()
+        var mode = animations[index].mode
+        if len <= 0.0 {
+            pos = 0.0
+            finished = mode == AnimLoop.None
+            return
+        }
+        var s = amount * dir
+        var prev = pos
+        var next = prev + s
+        if s >= 0.0 {
+            if next < len {
+                collect(prev, next, false, true, fired)
+                pos = next
+                return
+            }
+            collect(prev, len, false, true, fired)
+            match mode {
+                AnimLoop.None => {
+                    pos = len
+                    finished = true
+                }
+                AnimLoop.Loop => {
+                    pos = fposmod(next, len)
+                    wrapped = true
+                    collect(0.0, pos, true, true, fired)
+                }
+                AnimLoop.PingPong => {
+                    pos = max(0.0, len - (next - len))
+                    dir = -dir
+                    collect(pos, len, true, false, fired)
+                }
+            }
+        } else {
+            if next > 0.0 {
+                collect(next, prev, true, false, fired)
+                pos = next
+                return
+            }
+            collect(0.0, prev, true, false, fired)
+            match mode {
+                AnimLoop.None => {
+                    pos = 0.0
+                    finished = true
+                }
+                AnimLoop.Loop => {
+                    pos = fposmod(next, len)
+                    wrapped = true
+                    collect(pos, len, false, true, fired)
+                }
+                AnimLoop.PingPong => {
+                    pos = min(len, -next)
+                    dir = -dir
+                    collect(0.0, pos, false, true, fired)
+                }
+            }
+        }
+    }
+
+    // Samples the animation at the current position into `pose` (cleared).
+    fn sample_into(pose: AnimPose) {
+        pose.clear()
+        animations[index].sample(pos, pose)
+    }
+}
+
+// The node `np` ("A/B", ".." and "." allowed) relative to `root`, or null.
+fn anim_resolve(root: Node, np: str) -> Node {
+    if np == "" || np == "." {
+        return root
+    }
+    var n = root
+    for part in np.split("/") {
+        if part == "" || part == "." {
+            continue
+        }
+        if part == ".." {
+            n = n.parent
+        } else {
+            var found: Node = null
+            for c in n.children {
+                if c.name == part {
+                    found = c
+                    break
+                }
+            }
+            n = found
+        }
+        if n == null {
+            return null
+        }
+    }
+    return n
+}
+
+// A resolved track target.
+class AnimBinding {
+    // The bound node (null when the path did not resolve).
+    var node: Node
+    // The field name on the node.
+    var prop = ""
+    // The field's kind, as resolved by the binder (how a pose value is written to it).
+    var kind = 0
+    // True once an unresolved path was reported, so the warning is logged once.
+    var warned = false
+}
+
+// Resolves "NodePath:field" track paths against a root node, caching the node
+// and the field's kind (re-resolved when the node was freed), and writes poses.
+class AnimBinder {
+    // Cached bindings by track path; used by the animation internals.
+    var bindings = Map<str, AnimBinding>()
+
+    // The binding of `path` under `root`.
+    fn lookup(root: Node, path: str) -> AnimBinding {
+        var b: AnimBinding = null
+        if bindings.has(path) {
+            b = bindings[path]
+            if b.node != null && !b.node.freed && b.kind != 0 {
+                return b
+            }
+        } else {
+            b = AnimBinding()
+            bindings[path] = b
+        }
+        var colon = path.find(":")
+        var np = colon < 0 ? path : path.substr(0, colon)
+        b.prop = colon < 0 ? "" : path.substr(colon + 1)
+        b.node = anim_resolve(root, np)
+        b.kind = 0
+        if b.node != null && b.prop != "" {
+            b.kind = Anim.kind(b.node, b.prop)
+        }
+        return b
+    }
+
+    // True when values of this track blend (numbers, vectors, colors); bools,
+    // enums and names switch at half weight.
+    fn continuous(root: Node, path: str) -> bool {
+        var k = lookup(root, path).kind
+        return k == 1 || k == 2 || (k >= 4 && k <= 7)
+    }
+
+    // Writes every value of `pose`. A target that can't be found or driven is
+    // reported once and skipped.
+    fn apply(root: Node, pose: AnimPose) {
+        for i in 0..pose.paths.len() {
+            var b = lookup(root, pose.paths[i])
+            if b.node == null || b.kind == 0 || b.kind == 10 {
+                if !b.warned {
+                    b.warned = true
+                    print("animation: can't drive '{pose.paths[i]}' (missing node, or the field is not an @export of a supported type)")
+                }
+                continue
+            }
+            Anim.write(b.node, b.prop, pose.values[i], pose.texts[i])
+        }
+    }
+
+    // Calls the method named by a method track path.
+    fn call(root: Node, path: str) {
+        var b = lookup(root, path)
+        if b.node != null {
+            Anim.call(b.node, b.prop)
+        }
+    }
+}
+
+// Blends `a` into `b` at weight `w` (0 = a, 1 = b) into `out` (a third pose).
+// Paths only one pose sets keep that pose's value.
+fn anim_blend(a: AnimPose, b: AnimPose, w: float, binder: AnimBinder, root: Node, out: AnimPose) {
+    out.clear()
+    for i in 0..a.paths.len() {
+        var p = a.paths[i]
+        if b.has(p) {
+            var j = b.index[p]
+            if binder.continuous(root, p) {
+                out.put(p, a.values[i].lerp(b.values[j], w), w < 0.5 ? a.texts[i] : b.texts[j])
+            } else if w < 0.5 {
+                out.put(p, a.values[i], a.texts[i])
+            } else {
+                out.put(p, b.values[j], b.texts[j])
+            }
+        } else {
+            out.put(p, a.values[i], a.texts[i])
+        }
+    }
+    for j in 0..b.paths.len() {
+        if !a.has(b.paths[j]) {
+            out.put(b.paths[j], b.values[j], b.texts[j])
+        }
+    }
+}
+
+// Plays Animations from its `animations` list on the nodes under its parent
+// (or `root_path`): property tracks over any `@export` field, method and event
+// tracks, loop modes, speed and a queue. It advances once per tick before its
+// siblings' update(), so scripts see the animated values.
+//
+// Use either the player (`play`) or an AnimationTree over it, not both.
+class AnimationPlayer extends Node {
+    // Emitted when a non-looping animation reaches its end (before the queue
+    // moves on).
+    signal animation_finished(animation: str)
+    // Emitted when `play` starts an animation.
+    signal animation_started(animation: str)
+    // Emitted when an event track key is crossed.
+    signal event(event_name: str)
+    // The animations this player (and an AnimationTree using it) can play.
+    @export var animations = List<Animation>()
+    // The animation to play when the node enters the tree ("" = none).
+    @export var autoplay = ""
+    // Ticks advanced per tick; negative plays backwards.
+    @export var speed = 1.0
+    // The animated tree's root, relative to this node (".." = the parent).
+    @export var root_path = ".."
+    // False stops the player from advancing (an AnimationTree drives instead).
+    @export var active = true
+    // True while an animation runs.
+    var playing = false
+    // The running animation's name ("" when none ever ran).
+    var current = ""
+    // A per-play speed multiplier (play's `speed` argument).
+    var play_speed = 1.0
+    // The playhead of the running animation; used by the animation internals.
+    var head: AnimPlayhead
+    // Names waiting to play after the current animation finishes.
+    var queued = List<str>()
+    // Resolves and writes track targets; used by the animation internals.
+    var binder = AnimBinder()
+    // The pose sampled on the last advance.
+    var pose = AnimPose()
+    // Method and event keys crossed on the last advance.
+    var fired = List<AnimFired>()
+    // The resolved root node, cached between ticks.
+    var root_cache: Node
+    // The `root_path` the cache was resolved for.
+    var root_cache_path = "?"
+
+    // Starts `autoplay`.
+    fn ready() {
+        if autoplay != "" {
+            play(autoplay)
+        }
+    }
+
+    // The node the track paths are relative to.
+    fn root_node() -> Node {
+        if root_cache != null && !root_cache.freed && root_cache_path == root_path {
+            return root_cache
+        }
+        var r = anim_resolve(self, root_path)
+        root_cache = r ?? self
+        root_cache_path = root_path
+        return root_cache
+    }
+
+    // Index of the animation named `name`, or -1.
+    fn index_of(name: str) -> int {
+        for i in 0..animations.len() {
+            if animations[i].name == name {
+                return i
+            }
+        }
+        return -1
+    }
+
+    // True when an animation has that name.
+    fn has_animation(name: str) -> bool {
+        return index_of(name) >= 0
+    }
+
+    // Adds an animation, replacing one with the same name.
+    fn add_animation(a: Animation) {
+        var i = index_of(a.name)
+        if i >= 0 {
+            animations[i] = a
+        } else {
+            animations.push(a)
+        }
+    }
+
+    // The length in ticks of the animation `name` (0 when missing).
+    fn animation_length(name: str) -> int {
+        var i = index_of(name)
+        return i < 0 ? 0 : animations[i].length
+    }
+
+    // Plays `name` from its start (its end when the speed is negative), and
+    // applies the first pose right away. `play_speed` multiplies `speed` for
+    // this play. Unknown names are reported and ignored.
+    fn play(name: str, play_speed: float = 1.0) {
+        var i = index_of(name)
+        if i < 0 {
+            print("AnimationPlayer: no animation named '{name}'")
+            return
+        }
+        self.play_speed = play_speed
+        head = AnimPlayhead(animations, i)
+        if speed * play_speed < 0.0 {
+            head.pos = head.length()
+        }
+        current = name
+        playing = true
+        fired.clear()
+        head.collect(head.pos, head.pos, true, true, fired)
+        apply_current()
+        emit animation_started(name)
+        dispatch()
+    }
+
+    // Plays `name` backwards from its end.
+    fn play_backwards(name: str) {
+        play(name, -1.0)
+    }
+
+    // Plays `name` after the current non-looping animation finishes (at once
+    // when nothing plays).
+    fn queue(name: str) {
+        if playing {
+            queued.push(name)
+        } else {
+            play(name)
+        }
+    }
+
+    // Empties the queue.
+    fn clear_queue() {
+        queued.clear()
+    }
+
+    // Stops where it is (no animation_finished) and clears the queue.
+    fn stop() {
+        playing = false
+        queued.clear()
+    }
+
+    // Moves the running animation to tick `t` and applies it (no events).
+    fn seek(t: float) {
+        if head != null {
+            head.pos = clamp(t, 0.0, head.length())
+            head.finished = false
+            apply_current()
+        }
+    }
+
+    // True while an animation runs.
+    fn is_playing() -> bool {
+        return playing
+    }
+
+    // The running animation's position in ticks.
+    fn position_ticks() -> float {
+        return head == null ? 0.0 : head.pos
+    }
+
+    // Samples the running animation and writes it to the tree.
+    fn apply_current() {
+        if head == null {
+            return
+        }
+        head.sample_into(pose)
+        binder.apply(root_node(), pose)
+    }
+
+    // Writes a pose (AnimationTree).
+    fn apply_pose(p: AnimPose) {
+        binder.apply(root_node(), p)
+    }
+
+    // Runs the method and event keys collected in `fired`.
+    fn dispatch() {
+        dispatch_list(fired)
+        fired.clear()
+    }
+
+    // Runs the method and event keys in `list` (AnimationTree).
+    fn dispatch_list(list: List<AnimFired>) {
+        for i in 0..list.len() {
+            var f = list[i]
+            if f.kind == AnimTrackKind.Method {
+                binder.call(root_node(), f.path)
+            } else if f.kind == AnimTrackKind.Event {
+                emit event(f.text)
+            }
+        }
+    }
+
+    // Engine-internal: advances one tick before the children's update().
+    fn update_tree(dt: float) {
+        if !freed && active && playing && head != null && can_process() {
+            fired.clear()
+            head.advance(speed * play_speed, fired)
+            apply_current()
+            dispatch()
+            if head.finished {
+                playing = false
+                var done = current
+                emit animation_finished(done)
+                if !queued.is_empty() && !playing {
+                    var next = queued[0]
+                    queued.remove(0)
+                    play(next)
+                }
+            }
+        }
+        super.update_tree(dt)
+    }
+}
+
+// One piece of a Tween: a property change, a wait, a call or a method sweep.
+class Tweener {
+    // 0 property, 1 interval, 2 callback, 3 method sweep.
+    var kind = 0
+    // The node whose field is tweened.
+    var target: Node
+    // The field name on `target`.
+    var prop = ""
+    // The start value, widened to vec4.
+    var from_value = vec4(0.0)
+    // The end value, widened to vec4.
+    var to_value = vec4(0.0)
+    // The text for name tweens (and the method name for sweeps).
+    var text = ""
+    // The field's kind, which decides how values are written back.
+    var prop_kind = 0
+    // Duration in ticks.
+    var ticks = 1
+    // Ticks to wait before starting.
+    var delay = 0
+    // How progress is shaped (see `with_ease`).
+    var interp = AnimInterp.Linear
+    // The easing family used by `interp`.
+    var ease_kind = Ease.Sine
+    // The curve parameter for the easing.
+    var curve = 1.0
+    // The function a callback tweener calls.
+    var callback: fn() = fn() {}
+    // The function a method sweep calls with the interpolated value.
+    var method: fn(float) = fn(v: float) {}
+    // The start value of a method sweep.
+    var from_f = 0.0
+    // The end value of a method sweep.
+    var to_f = 0.0
+    // Ticks run so far.
+    var elapsed = 0
+    // True when the start value was given; otherwise it is read from the target when the tweener starts.
+    var has_from = false
+
+    // True for tweeners that take no time (callbacks).
+    fn instant() -> bool {
+        return kind == 2
+    }
+
+    // Starts the tweener: captures the start value, or runs a callback.
+    fn begin() {
+        elapsed = 0
+        if kind == 0 && target != null && !target.freed {
+            if !has_from {
+                from_value = Anim.read(target, prop)
+            }
+            prop_kind = Anim.kind(target, prop)
+        } else if kind == 2 {
+            callback()
+        }
+    }
+
+    // Advances one tick; true while it still has ticks to run.
+    fn tick() -> bool {
+        elapsed += 1
+        if elapsed <= delay {
+            return true
+        }
+        var n = elapsed - delay
+        var done = n >= ticks
+        var u = done ? 1.0 : (n as float) / (ticks as float)
+        var w = anim_shape(interp, ease_kind, curve, u)
+        if kind == 0 {
+            if target != null && !target.freed && prop_kind != 0 {
+                var continuous = prop_kind == 1 || prop_kind == 2 || (prop_kind >= 4 && prop_kind <= 7)
+                if continuous {
+                    Anim.write(target, prop, from_value.lerp(to_value, w), text)
+                } else if done {
+                    Anim.write(target, prop, to_value, text)
+                }
+            }
+        } else if kind == 3 {
+            method(from_f + (to_f - from_f) * w)
+        }
+        return !done
+    }
+}
+
+// A step of tweeners that run together.
+class TweenStep {
+    // The tweeners that run together in this step.
+    var items = List<Tweener>()
+}
+
+// A scripted, chainable animation: a sequence of steps, each holding tweeners
+// that run in parallel. Create one with `Node.create_tween()`; it runs with
+// that node and stops when the node leaves the tree. Time is in ticks.
+//
+//     create_tween()
+//         .tween_vec2(sprite, "position", vec2(200.0, 100.0), 30)
+//         .with_ease(AnimInterp.EaseOut, Ease.Cubic)
+//         .tween_float(sprite, "rotation", PI, 30)
+//         .parallel()
+//         .tween_callback(() => print("done"))
+class Tween {
+    // Emitted when every step (and loop) has run.
+    signal finished
+    // The steps, run one after another.
+    var steps = List<TweenStep>()
+    // The task that drives the tween; used by the animation internals.
+    var task: Task
+    // Set by `parallel()`: the next tweener joins the current step.
+    var parallel_next = false
+    // Set by `set_parallel()`: every tweener joins the current step.
+    var all_parallel = false
+    // How many times the sequence runs (0 = forever).
+    var loops = 1
+    // True after `kill()`.
+    var killed = false
+    // True while paused.
+    var paused = false
+    // True once every step and loop has run.
+    var done = false
+    // The most recently added tweener, which `with_ease` and `with_delay` modify.
+    var last: Tweener
+
+    // Everything after this runs one step at a time, in order (the default) or,
+    // with `true`, all at once.
+    fn set_parallel(on: bool = true) -> Tween {
+        all_parallel = on
+        return self
+    }
+
+    // The next tweener starts together with the previous one.
+    fn parallel() -> Tween {
+        parallel_next = true
+        return self
+    }
+
+    // Repeats the sequence `n` times (0 = forever).
+    fn set_loops(n: int) -> Tween {
+        loops = n
+        return self
+    }
+
+    // Adds a tweener to the current step, or to a new one.
+    fn add(t: Tweener) {
+        if steps.is_empty() || !(parallel_next || all_parallel) {
+            steps.push(TweenStep())
+        }
+        parallel_next = false
+        steps[steps.len() - 1].items.push(t)
+        last = t
+    }
+
+    // Tweens any field to a packed value; the typed helpers below call it.
+    fn tween_value(target: Node, prop: str, to: vec4, ticks: int, text: str = "") -> Tween {
+        var t = Tweener()
+        t.target = target
+        t.prop = prop
+        t.to_value = to
+        t.text = text
+        t.ticks = max(1, ticks)
+        add(t)
+        return self
+    }
+
+    // Tweens a float field.
+    fn tween_float(target: Node, prop: str, to: float, ticks: int) -> Tween {
+        return tween_value(target, prop, vec4(to, 0.0, 0.0, 0.0), ticks)
+    }
+
+    // Tweens an int field (interpolated as a float, rounded when written).
+    fn tween_int(target: Node, prop: str, to: int, ticks: int) -> Tween {
+        return tween_value(target, prop, vec4(to as float, 0.0, 0.0, 0.0), ticks)
+    }
+
+    // Tweens a vec2 field.
+    fn tween_vec2(target: Node, prop: str, to: vec2, ticks: int) -> Tween {
+        return tween_value(target, prop, vec4(to.x, to.y, 0.0, 0.0), ticks)
+    }
+
+    // Tweens a vec3 field.
+    fn tween_vec3(target: Node, prop: str, to: vec3, ticks: int) -> Tween {
+        return tween_value(target, prop, vec4(to.x, to.y, to.z, 0.0), ticks)
+    }
+
+    // Tweens a vec4 field.
+    fn tween_vec4(target: Node, prop: str, to: vec4, ticks: int) -> Tween {
+        return tween_value(target, prop, to, ticks)
+    }
+
+    // Tweens a Color field.
+    fn tween_color(target: Node, prop: str, to: Color, ticks: int) -> Tween {
+        return tween_value(target, prop, Anim.pack_color(to), ticks)
+    }
+
+    // Sets a bool field after `ticks`.
+    fn tween_bool(target: Node, prop: str, to: bool, ticks: int) -> Tween {
+        return tween_value(target, prop, vec4(to ? 1.0 : 0.0, 0.0, 0.0, 0.0), ticks)
+    }
+
+    // Sets a name field after `ticks`.
+    fn tween_name(target: Node, prop: str, to: str, ticks: int) -> Tween {
+        return tween_value(target, prop, vec4(0.0), ticks, to)
+    }
+
+    // Waits `ticks`.
+    fn interval(ticks: int) -> Tween {
+        var t = Tweener()
+        t.kind = 1
+        t.ticks = max(1, ticks)
+        add(t)
+        return self
+    }
+
+    // Calls `f` (after the previous tweener, or together with it after
+    // `parallel()`).
+    fn tween_callback(f: fn()) -> Tween {
+        var t = Tweener()
+        t.kind = 2
+        t.callback = f
+        t.ticks = 0
+        add(t)
+        return self
+    }
+
+    // Calls `f` every tick with a value moving from `from` to `to`.
+    fn tween_method(f: fn(float), from: float, to: float, ticks: int) -> Tween {
+        var t = Tweener()
+        t.kind = 3
+        t.method = f
+        t.from_f = from
+        t.to_f = to
+        t.ticks = max(1, ticks)
+        add(t)
+        return self
+    }
+
+    // Easing of the last added tweener (default Linear).
+    fn with_ease(interp: AnimInterp, ease_kind: Ease = Ease.Sine) -> Tween {
+        if last != null {
+            last.interp = interp
+            last.ease_kind = ease_kind
+        }
+        return self
+    }
+
+    // Godot-style power ease (see `ease`) for the last added tweener.
+    fn with_curve(curve: float) -> Tween {
+        if last != null {
+            last.interp = AnimInterp.Curve
+            last.curve = curve
+        }
+        return self
+    }
+
+    // Delays the last added tweener by `ticks`.
+    fn with_delay(ticks: int) -> Tween {
+        if last != null {
+            last.delay = max(0, ticks)
+        }
+        return self
+    }
+
+    // Starts the start value from `v` instead of the field's value at start.
+    fn with_from(v: vec4) -> Tween {
+        if last != null {
+            last.from_value = v
+            last.has_from = true
+        }
+        return self
+    }
+
+    // Stops the tween for good (no `finished`).
+    fn kill() {
+        killed = true
+        done = true
+        if task != null {
+            task.cancel()
+        }
+    }
+
+    // Holds the tween without ending it.
+    fn pause() {
+        paused = true
+    }
+
+    // Continues after `pause()`.
+    fn resume() {
+        paused = false
+    }
+
+    // True until it finishes or is killed.
+    fn is_running() -> bool {
+        return !done
+    }
+
+    // Engine-internal: the coroutine Node.create_tween starts (owned by the
+    // node). It begins on the next tick so the chain is built first.
+    fn run() {
+        yield
+        // The first step's first tick is this one; later steps begin on the tick the
+        // previous one ends and tick from the next, so a sequence takes the sum of its ticks.
+        var fresh = true
+        var round = 0
+        while !killed {
+            var si = 0
+            var yielded = false
+            while si < steps.len() && !killed {
+                var group = steps[si]
+                for t in group.items {
+                    t.begin()
+                }
+                var running = false
+                for t in group.items {
+                    if !t.instant() {
+                        running = true
+                    }
+                }
+                if running && !fresh {
+                    yield
+                    yielded = true
+                }
+                fresh = false
+                while running && !killed {
+                    while paused && !killed {
+                        yield
+                    }
+                    running = false
+                    for t in group.items {
+                        if t.tick() {
+                            running = true
+                        }
+                    }
+                    if running {
+                        yield
+                        yielded = true
+                    }
+                }
+                si += 1
+            }
+            round += 1
+            if loops != 0 && round >= loops {
+                break
+            }
+            if !yielded {
+                yield
+            }
+        }
+        if !killed {
+            done = true
+            emit finished
+        }
+    }
+}
+
+// What a condition compares a state-machine parameter with.
+enum AnimCondOp {
+    IsTrue,  // parameter >= 0.5
+    IsFalse, // parameter < 0.5
+    // True when the parameter equals the value.
+    Eq,
+    // True when the parameter differs from the value.
+    Ne,
+    // True when the parameter is less than the value.
+    Lt,
+    // True when the parameter is at most the value.
+    Le,
+    // True when the parameter is greater than the value.
+    Gt,
+    // True when the parameter is at least the value.
+    Ge,
+    Trigger, // set by AnimationTree.trigger(), consumed by the transition that fires
+}
+
+// One test of a transition: `param op value`.
+struct AnimCondition {
+    // The parameter to test.
+    var param = ""
+    // How the parameter is compared with `value`.
+    var op = AnimCondOp.IsTrue
+    // The value compared against (unused by the boolean and trigger ops).
+    var value = 0.0
+}
+
+// A state of an AnimationTree: plays the animation `animation` of the player.
+struct AnimStateDef {
+    // The state's name, which transitions and `goto` refer to.
+    var name = ""
+    // The name of the player's animation this state plays.
+    var animation = ""
+    // Playback speed multiplier for this state.
+    var speed = 1.0
+}
+
+// A transition between states. It fires when its conditions all hold (none =
+// immediately) and, with `at_end`, the source animation has ended or wrapped.
+struct AnimTransition {
+    // The source state, or "*" for any.
+    var from_state = "*"
+    // The destination state.
+    var to_state = ""
+    // All must hold for the transition to fire (none = always).
+    var conditions = List<AnimCondition>()
+    // Cross-fade length in ticks (0 = cut).
+    var duration = 6
+    // How the blend weight follows time.
+    var interp = AnimInterp.Linear
+    // The easing family used by `interp`.
+    var ease_kind = Ease.Sine
+    // The curve parameter for the easing.
+    var curve = 1.0
+    // Waits for the source animation to end (or wrap).
+    var at_end = false
+}
+
+// A state machine over an AnimationPlayer's animations. Transitions fire from
+// conditions on parameters (`set_param`, `set_bool`, `trigger`); each cross-fade
+// blends the outgoing and incoming poses over `duration` ticks. A transition
+// that fires during a fade freezes the current blended pose as the outgoing
+// side. `goto` jumps, `travel` walks the shortest route over the transitions.
+//
+// The player is the first AnimationPlayer sibling (or `player_path`, a sibling's
+// name); it stops advancing on its own and applies the tree's poses. Tracks one
+// side doesn't set keep the other side's value, so animations that share a
+// character should key the same fields.
+class AnimationTree extends Node {
+    // Emitted when a transition starts (the cross-fade begins).
+    signal state_changed(from_state: str, to_state: str)
+    // The name of the AnimationPlayer sibling ("" = the first one).
+    @export var player_path = ""
+    // The states.
+    @export var states = List<AnimStateDef>()
+    // The transitions between states.
+    @export var transitions = List<AnimTransition>()
+    // The state to start in ("" = the first state).
+    @export var start_state = ""
+    // False freezes the tree.
+    @export var active = true
+    // Time scale of every state.
+    @export var speed = 1.0
+    // The current state's name.
+    var current = ""
+    // Numeric parameters by name (set with `set_param` and `set_bool`).
+    var params = Map<str, float>()
+    // Triggers raised since the last evaluation.
+    var pulses = List<str>()
+    // The AnimationPlayer driven by this tree.
+    var player: AnimationPlayer
+    // The playhead of the current state; used by the animation internals.
+    var head: AnimPlayhead
+    // The playhead of the outgoing state during a cross-fade.
+    var from_head: AnimPlayhead
+    // Speed multiplier of the current state.
+    var head_speed = 1.0
+    // Speed multiplier of the outgoing state.
+    var from_speed = 1.0
+    // Length of the running cross-fade in ticks (0 = none).
+    var fade_total = 0
+    // Guards against re-entrant evaluation from signal handlers.
+    var evaluating = false
+    // Ticks into the running cross-fade.
+    var fade_t = 0
+    // The running cross-fade's interpolation.
+    var fade_interp = AnimInterp.Linear
+    // The running cross-fade's easing family.
+    var fade_kind = Ease.Sine
+    // The running cross-fade's curve parameter.
+    var fade_curve = 1.0
+    // The remaining states of a `travel` route.
+    var route = List<str>()
+    // The frozen outgoing pose when a transition interrupts a fade.
+    var snapshot = AnimPose()
+    // The last pose applied.
+    var last_pose = AnimPose()
+    // Scratch pose for the outgoing side of a blend.
+    var pose_a = AnimPose()
+    // Scratch pose for the incoming side of a blend.
+    var pose_b = AnimPose()
+    // The blended result written to the nodes.
+    var pose_out = AnimPose()
+    // Method and event keys crossed on the last evaluation.
+    var fired = List<AnimFired>()
+
+    // Sets a numeric parameter.
+    fn set_param(name: str, v: float) {
+        params[name] = v
+    }
+
+    // Sets a parameter to 1 or 0.
+    fn set_bool(name: str, v: bool) {
+        params[name] = v ? 1.0 : 0.0
+    }
+
+    // A parameter's value (0 when never set).
+    fn param(name: str) -> float {
+        return params.get_or(name, 0.0)
+    }
+
+    // Raises a trigger for the next evaluation. It is consumed by the transition
+    // that uses it and cleared at the end of that evaluation otherwise.
+    fn trigger(name: str) {
+        params[name] = 1.0
+        pulses.push(name)
+    }
+
+    // Index of the state `name`, or -1.
+    fn state_index(name: str) -> int {
+        for i in 0..states.len() {
+            if states[i].name == name {
+                return i
+            }
+        }
+        return -1
+    }
+
+    // The current state's time in ticks.
+    fn state_time() -> float {
+        return head == null ? 0.0 : head.pos
+    }
+
+    // True during a cross-fade.
+    fn is_fading() -> bool {
+        return fade_total > 0
+    }
+
+    // The cross-fade's progress, 0..1 (1 when not fading).
+    fn fade_progress() -> float {
+        return fade_total > 0 ? max(0.0, (fade_t as float) / (fade_total as float)) : 1.0
+    }
+
+    // The state being walked to by `travel` ("" when not travelling).
+    fn travel_target() -> str {
+        return route.is_empty() ? "" : route[route.len() - 1]
+    }
+
+    // Enters `state` now, cross-fading over `duration` ticks (0 = cut). Cancels
+    // a travel. False for an unknown state.
+    fn goto(state: str, duration: int = 0) -> bool {
+        if state_index(state) < 0 {
+            print("AnimationTree: no state named '{state}'")
+            return false
+        }
+        route.clear()
+        enter(state, duration, AnimInterp.Linear, Ease.Sine, 1.0)
+        return true
+    }
+
+    // Walks to `state` along the shortest chain of transitions, using each
+    // one's cross-fade (conditions are skipped, `at_end` is honored). False
+    // when no route exists.
+    fn travel(state: str) -> bool {
+        if state_index(state) < 0 {
+            return false
+        }
+        init_if_needed()
+        route.clear()
+        if state == current {
+            return true
+        }
+        var prev = Map<str, str>()
+        var queue = Deque<str>()
+        queue.push_back(current)
+        prev[current] = ""
+        var found = false
+        while !queue.is_empty() && !found {
+            var s = queue.pop_front()
+            for t in transitions {
+                if (t.from_state == s || t.from_state == "*") && !prev.has(t.to_state) && state_index(t.to_state) >= 0 {
+                    prev[t.to_state] = s
+                    if t.to_state == state {
+                        found = true
+                        break
+                    }
+                    queue.push_back(t.to_state)
+                }
+            }
+        }
+        if !found {
+            return false
+        }
+        var path = List<str>()
+        var s = state
+        while s != current {
+            path.push(s)
+            s = prev[s]
+        }
+        path.reverse()
+        route = path
+        return true
+    }
+
+    // Finds the player sibling.
+    fn find_player() -> AnimationPlayer {
+        if parent == null {
+            return null
+        }
+        for c in parent.children {
+            if c is AnimationPlayer p {
+                if player_path == "" || p.name == player_path {
+                    return p
+                }
+            }
+        }
+        return null
+    }
+
+    // A playhead for the state at `si`.
+    fn make_head(si: int) -> AnimPlayhead {
+        var ai = player.index_of(states[si].animation)
+        if ai < 0 {
+            print("AnimationTree: state '{states[si].name}' uses a missing animation '{states[si].animation}'")
+            return null
+        }
+        return AnimPlayhead(player.animations, ai)
+    }
+
+    // Starts in `start_state` (or the first state) once.
+    fn init_if_needed() {
+        if current != "" || states.is_empty() {
+            return
+        }
+        if player == null {
+            player = find_player()
+        }
+        if player == null {
+            return
+        }
+        var si = state_index(start_state)
+        if si < 0 {
+            si = 0
+        }
+        current = states[si].name
+        head = make_head(si)
+        head_speed = states[si].speed
+        player.playing = false
+    }
+
+    // Switches to `state`, fading from the old pose over `duration` ticks.
+    fn enter(state: str, duration: int, interp: AnimInterp, ease_kind: Ease, curve: float) {
+        init_if_needed()
+        if player == null {
+            return
+        }
+        var si = state_index(state)
+        if si < 0 {
+            return
+        }
+        var old = current
+        if duration > 0 {
+            if fade_total > 0 {
+                // Interrupting a fade: the blended pose so far becomes the outgoing side.
+                snapshot.copy_from(last_pose)
+                from_head = null
+            } else {
+                from_head = head
+                from_speed = head_speed
+            }
+        } else {
+            from_head = null
+        }
+        current = state
+        head = make_head(si)
+        head_speed = states[si].speed
+        fade_total = duration > 0 ? duration : 0
+        // evaluate() counts a tick before it decides; a call from outside (goto) starts one earlier.
+        fade_t = evaluating ? 0 : -1
+        fade_interp = interp
+        fade_kind = ease_kind
+        fade_curve = curve
+        emit state_changed(old, state)
+    }
+
+    // True when every condition of `t` holds.
+    fn conditions_hold(t: AnimTransition) -> bool {
+        for c in t.conditions {
+            var v = param(c.param)
+            var ok = false
+            match c.op {
+                AnimCondOp.IsTrue => ok = v >= 0.5
+                AnimCondOp.IsFalse => ok = v < 0.5
+                AnimCondOp.Eq => ok = v == c.value
+                AnimCondOp.Ne => ok = v != c.value
+                AnimCondOp.Lt => ok = v < c.value
+                AnimCondOp.Le => ok = v <= c.value
+                AnimCondOp.Gt => ok = v > c.value
+                AnimCondOp.Ge => ok = v >= c.value
+                AnimCondOp.Trigger => ok = v >= 0.5
+            }
+            if !ok {
+                return false
+            }
+        }
+        return true
+    }
+
+    // Takes the first transition out of the current state that can fire.
+    fn decide() {
+        if !route.is_empty() {
+            if fade_total > 0 {
+                return
+            }
+            var hop = route[0]
+            for t in transitions {
+                if (t.from_state == current || t.from_state == "*") && t.to_state == hop {
+                    if t.at_end && !(head != null && head.at_end()) {
+                        return
+                    }
+                    route.remove(0)
+                    enter(hop, t.duration, t.interp, t.ease_kind, t.curve)
+                    return
+                }
+            }
+            route.clear()
+            return
+        }
+        for t in transitions {
+            if t.from_state != "*" && t.from_state != current {
+                continue
+            }
+            if t.to_state == current || state_index(t.to_state) < 0 {
+                continue
+            }
+            if t.at_end && !(head != null && head.at_end()) {
+                continue
+            }
+            if !conditions_hold(t) {
+                continue
+            }
+            for c in t.conditions {
+                if c.op == AnimCondOp.Trigger {
+                    params[c.param] = 0.0
+                }
+            }
+            enter(t.to_state, t.duration, t.interp, t.ease_kind, t.curve)
+            return
+        }
+    }
+
+    // One evaluation: advance, decide, blend, apply.
+    fn evaluate() {
+        init_if_needed()
+        if player == null || head == null {
+            return
+        }
+        player.playing = false
+        if fade_total > 0 {
+            fade_t += 1
+        }
+        fired.clear()
+        head.advance(speed * head_speed, fired)
+        if from_head != null {
+            var scratch = List<AnimFired>()
+            from_head.advance(speed * from_speed, scratch)
+        }
+        evaluating = true
+        decide()
+        evaluating = false
+        var root = player.root_node()
+        head.sample_into(pose_b)
+        if fade_total > 0 {
+            if from_head != null {
+                from_head.sample_into(pose_a)
+            } else {
+                pose_a.copy_from(snapshot)
+            }
+            var u = min(1.0, (fade_t as float) / (fade_total as float))
+            anim_blend(pose_a, pose_b, anim_shape(fade_interp, fade_kind, fade_curve, u), player.binder, root, pose_out)
+            if fade_t >= fade_total {
+                fade_total = 0
+                fade_t = 0
+                from_head = null
+            }
+            player.apply_pose(pose_out)
+            last_pose.copy_from(pose_out)
+        } else {
+            player.apply_pose(pose_b)
+            last_pose.copy_from(pose_b)
+        }
+        player.dispatch_list(fired)
+        for n in pulses {
+            params[n] = 0.0
+        }
+        pulses.clear()
+    }
+
+    // Engine-internal: evaluates once per tick before the children's update().
+    fn update_tree(dt: float) {
+        if !freed && active && can_process() {
+            evaluate()
+        }
+        super.update_tree(dt)
+    }
+}

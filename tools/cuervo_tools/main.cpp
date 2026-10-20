@@ -3,14 +3,14 @@
 //   cuervo-tools scene dump <file.scene>               stable text view on stdout
 //   cuervo-tools scene build <file.txt> <file.scene>   text view -> binary
 //   cuervo-tools scene upgrade <file.scene> [<out>]    rewrite in the current version
-//   cuervo-tools tier check <project> [--to compatible|full]
+//   cuervo-tools tier check <project> [--to compatible|full] [--platform linux|windows|web]
 //   cuervo-tools tier set <project> compatible|full [--force]
 //   cuervo-tools pack <project> -o <game.pak> [--platform linux|web|windows] [--strip] [--font <file>]
 //   cuervo-tools export <project> --platform linux|web|windows -o <dir> [--strip] [--runtime <path>]
 //                [--name <launcher>] [--font <file>] [--engine auto|full|stripped] [--cmake <path>]
 //                [--player-cache <dir>] [--no-verify] [--emsdk <dir>] [--host-build <dir>]
 //   cuervo-tools pack-info <game.pak>                  list a pack's entries and check its hash
-//   cuervo-tools docs [-o <file>] [--check <file>]     engine API reference (docs/API.md)
+//   cuervo-tools docs [-o <file>] [--check <file>] [--check-coverage]   engine API reference (docs/API.md)
 //
 // `pack` and `export` are the release path (DESIGN.md 4.11, docs/EXPORT.md):
 // the tier check, the importers and a deterministic archive; `export` adds the
@@ -27,6 +27,8 @@
 // cuervo/script/tier_check.hpp): every shader, script, scene and asset use the
 // target tier (default: the project's own render_tier) doesn't support, with
 // file:line:column. Exit code 0 when nothing blocks the tier, 1 otherwise.
+// `--platform` also refuses claims the platform doesn't provide (a Full tier on the web;
+// docs/support.json, milestone 8.8); `export` runs the same check for its target.
 // `tier set` is the migration itself: it runs the same check and rewrites
 // render_tier in project.toml only if there are no errors (or with --force).
 
@@ -59,7 +61,7 @@ int usage() {
                "  cuervo-tools scene dump <file.scene>\n"
                "  cuervo-tools scene build <file.txt> <file.scene>\n"
                "  cuervo-tools scene upgrade <file.scene> [<out.scene>]\n"
-               "  cuervo-tools tier check <project> [--to compatible|full]\n"
+               "  cuervo-tools tier check <project> [--to compatible|full] [--platform linux|windows|web]\n"
                "  cuervo-tools tier set <project> compatible|full [--force]\n"
                "  cuervo-tools pack <project> -o <game.pak> [--platform linux|web|windows] [--scripts source|native]\n"
                "               [--aot] [--strip] [--font <file>]\n"
@@ -70,7 +72,7 @@ int usage() {
                "  cuervo-tools pack-info <game.pak>\n"
                "  cuervo-tools fmt <file-or-project> [--check] [--write|-w]\n"
                "  cuervo-tools lsp [<project>] [--check-style|--no-check-style]\n"
-               "  cuervo-tools docs [-o <file.md>] [--check <file.md>]\n",
+               "  cuervo-tools docs [-o <file.md>] [--check <file.md>] [--check-coverage]\n",
                stderr);
     return 2;
 }
@@ -118,14 +120,24 @@ int tier_command(int argc, char** argv) {
     const std::string_view cmd = argv[2];
     const std::string project = argv[3];
     std::string error;
-    if (cmd == "check" && (argc == 4 || argc == 6)) {
+    if (cmd == "check") {
         std::optional<rhi::Tier> target;
-        if (argc == 6) {
-            rhi::Tier t{};
-            if (std::string_view(argv[4]) != "--to" || !rhi::parse_tier(argv[5], t)) return usage();
-            target = t;
+        std::optional<script::support::Target> platform;
+        for (int i = 4; i < argc; i += 2) {
+            const std::string_view flag = argv[i];
+            if (i + 1 >= argc) return usage();
+            if (flag == "--to") {
+                rhi::Tier t{};
+                if (!rhi::parse_tier(argv[i + 1], t)) return usage();
+                target = t;
+            } else if (flag == "--platform") {
+                platform = script::support::parse_target(argv[i + 1]);
+                if (!platform) return usage();
+            } else {
+                return usage();
+            }
         }
-        auto report = script::check_project_tier(project, target, error);
+        auto report = script::check_project_tier(project, target, error, script::default_tier_rules(), platform);
         if (!report) return fail(error);
         const std::string text = script::format_tier_report(*report);
         std::fwrite(text.data(), 1, text.size(), stdout);
@@ -464,9 +476,12 @@ int lsp_command(int argc, char** argv) {
 // api_docs.hpp). `--check` is for ctest: docs/API.md must match the prelude.
 int docs_command(int argc, char** argv) {
     std::string out_path, check_path;
+    bool coverage = false;
     for (int i = 2; i < argc; ++i) {
         const std::string_view a = argv[i];
-        if ((a == "-o" || a == "--out") && i + 1 < argc) {
+        if (a == "--check-coverage") {
+            coverage = true;
+        } else if ((a == "-o" || a == "--out") && i + 1 < argc) {
             out_path = argv[++i];
         } else if (a == "--check" && i + 1 < argc) {
             check_path = argv[++i];
@@ -475,6 +490,14 @@ int docs_command(int argc, char** argv) {
         }
     }
     std::string error;
+    if (coverage) {
+        // Every public prelude symbol needs a doc comment (DESIGN.md 4.16, 8.4).
+        auto cov = cuervo::tools::check_api_coverage(cuervo::script::engine_preludes(), error);
+        if (!cov) return fail("the prelude doesn't parse:\n" + error);
+        for (const std::string& m : cov->missing) std::fprintf(stderr, "undocumented: %s\n", m.c_str());
+        std::printf("prelude doc coverage: %zu of %zu public symbols documented\n", cov->documented, cov->total);
+        return cov->missing.empty() ? 0 : 1;
+    }
     auto docs = cuervo::tools::generate_api_docs(cuervo::script::engine_preludes(), error);
     if (!docs) return fail("the prelude doesn't parse:\n" + error);
     if (!check_path.empty()) {

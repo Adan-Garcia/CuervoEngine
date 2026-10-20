@@ -1,9 +1,10 @@
 # cuervo-editor
 
 The Cuervo Engine editor (DESIGN.md 4.13): a standalone Dear ImGui application built on
-the engine. Phase 6A is the editor shell: open, build and save scenes without writing
-code. Phase 6B adds the asset browser, the input-map editor, play-in-editor with hot
-reload, replays and the debugger, and the tier migration report.
+the engine. It opens, builds and saves scenes without writing code, and has an asset
+browser, an input-map editor, play-in-editor with hot reload, replays, a debugger, a
+profiler and the tier migration report. It is desktop only (verified on Linux; Windows is
+experimental, see [STATUS.md](../docs/STATUS.md)); there is no web editor.
 
 ```sh
 cmake --build build/<dir> --target editor
@@ -24,10 +25,11 @@ build/<dir>/editor/cuervo-editor --project examples/shmup --scene scenes/title.s
 | `--quit-after <s>`, `--vsync off`, `--font <file.ttf>` | as for `cuervo` |
 | `--jobs <n>`, `--no-audio` | play sessions: job threads, null audio backend |
 | `--replay-verify <file.replay>` | headless: replay it and compare every tick's state hash; exit 1 at the first mismatch (docs/REPLAYS.md) |
+| `--new-project <dir>` | headless: create a project like the welcome screen's *New project* (`--template empty\|walker`, default `empty`; `--name`, default the folder name), print its path, exit |
 | `--tabs <Panel,...>` | bring these panels' tabs to the front (screenshots) |
 | `--profile` | start the Profiler panel recording (engine zones + script functions) |
 | `--theme light\|dark` | the brand theme (Bone or Raven); default: the OS's preference. *View > Theme* switches it live |
-| `--splash`, `--no-splash` | hold the splash until a click or key (screenshots of it) / never show it. By default it shows for about two seconds at start (not with `--screenshot`) |
+| `--splash`, `--no-splash` | hold the splash until a click or key (screenshots of it) / never show it. By default it shows for about a second and a half at start (not with `--screenshot`) |
 | `--accept-eula` | accept the license agreement for this user (stored; same as the check box). `CUERVO_ACCEPT_EULA=<version>` accepts one run without storing |
 | `--screen eula\|welcome` | show that first-launch screen even when it is not needed (screenshots; nothing is stored) |
 | `--layout <name>` | start in that saved layout (Default, Debugging, Minimal or yours) |
@@ -36,7 +38,7 @@ build/<dir>/editor/cuervo-editor --project examples/shmup --scene scenes/title.s
 `--font` sets the font of the scene view's text (the game's font); the editor UI uses the
 brand fonts (below).
 
-## Brand (milestone 8.1)
+## Brand
 
 The editor wears the Cuervo brand (DESIGN.md 4.16): its window icon is the Cuervo Mark
 app icon (embedded in the engine, also `cuervo`'s icon), its colors are the design kit's
@@ -45,8 +47,7 @@ light (Bone) and dark (Raven) themes generated from `assets/brand/tokens.json`
 and the console is JetBrains Mono (TTFs fetched by CMake). At start a splash shows the
 mark and wordmark as the kit's horizontal lockup, imported from `assets/brand/logo/*.svg`
 by the engine's own SVG importer and drawn as vector meshes, with an Outfit caption;
-click or press a key to skip it. The full token-driven style, the welcome screen and
-icons are milestone 8.3.
+click or press a key to skip it.
 
 ```sh
 cuervo-editor --project examples/editor_level --theme light --splash --screenshot splash-light.ppm
@@ -56,7 +57,7 @@ cuervo-editor --project examples/editor_level --theme dark --screenshot editor-d
 The editor is desktop-only: the web build (Emscripten) never configures `editor/`.
 `-DCUERVO_BUILD_EDITOR=OFF` skips it (and the Dear ImGui download) elsewhere too.
 
-## First run, welcome screen (milestone 8.3)
+## First run, welcome screen
 
 A fresh user account sees the **license agreement** before anything else opens: the
 plain-English summary on top, the scrollable [agreement](../LICENSE.md) and the
@@ -77,7 +78,7 @@ choice opens the editor; *Project > Switch Project...* comes back here. Recents 
 `editor-recent-projects.txt` in the user data folder. Screenshot and test runs never
 write any of the per-user files.
 
-## Interface (milestone 8.3)
+## Interface
 
 - **Toolbar** under the menu bar: new/open/save, undo/redo, the tools, snapping, frame
   scene, Play/Record/Pause/Step/Stop, and the **command palette** box. Icons are vector
@@ -274,7 +275,7 @@ are coerced to the field's type: `12`, `0.25`, `(640.0, 150.0)`, `"text"`, `#nam
 rrggbbaa) or `Color { r = 1.0, a = 0.5 }` (missing fields keep their current value), a
 list as `[1, 2]`.
 
-Phase 6B commands (play, replays, input map, assets):
+Play, replay, input-map and asset commands:
 
 | Command | |
 |---|---|
@@ -284,7 +285,9 @@ Phase 6B commands (play, replays, input map, assets):
 | `step [n]` | run n ticks now (default 1); stops early at a panic |
 | `hold <action>`, `release <action>` | hold a project action on the following ticks |
 | `expect-tick <n>`, `expect-hash <hex>` | checks on the running game |
+| `print-hash` | logs `at tick N (state hash H)`, the runtime's wording, so a script can hand the hash to a test |
 | `expect-state stopped\|playing\|paused`, `expect-panic <text>`, `expect-clean` | the play state; a panic mentioning text (message, trace or locals); no unsaved scene changes |
+| `append-file <path> <text>`, `reload` | appends a line to a project file (a script edit); force a hot reload of the playing game (fails if it did not reload) |
 | `record start\|stop`, `record save <path>` | recording, and saving it as a replay |
 | `replay load <path>`, `replay seek <tick>`, `replay verify`, `replay expect-mismatch <tick>` | play a replay back, verify every hash to the end |
 | `input add-action\|remove-action <a>`, `input rename-action <a> <b>`, `input bind\|unbind <a> <binding>` | input map edits |
@@ -292,7 +295,7 @@ Phase 6B commands (play, replays, input map, assets):
 | `input undo\|redo\|save`, `input expect <action> [bindings...]` | |
 | `asset mkdir <path>`, `asset rename <path> <name>`, `asset delete <path>`, `asset expect[-missing] <path>` | file operations |
 
-Milestone 8.3 commands (gizmos, multi-select, the palette, history):
+Gizmo, multi-select, palette and history commands:
 
 | Command | |
 |---|---|
@@ -310,8 +313,7 @@ device input (only `hold`) and the pointer at (0, 0), like a headless `cuervo --
 `examples/editor_level/level.cmds` builds that example's level this way; the
 `editor_level` test rebuilds it with the shipped binary, checks the result against the
 checked-in scene byte for byte and runs it with `cuervo --game`.
-`examples/node_level/level.cmds` builds a level from the built-in nodes (milestone 8.2,
-no scripts); the `node_level` test also round-trips it through the scene text view and
+`examples/node_level/level.cmds` builds a level from the built-in nodes (no scripts); the `node_level` test also round-trips it through the scene text view and
 plays the saved scene in the editor to the runtime's state hash.
 
 ## How it is built
@@ -338,8 +340,8 @@ plays the saved scene in the editor to the runtime's state hash.
 - `app`, `app_ui` and `*_panel` — the window, frame loop and rendering (`app.cpp`); the
   menu bar, toolbar, dock space and DockBuilder default layout, command palette,
   messages, shortcuts, layouts and the action registry (`app_ui.cpp`); and the panels.
-  The 6B panels are `asset_panel`, `input_map_panel`, `debugger_panel`, `replay_panel`
-  and `tier_panel`; Phase 8 adds `profiler_panel` and `history_panel`.
+  The panels include `asset_panel`, `input_map_panel`, `debugger_panel`, `replay_panel`,
+  `tier_panel`, `profiler_panel` and `history_panel`.
 - `theme`, `ui`, `icons`, `messages` — the brand-token ImGui style (every color and metric
   set from the tokens; `tests/editor/editor_ui_tests.cpp` compares it with ImGui's own
   defaults), shared widgets, the vector icons and the message formula.
@@ -350,5 +352,5 @@ plays the saved scene in the editor to the runtime's state hash.
   gate itself is `cuervo/platform/eula.*`.
 
 `editor_core` (everything but the window and ImGui) is a library that
-`tests/editor/editor_tests.cpp` and `editor_6b_tests.cpp` link headless; the
+`tests/editor/editor_tests.cpp`, `editor_6b_tests.cpp` and `editor_83_tests.cpp` link headless; the
 `editor_level` and `editor_replay` ctests run the shipped binaries.

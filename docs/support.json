@@ -1,0 +1,833 @@
+{
+ "comment": "The single source of truth for the support matrix (milestone 8.8, DESIGN.md 4.4, 4.16). The tables in docs/STATUS.md and README.md are generated from it by tools/support_matrix.py; cuervo/script/support.cpp compiles it in (CMake string(JSON)) so the tier and export checks read the same data. Edit this file, then run: python3 -I tools/support_matrix.py --write",
+ "levels": [
+  {
+   "id": "stable",
+   "title": "Stable",
+   "meaning": "Shipped and covered by the test suite (`ctest`) or a verified end-to-end run. Changes that break it are bugs."
+  },
+  {
+   "id": "experimental",
+   "title": "Experimental",
+   "meaning": "Shipped and usable, but with known gaps, limited verification, or an interface that may still change."
+  },
+  {
+   "id": "planned",
+   "title": "Planned",
+   "meaning": "Designed, with a milestone in DESIGN.md section 6, but not in the tree. Do not build on it."
+  },
+  {
+   "id": "unsupported",
+   "title": "Unsupported",
+   "meaning": "Not provided and not on the near-term roadmap."
+  }
+ ],
+ "targets": [
+  {
+   "id": "linux",
+   "name": "Linux",
+   "status": "stable"
+  },
+  {
+   "id": "windows",
+   "name": "Windows",
+   "status": "experimental"
+  },
+  {
+   "id": "web",
+   "name": "Web",
+   "status": "stable"
+  }
+ ],
+ "sections": [
+  {
+   "id": "platforms",
+   "title": "Platforms",
+   "entries": [
+    {
+     "id": "linux-vulkan",
+     "name": "Linux x86-64, Vulkan 1.3",
+     "status": "stable",
+     "platforms": [
+      "linux"
+     ],
+     "desktop_only": true,
+     "web": false,
+     "tier": "compatible",
+     "note": "Development and verification platform (Arch Linux; NVIDIA RTX 3060 Ti). Serves both render tiers."
+    },
+    {
+     "id": "linux-gl",
+     "name": "Linux x86-64, OpenGL 3.3 core",
+     "status": "stable",
+     "platforms": [
+      "linux"
+     ],
+     "desktop_only": true,
+     "web": false,
+     "tier": "compatible",
+     "note": "The fallback when there is no Vulkan driver; renders the same scenes as Vulkan (the `rhi_parity` test). Compatible tier only."
+    },
+    {
+     "id": "linux-gles",
+     "name": "Linux, OpenGL ES 3.0 (`--gl-es`)",
+     "status": "stable",
+     "platforms": [
+      "linux"
+     ],
+     "desktop_only": true,
+     "web": false,
+     "tier": "compatible",
+     "note": "The web's shader path, testable on the desktop."
+    },
+    {
+     "id": "web-chrome",
+     "name": "Web (WebGL2 / WASM), Chrome",
+     "status": "stable",
+     "platforms": [
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "compatible",
+     "note": "Single-threaded by default; the shmup reaches the same state hash as the native build. See [WEB.md](WEB.md). Compatible tier only."
+    },
+    {
+     "id": "web-threads",
+     "name": "Web, WASM threads",
+     "status": "experimental",
+     "platforms": [
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "compatible",
+     "note": "Opt-in (`CUERVO_WEB_THREADS`, presets `web-threads` and `web-pack-threads`); the page must be cross-origin isolated."
+    },
+    {
+     "id": "web-other-browsers",
+     "name": "Web, Firefox and Safari",
+     "status": "experimental",
+     "platforms": [
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "compatible",
+     "note": "Untested; any WebGL2 browser should work."
+    },
+    {
+     "id": "windows",
+     "name": "Windows",
+     "status": "experimental",
+     "platforms": [
+      "windows"
+     ],
+     "desktop_only": true,
+     "web": false,
+     "tier": "none",
+     "note": "The Clang debug build passes all tests and matches the Linux state hashes on Intel Arc (GL) and an RTX 4070 (Vulkan). MSVC, MinGW-w64 and release builds are not checked yet; not marked supported until milestone 10.5a passes. No prebuilt binaries; `export --platform windows` needs a Windows player. See [WINDOWS.md](WINDOWS.md)."
+    },
+    {
+     "id": "other-platforms",
+     "name": "macOS, iOS, Android, consoles",
+     "status": "unsupported",
+     "platforms": [],
+     "desktop_only": false,
+     "web": false,
+     "tier": "none",
+     "note": "Only the long-term Phase 14 mentions them."
+    }
+   ]
+  },
+  {
+   "id": "rendering",
+   "title": "Rendering",
+   "entries": [
+    {
+     "id": "backend-vulkan",
+     "name": "Vulkan backend",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows"
+     ],
+     "desktop_only": true,
+     "web": false,
+     "tier": "compatible",
+     "note": "Desktop only; supports both render tiers."
+    },
+    {
+     "id": "backend-gl",
+     "name": "GL backend (GL 3.3, GLES 3.0, WebGL2)",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "compatible",
+     "note": "Every RHI feature is implemented in both backends in the same change."
+    },
+    {
+     "id": "tier-compatible",
+     "name": "`compatible` render tier",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "compatible",
+     "note": "Promises what WebGL2 offers: 4096 px textures, 4x MSAA, 16 KB uniform ranges. Exports to every target. See Render tiers below."
+    },
+    {
+     "id": "tier-full",
+     "name": "`full` render tier",
+     "status": "experimental",
+     "platforms": [
+      "linux",
+      "windows"
+     ],
+     "desktop_only": true,
+     "web": false,
+     "tier": "full",
+     "note": "Vulkan on the desktop only. The only Full-only feature today is base-vertex indexed draws; compute, storage buffers and bindless are planned. A Full project on GL or the web is refused. See Render tiers below."
+    },
+    {
+     "id": "tier-report",
+     "name": "Tier migration report (`cuervo-tools tier check`, editor Tier Report)",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows"
+     ],
+     "desktop_only": true,
+     "web": false,
+     "tier": "none",
+     "note": "Scans project settings, shaders, scripts, scenes and assets, and checks the claimed tier and target platform against this page."
+    },
+    {
+     "id": "vector-shapes",
+     "name": "SDF shapes, MSDF text, SVG import (practical subset)",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "compatible",
+     "note": "Unsupported SVG features (filters, masks, CSS, embedded text) are skipped with a warning."
+    },
+    {
+     "id": "gpu-particles",
+     "name": "GPU compute visual particles",
+     "status": "planned",
+     "platforms": [],
+     "desktop_only": false,
+     "web": false,
+     "tier": "full",
+     "note": "Visual particles run on the CPU on every tier today."
+    },
+    {
+     "id": "raster-images",
+     "name": "Raster images, sprite sheets, atlases, custom shaders, post-processing",
+     "status": "planned",
+     "platforms": [],
+     "desktop_only": false,
+     "web": false,
+     "tier": "none",
+     "note": "Milestone 11.2. Art is vector first."
+    },
+    {
+     "id": "svg-fallback",
+     "name": "SVG rasterized fallback, text shaping (right-to-left, complex scripts)",
+     "status": "planned",
+     "platforms": [],
+     "desktop_only": false,
+     "web": false,
+     "tier": "none",
+     "note": "Milestones 11.2 and 11.3."
+    },
+    {
+     "id": "lighting",
+     "name": "2D lighting",
+     "status": "planned",
+     "platforms": [],
+     "desktop_only": false,
+     "web": false,
+     "tier": "none",
+     "note": "Milestone 9.7."
+    },
+    {
+     "id": "webgpu",
+     "name": "WebGPU",
+     "status": "planned",
+     "platforms": [],
+     "desktop_only": false,
+     "web": false,
+     "tier": "none",
+     "note": "Milestone 10, after Phases 8 and 9."
+    }
+   ]
+  },
+  {
+   "id": "simulation",
+   "title": "Simulation and gameplay systems",
+   "entries": [
+    {
+     "id": "determinism",
+     "name": "Fixed timestep, seeded PCG32 RNG, deterministic math (`dmath`)",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "none",
+     "note": "Bit-identical on the same build and platform. Native Linux and the web build agree on the shmup state hash."
+    },
+    {
+     "id": "replays",
+     "name": "Replays (record, verify, seek)",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "none",
+     "note": "[REPLAYS.md](REPLAYS.md)."
+    },
+    {
+     "id": "jobs-simd",
+     "name": "Job system and SIMD kernels",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "none",
+     "note": "The same state hash for any thread count and with SIMD on or off."
+    },
+    {
+     "id": "particles",
+     "name": "Particles (gameplay and visual modes)",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "none",
+     "note": "Gameplay mode is deterministic and collidable; see `cuervo/particles/README.md`."
+    },
+    {
+     "id": "collision",
+     "name": "Collision (circles, capsules, spatial hash)",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "none",
+     "note": "AABB and OBB shapes are planned."
+    },
+    {
+     "id": "audio",
+     "name": "Audio (miniaudio decoding, own mixer, buses, voice limiting)",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "none",
+     "note": "Per-bus effects and positional audio are planned."
+    },
+    {
+     "id": "scenes",
+     "name": "Node tree, scene files (versioned binary, text dump)",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "none",
+     "note": "[SCENES.md](SCENES.md)."
+    },
+    {
+     "id": "node-library",
+     "name": "Node library (shapes, paths, sprites, text, camera, timer, area, emitter, audio player, lines, polygons)",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "none",
+     "note": "See [API.md](API.md)."
+    },
+    {
+     "id": "hierarchy",
+     "name": "Transform hierarchy",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "none",
+     "note": "On by default; `[scene] transform_hierarchy = false` keeps world-space behavior."
+    },
+    {
+     "id": "ui",
+     "name": "UI controls and widgets (containers, scroll, tabs, popups, `LineEdit`, ...)",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "none",
+     "note": "Keyboard, gamepad and pointer. No on-screen keyboard and no IME composition yet."
+    },
+    {
+     "id": "animation",
+     "name": "Animation: `AnimationPlayer` (property, method and event tracks), `Tween`, `AnimationTree` state machine with cross-fades",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "none",
+     "note": "Time is in ticks and animations are saved in scene files; see [GUIDE.md](GUIDE.md) and [SCENES.md](SCENES.md). Replays include the values animation writes."
+    },
+    {
+     "id": "animation-advanced",
+     "name": "Cutout, skeletal and morph animation, Bezier key handles, blend spaces, layered blending",
+     "status": "planned",
+     "platforms": [],
+     "desktop_only": false,
+     "web": false,
+     "tier": "none",
+     "note": "Not implemented. The track system is designed to carry cutout, skeletal and morph tracks (DESIGN.md 4.17)."
+    },
+    {
+     "id": "physics",
+     "name": "Physics (Box2D v3), tilemaps and navigation",
+     "status": "planned",
+     "platforms": [],
+     "desktop_only": false,
+     "web": false,
+     "tier": "none",
+     "note": "Milestones 9.5 and 9.6."
+    },
+    {
+     "id": "ecs",
+     "name": "General ECS exposed to scripts",
+     "status": "planned",
+     "platforms": [],
+     "desktop_only": false,
+     "web": false,
+     "tier": "none",
+     "note": "Milestone 12.4 decides whether to expose it or drop it."
+    },
+    {
+     "id": "networking",
+     "name": "Networking (lockstep, rollback), HTTP and WebSocket",
+     "status": "planned",
+     "platforms": [],
+     "desktop_only": false,
+     "web": false,
+     "tier": "none",
+     "note": "Milestone 11.1."
+    },
+    {
+     "id": "services",
+     "name": "Localization, save and settings API, accessibility features",
+     "status": "planned",
+     "platforms": [],
+     "desktop_only": false,
+     "web": false,
+     "tier": "none",
+     "note": "Milestones 11.3, 11.4 and 12.3. Today games save through `Scene.save`."
+    },
+    {
+     "id": "3d",
+     "name": "3D",
+     "status": "unsupported",
+     "platforms": [],
+     "desktop_only": false,
+     "web": false,
+     "tier": "none",
+     "note": "Phase 13, long term."
+    }
+   ]
+  },
+  {
+   "id": "language",
+   "title": "The Pluma language and its tools",
+   "entries": [
+    {
+     "id": "vm",
+     "name": "Bytecode VM, type checker, coroutines, signals, hot reload",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "none",
+     "note": "[LANGUAGE.md](LANGUAGE.md), [PLUMA_GUIDE.md](PLUMA_GUIDE.md)."
+    },
+    {
+     "id": "stdlib",
+     "name": "Collections, strings, `Result` and `?`, math, geometry, noise, seeded `Rng`",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "none",
+     "note": "The same results in the VM and in AOT."
+    },
+    {
+     "id": "memory",
+     "name": "Memory model (refcounting, cycle collector, opt-in manual memory)",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "none",
+     "note": ""
+    },
+    {
+     "id": "aot",
+     "name": "AOT-to-C compilation",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows"
+     ],
+     "desktop_only": true,
+     "web": false,
+     "tier": "none",
+     "note": "Host platform only: the export host must be the target (Linux or Windows). Needs a C compiler. Windows is validated with the Clang debug build (docs/WINDOWS.md). Not used for web exports (web games ship scripts as source); an AOT export for another platform is refused."
+    },
+    {
+     "id": "lang-tools",
+     "name": "Formatter, language server, VS Code extension",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows"
+     ],
+     "desktop_only": true,
+     "web": false,
+     "tier": "none",
+     "note": "`cuervo-tools fmt`, `cuervo-tools lsp`, [the extension](../tools/vscode-pluma/README.md). Host tools."
+    },
+    {
+     "id": "debugger",
+     "name": "Debugger (DAP) and profiler",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows"
+     ],
+     "desktop_only": true,
+     "web": false,
+     "tier": "none",
+     "note": "On the VM only; not available for AOT-native exports or the web."
+    },
+    {
+     "id": "modules",
+     "name": "Modules, `import` and packages",
+     "status": "planned",
+     "platforms": [],
+     "desktop_only": false,
+     "web": false,
+     "tier": "none",
+     "note": "Milestone 10.5b; project scripts share one global namespace today."
+    },
+    {
+     "id": "plugins",
+     "name": "Plugin API, FFI, embedding",
+     "status": "planned",
+     "platforms": [],
+     "desktop_only": false,
+     "web": false,
+     "tier": "none",
+     "note": "Milestone 10.5c."
+    }
+   ]
+  },
+  {
+   "id": "tools",
+   "title": "Editor, tools and export",
+   "entries": [
+    {
+     "id": "editor",
+     "name": "Editor (`cuervo-editor`)",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows"
+     ],
+     "desktop_only": true,
+     "web": false,
+     "tier": "none",
+     "note": "Scene tree, inspector, gizmos, docking layouts, play-in-editor, replays, debugger, profiler. Desktop only; there is no web editor. See [editor/README.md](../editor/README.md)."
+    },
+    {
+     "id": "export-linux",
+     "name": "Export for Linux (source and AOT scripts, stripped players)",
+     "status": "stable",
+     "platforms": [
+      "linux"
+     ],
+     "desktop_only": true,
+     "web": false,
+     "tier": "none",
+     "note": "Shared libraries (SDL3, and FreeType for full players) are not bundled. [EXPORT.md](EXPORT.md)."
+    },
+    {
+     "id": "export-web",
+     "name": "Export for the web",
+     "status": "stable",
+     "platforms": [
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "compatible",
+     "note": "Needs an emsdk (6.0.12) and a host-tools build. Compatible tier only; a Full project is refused."
+    },
+    {
+     "id": "export-windows",
+     "name": "Export for Windows",
+     "status": "experimental",
+     "platforms": [
+      "windows"
+     ],
+     "desktop_only": true,
+     "web": false,
+     "tier": "none",
+     "note": "Needs a Windows player (`--runtime`). An export of the shmup made with the Clang debug player reaches the Linux state hash with bytecode and AOT scripts; other games and release players are untested."
+    },
+    {
+     "id": "pack",
+     "name": "Pack format (`game.pak`)",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "none",
+     "note": "Deterministic, integrity-checked, uncompressed (the web server compresses)."
+    },
+    {
+     "id": "docs-site",
+     "name": "Documentation site (`docs_site` target)",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows"
+     ],
+     "desktop_only": true,
+     "web": false,
+     "tier": "none",
+     "note": "Built from these Markdown files; every link is checked, and the support tables are checked against `docs/support.json`."
+    },
+    {
+     "id": "dev-features",
+     "name": "Dev-only features (`--demo`, `--svg`, `--bench`)",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows"
+     ],
+     "desktop_only": true,
+     "web": false,
+     "tier": "none",
+     "note": "Not in stripped players."
+    },
+    {
+     "id": "registry",
+     "name": "Plugin registry, `license report`, signed prebuilt editor and export templates",
+     "status": "planned",
+     "platforms": [],
+     "desktop_only": false,
+     "web": false,
+     "tier": "none",
+     "note": "Milestones 10.5a to 10.5d."
+    },
+    {
+     "id": "content-tools",
+     "name": "Content tools (dialogue, timeline, particle and shader editors), AI tools",
+     "status": "planned",
+     "platforms": [],
+     "desktop_only": false,
+     "web": false,
+     "tier": "none",
+     "note": "Milestones 12.1 and 12.2."
+    }
+   ]
+  }
+ ],
+ "tiers": {
+  "compatible": {
+   "summary": "The portable tier and the default. A project that stays inside it runs unchanged on Vulkan, OpenGL 3.3, OpenGL ES 3.0 and WebGL2.",
+   "backends": [
+    "Vulkan",
+    "OpenGL 3.3",
+    "OpenGL ES 3.0",
+    "WebGL2"
+   ],
+   "platforms": [
+    "linux",
+    "windows",
+    "web"
+   ],
+   "limits": {
+    "max_texture_size": 4096,
+    "max_msaa_samples": 4,
+    "max_uniform_block_size": 16384,
+    "max_vertex_attributes": 16,
+    "uniform_offset_alignment": 256
+   },
+   "guarantees": [
+    "Every Compatible RHI feature in the table below is available on every backend and platform that serves the tier.",
+    "The device is clamped to the limits above even when the hardware offers more, so a game tested on Vulkan cannot use what WebGL2 lacks.",
+    "The optional features (MSAA, frame capture) degrade instead of breaking a project when a device lacks them."
+   ],
+   "refuses": [
+    "Custom shader constructs GLES 3.0 cannot express (storage buffers, image load/store, atomics, subgroups, bindless, 64-bit floats, ...): a tier check error.",
+    "Compute, geometry, tessellation, mesh and task shader stages: a tier check error.",
+    "Textures larger than the limit above (split them into an atlas): a tier check error.",
+    "Full-only RHI features: the gated device logs once and ignores the call."
+   ]
+  },
+  "full": {
+   "summary": "The desktop tier. Everything Compatible has, plus features only Vulkan provides. It is the migration target when a game outgrows WebGL2.",
+   "backends": [
+    "Vulkan"
+   ],
+   "platforms": [
+    "linux",
+    "windows"
+   ],
+   "limits": {},
+   "guarantees": [
+    "Runs on the Vulkan backend on Linux (and on Windows, experimental) only. Full has no fixed numeric minimums yet.",
+    "The Full RHI features in the table below are required: a Vulkan device missing one is refused."
+   ],
+   "refuses": [
+    "The OpenGL backend: a Full project on GL, or on any device that cannot serve Full, is refused at startup with an error naming --backend vulkan.",
+    "The web: a Full project cannot be exported with --platform web (tier check and export both refuse it).",
+    "Exports for a platform this page does not list for the tier."
+   ]
+  }
+ },
+ "rhi_features": [
+  {
+   "name": "instanced draws",
+   "tier": "compatible",
+   "required": true,
+   "note": "draw and draw_indexed with instance_count and first_instance"
+  },
+  {
+   "name": "32-bit indices",
+   "tier": "compatible",
+   "required": true,
+   "note": "IndexFormat::UInt32"
+  },
+  {
+   "name": "uniform buffers",
+   "tier": "compatible",
+   "required": true,
+   "note": "bound with offsets"
+  },
+  {
+   "name": "textures",
+   "tier": "compatible",
+   "required": true,
+   "note": "RGBA8 and R8 2D textures, nearest and linear"
+  },
+  {
+   "name": "integer vertex attributes",
+   "tier": "compatible",
+   "required": true,
+   "note": "VertexFormat::UInt1"
+  },
+  {
+   "name": "points and lines",
+   "tier": "compatible",
+   "required": true,
+   "note": "point lists, line lists and line strips, 1 px wide"
+  },
+  {
+   "name": "MSAA",
+   "tier": "compatible",
+   "required": false,
+   "note": "falls back to 1 sample"
+  },
+  {
+   "name": "frame capture",
+   "tier": "compatible",
+   "required": false,
+   "note": "a debug aid"
+  },
+  {
+   "name": "base-vertex draws",
+   "tier": "full",
+   "required": true,
+   "note": "draw_indexed_base_vertex; GLES 3.0 has no base vertex"
+  }
+ ]
+}

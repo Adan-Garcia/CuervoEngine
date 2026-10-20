@@ -2,7 +2,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <span>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "cuervo/math/vec.hpp"
@@ -17,6 +20,30 @@
 // Coordinates are world units (y down), angles radians (clockwise on screen);
 // see camera.hpp.
 namespace cuervo::render {
+
+namespace detail {
+// std::allocator that leaves default-constructed elements alone. append()
+// hands the new instances to a caller that overwrites every one, so
+// value-initializing them first was a wasted pass over 40 B each (80 MB a
+// frame at 2M particles). Only for trivially copyable element types.
+template <class T>
+struct UninitializedAllocator : std::allocator<T> {
+    static_assert(std::is_trivially_copyable_v<T>);
+    template <class U>
+    struct rebind {
+        using other = UninitializedAllocator<U>;
+    };
+    UninitializedAllocator() = default;
+    template <class U>
+    explicit UninitializedAllocator(const UninitializedAllocator<U>&) {}
+    template <class U>
+    void construct(U*) noexcept {}
+    template <class U, class... Args>
+    void construct(U* p, Args&&... args) {
+        ::new (static_cast<void*>(p)) U(std::forward<Args>(args)...);
+    }
+};
+} // namespace detail
 
 enum class SdfShape : std::uint32_t {
     Circle = 0,
@@ -97,7 +124,8 @@ public:
     void reserve(std::size_t count) { instances_.reserve(count); }
     void add(const SdfInstance& instance) { instances_.push_back(instance); }
     // Appends `count` instances for the caller to fill (several jobs may fill
-    // disjoint parts of the span). Valid until the next add/append/clear.
+    // disjoint parts of the span); the caller must write every one, they start
+    // uninitialized. Valid until the next add/append/clear.
     std::span<SdfInstance> append(std::size_t count) {
         const std::size_t first = instances_.size();
         instances_.resize(first + count);
@@ -151,7 +179,7 @@ private:
     rhi::BufferHandle instance_buffer_;
     rhi::BufferHandle globals_;
     std::size_t capacity_ = 0;
-    std::vector<SdfInstance> instances_;
+    std::vector<SdfInstance, detail::UninitializedAllocator<SdfInstance>> instances_;
     std::size_t flushed_ = 0; // instances already drawn this frame
 };
 

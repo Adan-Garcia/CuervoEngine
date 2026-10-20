@@ -134,11 +134,18 @@ std::optional<std::vector<std::byte>> pack_project(const fs::path& project, cons
     if (!proj) return std::nullopt;
     summary.game = proj->name;
     if (options.tier_gate) {
-        // The web runs only the compatible tier (DESIGN.md 4.4); other
-        // targets are checked against the project's own tier.
-        std::optional<rhi::Tier> target;
-        if (options.platform == assets::PackPlatform::Web) target = rhi::Tier::Compatible;
-        auto report = script::check_project_tier(project, target, error);
+        // The project's own tier is checked, and the claims it makes (a Full
+        // tier on the web, native scripts when the host is not the target) must be ones the target
+        // provides per docs/support.json (milestone 8.8, DESIGN.md 4.4).
+        std::optional<script::support::Target> platform;
+        switch (options.platform) {
+            case assets::PackPlatform::Linux: platform = script::support::Target::Linux; break;
+            case assets::PackPlatform::Windows: platform = script::support::Target::Windows; break;
+            case assets::PackPlatform::Web: platform = script::support::Target::Web; break;
+            case assets::PackPlatform::Any: break;
+        }
+        auto report = script::check_project_tier(project, std::nullopt, error, script::default_tier_rules(), platform,
+                                                 options.scripts == assets::ScriptForm::Native);
         if (!report) return std::nullopt;
         if (!report->ok()) {
             error = "the tier check failed (cuervo-tools tier check):\n" + script::format_tier_report(*report);

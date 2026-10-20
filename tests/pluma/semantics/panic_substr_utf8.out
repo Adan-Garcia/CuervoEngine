@@ -1,0 +1,2 @@
+test.plm:2:7: panic: substr(0, 2) splits a UTF-8 character
+    at <top level> (test.plm:2:7)

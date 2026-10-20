@@ -146,6 +146,27 @@ bool Window::handle_event(const SDL_Event& event, DeviceState& devices) {
                 break;
             }
 
+            case SDL_EVENT_TEXT_INPUT: {
+                // UTF-8 to code points; invalid bytes are skipped.
+                const char* t = event.text.text;
+                while (t != nullptr && *t != '\0') {
+                    const auto b = static_cast<unsigned char>(*t);
+                    const int extra = b < 0x80 ? 0 : (b >> 5) == 0x6 ? 1 : (b >> 4) == 0xE ? 2 : (b >> 3) == 0x1E ? 3 : -1;
+                    if (extra < 0) {
+                        ++t;
+                        continue;
+                    }
+                    char32_t cp = extra == 0 ? b : static_cast<char32_t>(b & (0x3F >> extra));
+                    int i = 1;
+                    for (; i <= extra && (static_cast<unsigned char>(t[i]) >> 6) == 0x2; ++i) {
+                        cp = (cp << 6) | (static_cast<unsigned char>(t[i]) & 0x3F);
+                    }
+                    t += i;
+                    if (i == extra + 1 && cp >= 0x20 && cp != 0x7F) devices.typed.push_back(cp);
+                }
+                break;
+            }
+
             case SDL_EVENT_WINDOW_FOCUS_LOST:
                 // Keys released while unfocused never send key-up events.
                 devices.keys.reset();
@@ -187,6 +208,15 @@ bool Window::handle_event(const SDL_Event& event, DeviceState& devices) {
         }
     }
     return keep_running;
+}
+
+void Window::set_text_input(bool on) {
+    if (window_ == nullptr || SDL_TextInputActive(window_) == on) return;
+    if (on) {
+        SDL_StartTextInput(window_);
+    } else {
+        SDL_StopTextInput(window_);
+    }
 }
 
 ivec2 Window::pixel_size() const {

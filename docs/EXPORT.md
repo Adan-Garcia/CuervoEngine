@@ -3,16 +3,16 @@
 A release is a **player executable plus one archive**, `game.pak`, that holds
 every file the game reads. Nothing reads the project directory any more: the
 runtime loads project.toml, scripts, scenes, sounds and the font from the pack
-through the engine's virtual file system (VFS). DESIGN.md 4.11 "A release export
-packs everything into a single archive per platform"; Phase 7C.
+through the engine's virtual file system (VFS). DESIGN.md 4.11: a release export
+packs everything into a single archive per platform.
 
 Status: **Linux and web exports built and verified**: the exported shmup reaches the
 same state hash at tick 240 as `cuervo --game examples/shmup`
 (`a3e57e79964421d3`), natively from an unrelated directory with the project
-deleted, and in headless Chrome. **Windows is not supported yet** (untested, see
-below). Linux exports ship a **stripped player** by default: an engine built
-with only the subsystems the game uses (milestone 7.5, "Stripped players"
-below), 20-40% smaller than the full Release player.
+deleted, and in headless Chrome. **Windows is experimental** (one export
+validated so far, see below). Linux exports ship a **stripped player** by default: an engine built
+with only the subsystems the game uses ("Stripped players" below), 20-40%
+smaller than the full Release player.
 
 ## Quick start
 
@@ -63,8 +63,11 @@ for a real release. The web runtime defaults to `build/web-pack/runtime`
 `tools/cuervo_tools/export.{hpp,cpp}`:
 
 1. **check**: project.toml must load, and the **tier check** must pass
-   (`cuervo-tools tier check`, DESIGN.md 4.4) against the project's tier. For
-   the web the check targets `compatible`. Errors stop the export.
+   (`cuervo-tools tier check`, DESIGN.md 4.4) against the project's tier, and the
+   project must not claim support the target platform lacks ([STATUS.md](STATUS.md)):
+   a `render_tier = "full"` project is refused for `--platform web`, and `--aot` is
+   refused unless the export host is the target. Errors stop the export; an experimental
+   target (Windows) warns.
 2. **collect**: every file under the project. Hidden files and directories
    (`.import/`, `.git`, `.gitignore`...) are never packed. `--strip` also drops
    development-only files: replays (`*.replay`, `replays/`, docs/REPLAYS.md) and
@@ -100,8 +103,8 @@ for a real release. The web runtime defaults to `build/web-pack/runtime`
 
 ## Stripped players
 
-`tools/cuervo_tools/player.{hpp,cpp}`, milestone 7.5 (DESIGN.md 4.11
-"Clarified (Milestone 7.5)"). The pack's manifest records the features the game
+`tools/cuervo_tools/player.{hpp,cpp}` (DESIGN.md 4.11 "Clarified (Milestone 7.5)").
+The pack's manifest records the features the game
 needs (`detect_features`, `[features]` in project.toml overrides it). Export
 builds a player with exactly those:
 
@@ -157,8 +160,8 @@ Limits:
 - **AOT** (`--aot`): `.cuervo/scripts.so` is compiled against cuervo-tools'
   own engine prelude, so it only matches a player with the same script
   surface. `auto` ships the full player otherwise (with a note), `stripped`
-  fails. The shmup's AOT export ships a stripped player. Lifting this needs the
-  AOT emitter to take the target feature set (the follow-up).
+  fails. The shmup's AOT export ships a stripped player. Lifting this would need the
+  AOT emitter to take the target feature set (not implemented).
 - **Web**: the same definitions plus `CUERVO_WEB_PACK=fetch` (the runtime that
   fetches the `game.pak` next to its page) and never Vulkan, configured with
   emscripten's toolchain file and `CUERVO_HOST_BUILD` like the `web-pack`
@@ -170,7 +173,7 @@ Limits:
   is verified in headless Chrome (`tools/web/smoke_test.mjs`): it must run
   the pack, and match the full engine's state hash when it has the full
   script surface. No Chrome: the export fails unless `--no-verify`.
-- **Windows**: "not supported for windows yet"; it needs a Windows host build
+- **Windows**: refused ("not supported for windows yet"); it needs a Windows host build
   first.
 
 ### Sizes
@@ -191,7 +194,7 @@ Every stripped player also drops FreeType (and with it zlib, bzip2, libpng and
 brotli) from its shared-library dependencies: it needs only SDL3 and the C/C++
 runtime.
 
-Web (same date, emscripten 6.0.12, Release `-O2`): the payload that changes is
+Web (emscripten 6.0.12, Release `-O2`): the payload that changes is
 `index.wasm` (`index.js` is ~195 KB either way). The full web player is the
 `web-pack` preset's runtime (every subsystem a web build has; never Vulkan).
 
@@ -268,19 +271,19 @@ section is 16-byte aligned.
 - **Hot reload is development-only.** A pack never changes under a running
   game: no file watcher, and F5/F6 are off.
 
-Call sites moved onto the VFS in 7C:
+How each kind of file is read:
 
-| File kind | Before | Now |
-|---|---|---|
-| project.toml | `std::ifstream` in `load_project(dir)` | `load_project(const Vfs&)` |
-| scripts | directory walk + `ifstream` in `read_scripts` | `read_scripts(const Vfs&)` (`Vfs::list`) |
-| scenes (`Scene.load`, `main_scene`) | `scene::load_file(project_dir / path)` | `ScriptHost::load_scene` → `Vfs::open` + `scene::read_binary` |
-| `Scene.save` | `project_dir / path` | `Vfs::user_dir() / path` |
-| sounds (`assets/**`, `Audio.load`) | directory walk + `load_sound_file` | `AudioSystem::load_directory(const Vfs&, dir)`, `AudioOptions::vfs` |
-| game font | `load_font_file(CUERVO_DEFAULT_FONT)` (a path in the source tree) | pack: `.cuervo/default.efont` through `load_font_data` |
+| File kind | Read through |
+|---|---|
+| project.toml | `load_project(const Vfs&)` |
+| scripts | `read_scripts(const Vfs&)` (`Vfs::list`) |
+| scenes (`Scene.load`, `main_scene`) | `ScriptHost::load_scene` → `Vfs::open` + `scene::read_binary` |
+| `Scene.save` | writes to `Vfs::user_dir() / path` |
+| sounds (`assets/**`, `Audio.load`) | `AudioSystem::load_directory(const Vfs&, dir)`, `AudioOptions::vfs` |
+| game font | in a pack, `.cuervo/default.efont` through `load_font_data` |
 
-The old path-taking functions are wrappers that build a development VFS, so the
-editor and tools keep working unchanged. The following stay on the real file
+The path-taking functions are wrappers that build a development VFS, so the
+editor and tools work on plain project directories. The following stay on the real file
 system on purpose, because they are developer tools or explicit user paths, not
 game data:
 
@@ -310,7 +313,7 @@ SDL_VIDEO_DRIVER=offscreen ./dist/shmup --backend gl --no-audio --screenshot s.p
 The full player links the system SDL3 and FreeType dynamically; a stripped
 player (no font import) only SDL3. The target machine needs them
 (`libSDL3.so.0`, `libfreetype.so.6`), or the binary has to be built against
-static copies. Bundling shared libraries is not done yet.
+static copies. Shared libraries are not bundled.
 
 ### Web
 
@@ -319,12 +322,13 @@ variable `CUERVO_WEB_PACK` (cmake/Web.cmake) selects how:
 
 | `CUERVO_WEB_PACK` | Build |
 |---|---|
-| empty (default) | the Phase 5 development build: `CUERVO_WEB_GAME` and the font preloaded as files |
+| empty (default) | the development build: `CUERVO_WEB_GAME` and the font preloaded as files |
 | `fetch` (preset `web-pack`) | a **game-independent** runtime: `web/pack_loader.js` fetches `game.pak` next to the page into MEMFS before `main()`, and the runtime runs `--pack /game.pak`. `export --platform web` copies this build and writes `game.pak` |
 | a `.pak` path | that pack preloaded as `/game.pak`: one self-contained build (`index.data` is the pack) |
 
 `export --platform web` checks that the runtime directory is a pack-loading
-build. Verify an export with:
+build. For the opt-in WASM-threads variant, build the `web-pack-threads` preset and pass
+`--runtime build/web-pack-threads/runtime` (docs/WEB.md "Threads"). Verify an export with:
 
 ```sh
 node tools/web/smoke_test.mjs --dir dist-web --args "--screenshot /tmp/w.ppm" --expect "state hash a3e57e79964421d3"
@@ -332,8 +336,10 @@ node tools/web/smoke_test.mjs --dir dist-web --args "--screenshot /tmp/w.ppm" --
 
 ### Windows
 
-Not supported yet. No Windows build of the runtime has ever been compiled or
-run (docs/WINDOWS.md).
+Experimental: Windows builds of the runtime are still being validated
+(docs/WINDOWS.md, [STATUS.md](STATUS.md)). With the Clang debug player, `export_shmup`
+passes on Windows: both shmup exports (bytecode and AOT) run from another directory and
+reach the Linux state hash. Release players and other games are untested.
 
 - `export --platform windows` fails with that message unless `--runtime
   <cuervo.exe>` names a player from a Windows build.
@@ -362,6 +368,8 @@ run (docs/WINDOWS.md).
   - a `GameSession` on the pack reaches the dev hash at tick 240
   - release saves go to the user directory and shadow packed scenes
   - non-game packs are refused
+- `export_tutorial` and `run_tutorial` (ctest): the tutorial game packs, exports (source and
+  AOT), ships alone and reaches its state hash.
 - `export_shmup` (ctest, `tests/export_shmup.cmake`): end to end.
   1. Export a copy of the shmup twice and require identical `game.pak` files.
   2. Delete the project copy and move only `dist/`.

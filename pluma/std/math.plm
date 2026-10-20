@@ -28,6 +28,7 @@ const NAN = 0.0 / 0.0
 const FLOAT_EPSILON = 1.1920929e-7
 // The largest and smallest `int`.
 const INT_MAX = 2147483647
+// The smallest `int` (-2147483648).
 const INT_MIN = -2147483647 - 1
 
 // ------------------------------------------------------------------- scalar
@@ -106,10 +107,12 @@ fn rotate_toward(from: float, to: float, max_delta: float) -> float {
     return from + (d > 0.0 ? max_delta : -max_delta)
 }
 
+// True when `x` is NaN (the only float not equal to itself).
 fn is_nan(x: float) -> bool {
     return x != x
 }
 
+// True when `x` is positive or negative infinity; false for NaN.
 fn is_inf(x: float) -> bool {
     return x == INF || x == -INF
 }
@@ -161,10 +164,12 @@ fn sinh(x: float) -> float {
     return (exp(x) - exp(-x)) * 0.5
 }
 
+// Hyperbolic cosine, (e^x + e^-x) / 2. Always >= 1; overflows to INF for large |x|.
 fn cosh(x: float) -> float {
     return (exp(x) + exp(-x)) * 0.5
 }
 
+// Hyperbolic tangent, in -1..1. Uses a series near 0 and saturates to +-1 beyond |x| = 9.
 fn tanh(x: float) -> float {
     if abs(x) < 0.1 {
         var x2 = x * x
@@ -180,6 +185,7 @@ fn tanh(x: float) -> float {
     return (e2 - 1.0) / (e2 + 1.0)
 }
 
+// Inverse hyperbolic sine, odd in `x`: sign(x) * ln(|x| + sqrt(x*x + 1)).
 fn asinh(x: float) -> float {
     var a = abs(x)
     var r = log(a + sqrt(a * a + 1.0))
@@ -212,15 +218,25 @@ fn cbrt(x: float) -> float {
 
 // The ten easing families of easings.net.
 enum Ease {
+    // Sinusoidal easing; the gentlest curve.
     Sine,
+    // Quadratic (t^2) easing.
     Quad,
+    // Cubic (t^3) easing.
     Cubic,
+    // Quartic (t^4) easing.
     Quart,
+    // Quintic (t^5) easing.
     Quint,
+    // Exponential easing; very abrupt start or end.
     Expo,
+    // Circular-arc easing.
     Circ,
+    // Overshooting easing that pulls back past the start or end before settling.
     Back,
+    // Spring-like easing that oscillates around the target.
     Elastic,
+    // Easing that bounces against the target like a dropped ball.
     Bounce,
 }
 
@@ -382,7 +398,9 @@ fn isqrt(n: int) -> int {
 
 // Quotient and remainder together.
 struct DivMod {
+    // The truncated quotient `a / b`.
     var quot = 0
+    // The remainder `a % b`; has the sign of `a`.
     var rem = 0
 }
 
@@ -454,10 +472,14 @@ fn ctz(x: int) -> int {
 // work componentwise (`*` multiplies two vectors; `scaled(k)` multiplies by an
 // int), `==` compares components. They convert to and from `vec2/3/4`.
 
+// A 2-component integer vector (grid cell or tile coordinate); `+ - *` and unary `-` work componentwise.
 struct ivec2: Add, Sub, Mul, Neg {
+    // The x component.
     var x = 0
+    // The y component.
     var y = 0
 
+    // An `ivec2` from its components.
     static fn of(x: int, y: int) -> ivec2 {
         return ivec2 { x = x, y = y }
     }
@@ -467,175 +489,224 @@ struct ivec2: Add, Sub, Mul, Neg {
         return ivec2 { x = floor(v.x) as int, y = floor(v.y) as int }
     }
 
+    // The same value as a float vector.
     fn to_vec() -> vec2 {
         return vec2(x as float, y as float)
     }
 
+    // Componentwise sum (the `+` operator).
     fn add(o: ivec2) -> ivec2 {
         return ivec2 { x = x + o.x, y = y + o.y }
     }
 
+    // Componentwise difference (the `-` operator).
     fn sub(o: ivec2) -> ivec2 {
         return ivec2 { x = x - o.x, y = y - o.y }
     }
 
+    // Componentwise product (the `*` operator), not a dot product.
     fn mul(o: ivec2) -> ivec2 {
         return ivec2 { x = x * o.x, y = y * o.y }
     }
 
+    // Each component negated (unary `-`).
     fn neg() -> ivec2 {
         return ivec2 { x = -x, y = -y }
     }
 
+    // Every component multiplied by the int `k`.
     fn scaled(k: int) -> ivec2 {
         return ivec2 { x = x * k, y = y * k }
     }
 
+    // Dot product, computed in `int` arithmetic.
     fn dot(o: ivec2) -> int {
         return x * o.x + y * o.y
     }
 
+    // Squared length, exact in integers (no square root).
     fn length_squared() -> int {
         return x * x + y * y
     }
 
+    // Each component's absolute value.
     fn abs() -> ivec2 {
         return ivec2 { x = x < 0 ? -x : x, y = y < 0 ? -y : y }
     }
 
+    // Componentwise minimum.
     fn min(o: ivec2) -> ivec2 {
         return ivec2 { x = x < o.x ? x : o.x, y = y < o.y ? y : o.y }
     }
 
+    // Componentwise maximum.
     fn max(o: ivec2) -> ivec2 {
         return ivec2 { x = x > o.x ? x : o.x, y = y > o.y ? y : o.y }
     }
 
+    // Each component limited to `lo..hi`; `lo` is tested first, so lo > hi yields `lo`.
     fn clamp(lo: ivec2, hi: ivec2) -> ivec2 {
         return ivec2 { x = x < lo.x ? lo.x : x > hi.x ? hi.x : x, y = y < lo.y ? lo.y : y > hi.y ? hi.y : y }
     }
 }
 
+// A 3-component integer vector (grid cell or tile coordinate); `+ - *` and unary `-` work componentwise.
 struct ivec3: Add, Sub, Mul, Neg {
+    // The x component.
     var x = 0
+    // The y component.
     var y = 0
+    // The z component.
     var z = 0
 
+    // An `ivec3` from its components.
     static fn of(x: int, y: int, z: int) -> ivec3 {
         return ivec3 { x = x, y = y, z = z }
     }
 
+    // Each component of `v` rounded down (toward negative infinity).
     static fn floor_of(v: vec3) -> ivec3 {
         return ivec3 { x = floor(v.x) as int, y = floor(v.y) as int, z = floor(v.z) as int }
     }
 
+    // The same value as a float vector.
     fn to_vec() -> vec3 {
         return vec3(x as float, y as float, z as float)
     }
 
+    // Componentwise sum (the `+` operator).
     fn add(o: ivec3) -> ivec3 {
         return ivec3 { x = x + o.x, y = y + o.y, z = z + o.z }
     }
 
+    // Componentwise difference (the `-` operator).
     fn sub(o: ivec3) -> ivec3 {
         return ivec3 { x = x - o.x, y = y - o.y, z = z - o.z }
     }
 
+    // Componentwise product (the `*` operator), not a dot product.
     fn mul(o: ivec3) -> ivec3 {
         return ivec3 { x = x * o.x, y = y * o.y, z = z * o.z }
     }
 
+    // Each component negated (unary `-`).
     fn neg() -> ivec3 {
         return ivec3 { x = -x, y = -y, z = -z }
     }
 
+    // Every component multiplied by the int `k`.
     fn scaled(k: int) -> ivec3 {
         return ivec3 { x = x * k, y = y * k, z = z * k }
     }
 
+    // Dot product, computed in `int` arithmetic.
     fn dot(o: ivec3) -> int {
         return x * o.x + y * o.y + z * o.z
     }
 
+    // Squared length, exact in integers (no square root).
     fn length_squared() -> int {
         return x * x + y * y + z * z
     }
 
+    // Each component's absolute value.
     fn abs() -> ivec3 {
         return ivec3 { x = x < 0 ? -x : x, y = y < 0 ? -y : y, z = z < 0 ? -z : z }
     }
 
+    // Componentwise minimum.
     fn min(o: ivec3) -> ivec3 {
         return ivec3 { x = x < o.x ? x : o.x, y = y < o.y ? y : o.y, z = z < o.z ? z : o.z }
     }
 
+    // Componentwise maximum.
     fn max(o: ivec3) -> ivec3 {
         return ivec3 { x = x > o.x ? x : o.x, y = y > o.y ? y : o.y, z = z > o.z ? z : o.z }
     }
 
+    // Each component limited to `lo..hi`; `lo` is tested first, so lo > hi yields `lo`.
     fn clamp(lo: ivec3, hi: ivec3) -> ivec3 {
         return ivec3 { x = x < lo.x ? lo.x : x > hi.x ? hi.x : x, y = y < lo.y ? lo.y : y > hi.y ? hi.y : y, z = z < lo.z ? lo.z : z > hi.z ? hi.z : z }
     }
 }
 
+// A 4-component integer vector (grid cell or tile coordinate); `+ - *` and unary `-` work componentwise.
 struct ivec4: Add, Sub, Mul, Neg {
+    // The x component.
     var x = 0
+    // The y component.
     var y = 0
+    // The z component.
     var z = 0
+    // The w component.
     var w = 0
 
+    // An `ivec4` from its components.
     static fn of(x: int, y: int, z: int, w: int) -> ivec4 {
         return ivec4 { x = x, y = y, z = z, w = w }
     }
 
+    // Each component of `v` rounded down (toward negative infinity).
     static fn floor_of(v: vec4) -> ivec4 {
         return ivec4 { x = floor(v.x) as int, y = floor(v.y) as int, z = floor(v.z) as int, w = floor(v.w) as int }
     }
 
+    // The same value as a float vector.
     fn to_vec() -> vec4 {
         return vec4(x as float, y as float, z as float, w as float)
     }
 
+    // Componentwise sum (the `+` operator).
     fn add(o: ivec4) -> ivec4 {
         return ivec4 { x = x + o.x, y = y + o.y, z = z + o.z, w = w + o.w }
     }
 
+    // Componentwise difference (the `-` operator).
     fn sub(o: ivec4) -> ivec4 {
         return ivec4 { x = x - o.x, y = y - o.y, z = z - o.z, w = w - o.w }
     }
 
+    // Componentwise product (the `*` operator), not a dot product.
     fn mul(o: ivec4) -> ivec4 {
         return ivec4 { x = x * o.x, y = y * o.y, z = z * o.z, w = w * o.w }
     }
 
+    // Each component negated (unary `-`).
     fn neg() -> ivec4 {
         return ivec4 { x = -x, y = -y, z = -z, w = -w }
     }
 
+    // Every component multiplied by the int `k`.
     fn scaled(k: int) -> ivec4 {
         return ivec4 { x = x * k, y = y * k, z = z * k, w = w * k }
     }
 
+    // Dot product, computed in `int` arithmetic.
     fn dot(o: ivec4) -> int {
         return x * o.x + y * o.y + z * o.z + w * o.w
     }
 
+    // Squared length, exact in integers (no square root).
     fn length_squared() -> int {
         return x * x + y * y + z * z + w * w
     }
 
+    // Each component's absolute value.
     fn abs() -> ivec4 {
         return ivec4 { x = x < 0 ? -x : x, y = y < 0 ? -y : y, z = z < 0 ? -z : z, w = w < 0 ? -w : w }
     }
 
+    // Componentwise minimum.
     fn min(o: ivec4) -> ivec4 {
         return ivec4 { x = x < o.x ? x : o.x, y = y < o.y ? y : o.y, z = z < o.z ? z : o.z, w = w < o.w ? w : o.w }
     }
 
+    // Componentwise maximum.
     fn max(o: ivec4) -> ivec4 {
         return ivec4 { x = x > o.x ? x : o.x, y = y > o.y ? y : o.y, z = z > o.z ? z : o.z, w = w > o.w ? w : o.w }
     }
 
+    // Each component limited to `lo..hi`; `lo` is tested first, so lo > hi yields `lo`.
     fn clamp(lo: ivec4, hi: ivec4) -> ivec4 {
         return ivec4 { x = x < lo.x ? lo.x : x > hi.x ? hi.x : x, y = y < lo.y ? lo.y : y > hi.y ? hi.y : y, z = z < lo.z ? lo.z : z > hi.z ? hi.z : z, w = w < lo.w ? lo.w : w > hi.w ? hi.w : w }
     }
@@ -647,9 +718,12 @@ struct ivec4: Add, Sub, Mul, Neg {
 // the width and height. A rectangle with a negative size is "inverted"; use
 // `abs()` to normalize it. Edges are half-open: `pos` is inside, `end()` is not.
 struct Rect2 {
+    // The top-left corner (y down).
     var pos: vec2
+    // Width and height; negative values make the rectangle inverted.
     var size: vec2
 
+    // A rectangle from its top-left corner `(x, y)` and its width and height.
     static fn of(x: float, y: float, w: float, h: float) -> Rect2 {
         return Rect2 { pos = vec2(x, y), size = vec2(w, h) }
     }
@@ -665,10 +739,12 @@ struct Rect2 {
         return pos + size
     }
 
+    // The point halfway between `pos` and `end()`.
     fn center() -> vec2 {
         return pos + size * 0.5
     }
 
+    // Width times height (negative if exactly one side is negative).
     fn area() -> float {
         return size.x * size.y
     }
@@ -678,6 +754,7 @@ struct Rect2 {
         return size.x > 0.0 && size.y > 0.0
     }
 
+    // True when `p` is inside; the `pos` edges count, the `end()` edges do not.
     fn contains(p: vec2) -> bool {
         return p.x >= pos.x && p.y >= pos.y && p.x < pos.x + size.x && p.y < pos.y + size.y
     }
@@ -736,25 +813,35 @@ struct Rect2 {
 // `t2` first: (t1 * t2).apply(p) == t1.apply(t2.apply(p)). The default is the
 // identity.
 struct Transform2D: Mul {
+    // Matrix entry: x-axis x term (scale/rotation).
     var a = 1.0
+    // Matrix entry: x-axis y term (how input x feeds output y).
     var b = 0.0
+    // Matrix entry: y-axis x term (how input y feeds output x).
     var c = 0.0
+    // Matrix entry: y-axis y term (scale/rotation).
     var d = 1.0
+    // Translation along x, applied after the linear part.
     var tx = 0.0
+    // Translation along y, applied after the linear part.
     var ty = 0.0
 
+    // The transform that leaves every point unchanged.
     static fn identity() -> Transform2D {
         return Transform2D {}
     }
 
+    // A pure translation by `t`.
     static fn translate(t: vec2) -> Transform2D {
         return Transform2D { a = 1.0, b = 0.0, c = 0.0, d = 1.0, tx = t.x, ty = t.y }
     }
 
+    // A pure scale about the origin by `s` per axis.
     static fn scale(s: vec2) -> Transform2D {
         return Transform2D { a = s.x, b = 0.0, c = 0.0, d = s.y, tx = 0.0, ty = 0.0 }
     }
 
+    // A pure rotation about the origin by `radians` (clockwise on screen, y down).
     static fn rotate(radians: float) -> Transform2D {
         var co = cos(radians)
         var si = sin(radians)
@@ -776,6 +863,7 @@ struct Transform2D: Mul {
         return vec2(a * v.x + c * v.y, b * v.x + d * v.y)
     }
 
+    // The determinant of the linear part; negative means a mirror, 0 means an axis collapses.
     fn determinant() -> float {
         return a * d - b * c
     }
@@ -794,6 +882,7 @@ struct Transform2D: Mul {
         return Transform2D { a = ia, b = ib, c = ic, d = id, tx = -(ia * tx + ic * ty), ty = -(ib * tx + id * ty) }
     }
 
+    // Composition: `self * r` applies `r` first, then `self`. Used by the `*` operator.
     fn mul(r: Transform2D) -> Transform2D {
         return Transform2D {
             a = a * r.a + c * r.b,
@@ -907,6 +996,7 @@ fn polygon_signed_area(polygon: List<vec2>) -> float {
     return sum * 0.5
 }
 
+// The absolute area of a simple polygon, independent of winding.
 fn polygon_area(polygon: List<vec2>) -> float {
     return abs(polygon_signed_area(polygon))
 }
@@ -1048,14 +1138,17 @@ fn _hash_bits(x: int, y: int, z: int, seed: int) -> u32 {
     return h
 }
 
+// Deterministic integer hash of `x` mixed with `seed`; any `int` (may be negative). Same inputs give the same output on every platform.
 fn hash(x: int, seed = 0) -> int {
     return _hash_bits(x, 0, 0, seed) as int
 }
 
+// Deterministic integer hash of `(x, y)` with `seed`; full `int` range, platform independent.
 fn hash2(x: int, y: int, seed = 0) -> int {
     return _hash_bits(x, y, 0, seed) as int
 }
 
+// Deterministic integer hash of `(x, y, z)` with `seed`; full `int` range, platform independent.
 fn hash3(x: int, y: int, z: int, seed = 0) -> int {
     return _hash_bits(x, y, z, seed) as int
 }

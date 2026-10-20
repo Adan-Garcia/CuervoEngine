@@ -17,9 +17,10 @@ the guide is [GUIDE.md](GUIDE.md). Names starting with `_` are private and not l
 - [core.plm](#coreplm): [`Color`](#color), [`Time`](#time), [`Screen`](#screen), [`Random`](#random), [`Input`](#input), [`Canvas`](#canvas)
 - [scene.plm](#sceneplm): [`Node`](#node), [`NodeTransform`](#nodetransform), [`Node2D`](#node2d), [`SceneInstance`](#sceneinstance), [`CanvasLayer`](#canvaslayer), [`Scene`](#scene)
 - [nodes.plm](#nodesplm): [`ShapeKind`](#shapekind), [`Shape`](#shape), [`PathCurve`](#pathcurve), [`Path`](#path), [`Sprite`](#sprite), [`Text`](#text), [`Camera2D`](#camera2d), [`Timer`](#timer), [`LineJoin`](#linejoin), [`LineCap`](#linecap), [`Line2D`](#line2d), [`Polygon2D`](#polygon2d), [`Marker2D`](#marker2d), [`VisibleOnScreenNotifier2D`](#visibleonscreennotifier2d)
+- [animation.plm](#animationplm): [`Anim`](#anim), [`AnimInterp`](#animinterp), [`AnimLoop`](#animloop), [`AnimTrackKind`](#animtrackkind), `anim_shape`, [`AnimKey`](#animkey), [`AnimPose`](#animpose), [`AnimTrack`](#animtrack), [`Animation`](#animation), [`AnimFired`](#animfired), [`AnimPlayhead`](#animplayhead), `anim_resolve`, [`AnimBinding`](#animbinding), [`AnimBinder`](#animbinder), `anim_blend`, [`AnimationPlayer`](#animationplayer), [`Tweener`](#tweener), [`TweenStep`](#tweenstep), [`Tween`](#tween), [`AnimCondOp`](#animcondop), [`AnimCondition`](#animcondition), [`AnimStateDef`](#animstatedef), [`AnimTransition`](#animtransition), [`AnimationTree`](#animationtree)
 - [collision.plm](#collisionplm): [`Collision`](#collision), [`AreaShape`](#areashape), [`Area`](#area)
 - [particles.plm](#particlesplm): [`Pattern`](#pattern), [`Shot`](#shot), [`Module`](#module), [`Emitter`](#emitter), [`EmitPattern`](#emitpattern), [`Emitter2D`](#emitter2d)
-- [ui.plm](#uiplm): [`Theme`](#theme), [`Control`](#control), [`Container`](#container), [`BoxContainer`](#boxcontainer), [`VBox`](#vbox), [`HBox`](#hbox), [`Margin`](#margin), [`Panel`](#panel), [`Center`](#center), [`Label`](#label), [`Button`](#button), [`Toggle`](#toggle), [`Slider`](#slider), [`UI`](#ui)
+- [ui.plm](#uiplm): [`Theme`](#theme), [`Control`](#control), [`Container`](#container), [`BoxContainer`](#boxcontainer), [`VBox`](#vbox), [`HBox`](#hbox), [`Margin`](#margin), [`Panel`](#panel), [`Center`](#center), [`Label`](#label), [`Button`](#button), [`Toggle`](#toggle), [`Slider`](#slider), [`GridContainer`](#gridcontainer), [`FlowContainer`](#flowcontainer), [`SplitContainer`](#splitcontainer), [`AspectRatioContainer`](#aspectratiocontainer), [`ScrollContainer`](#scrollcontainer), [`Image`](#image), [`TextureRect`](#texturerect), [`ProgressBar`](#progressbar), [`LineEdit`](#lineedit), [`TabBar`](#tabbar), [`TabContainer`](#tabcontainer), [`Popup`](#popup), [`PopupMenu`](#popupmenu), [`OptionButton`](#optionbutton), [`ConfirmDialog`](#confirmdialog), [`UIExtra`](#uiextra), [`UI`](#ui)
 - [audio.plm](#audioplm): [`Audio`](#audio), [`AudioPlayer`](#audioplayer)
 
 ## math.plm
@@ -74,6 +75,8 @@ Source: `pluma/std/math.plm`
 
 - `const INT_MIN = -2147483647 - 1`
 
+  The smallest `int` (-2147483648).
+
 - `fn trunc(x: float) -> float`
 
   `x` with its fractional part cut off (toward zero).
@@ -116,7 +119,11 @@ Source: `pluma/std/math.plm`
 
 - `fn is_nan(x: float) -> bool`
 
+  True when `x` is NaN (the only float not equal to itself).
+
 - `fn is_inf(x: float) -> bool`
+
+  True when `x` is positive or negative infinity; false for NaN.
 
 - `fn is_finite(x: float) -> bool`
 
@@ -149,9 +156,15 @@ Source: `pluma/std/math.plm`
 
 - `fn cosh(x: float) -> float`
 
+  Hyperbolic cosine, (e^x + e^-x) / 2. Always >= 1; overflows to INF for large |x|.
+
 - `fn tanh(x: float) -> float`
 
+  Hyperbolic tangent, in -1..1. Uses a series near 0 and saturates to +-1 beyond |x| = 9.
+
 - `fn asinh(x: float) -> float`
+
+  Inverse hyperbolic sine, odd in `x`: sign(x) * ln(|x| + sqrt(x*x + 1)).
 
 - `fn acosh(x: float) -> float`
 
@@ -251,6 +264,8 @@ Source: `pluma/std/math.plm`
 
 - `fn polygon_area(polygon: List<vec2>) -> float`
 
+  The absolute area of a simple polygon, independent of winding.
+
 - `fn convex_hull(points: List<vec2>) -> List<vec2>`
 
   The convex hull of a point set (Andrew's monotone chain), clockwise on
@@ -266,9 +281,15 @@ Source: `pluma/std/math.plm`
 
 - `fn hash(x: int, seed = 0) -> int`
 
+  Deterministic integer hash of `x` mixed with `seed`; any `int` (may be negative). Same inputs give the same output on every platform.
+
 - `fn hash2(x: int, y: int, seed = 0) -> int`
 
+  Deterministic integer hash of `(x, y)` with `seed`; full `int` range, platform independent.
+
 - `fn hash3(x: int, y: int, z: int, seed = 0) -> int`
+
+  Deterministic integer hash of `(x, y, z)` with `seed`; full `int` range, platform independent.
 
 - `fn hash_str(s: str, seed = 0) -> int`
 
@@ -312,23 +333,43 @@ The ten easing families of easings.net.
 
 - `Sine`
 
+  Sinusoidal easing; the gentlest curve.
+
 - `Quad`
+
+  Quadratic (t^2) easing.
 
 - `Cubic`
 
+  Cubic (t^3) easing.
+
 - `Quart`
+
+  Quartic (t^4) easing.
 
 - `Quint`
 
+  Quintic (t^5) easing.
+
 - `Expo`
+
+  Exponential easing; very abrupt start or end.
 
 - `Circ`
 
+  Circular-arc easing.
+
 - `Back`
+
+  Overshooting easing that pulls back past the start or end before settling.
 
 - `Elastic`
 
+  Spring-like easing that oscillates around the target.
+
 - `Bounce`
+
+  Easing that bounces against the target like a dropped ball.
 
 ### DivMod
 
@@ -342,7 +383,11 @@ Quotient and remainder together.
 
 - `var quot = 0`
 
+  The truncated quotient `a / b`.
+
 - `var rem = 0`
+
+  The remainder `a % b`; has the sign of `a`.
 
 ### ivec2
 
@@ -350,15 +395,23 @@ Quotient and remainder together.
 struct ivec2: Add, Sub, Mul, Neg
 ```
 
+A 2-component integer vector (grid cell or tile coordinate); `+ - *` and unary `-` work componentwise.
+
 **Fields**
 
 - `var x = 0`
 
+  The x component.
+
 - `var y = 0`
+
+  The y component.
 
 **Methods**
 
 - `static fn of(x: int, y: int) -> ivec2`
+
+  An `ivec2` from its components.
 
 - `static fn floor_of(v: vec2) -> ivec2`
 
@@ -366,27 +419,51 @@ struct ivec2: Add, Sub, Mul, Neg
 
 - `fn to_vec() -> vec2`
 
+  The same value as a float vector.
+
 - `fn add(o: ivec2) -> ivec2`
+
+  Componentwise sum (the `+` operator).
 
 - `fn sub(o: ivec2) -> ivec2`
 
+  Componentwise difference (the `-` operator).
+
 - `fn mul(o: ivec2) -> ivec2`
+
+  Componentwise product (the `*` operator), not a dot product.
 
 - `fn neg() -> ivec2`
 
+  Each component negated (unary `-`).
+
 - `fn scaled(k: int) -> ivec2`
+
+  Every component multiplied by the int `k`.
 
 - `fn dot(o: ivec2) -> int`
 
+  Dot product, computed in `int` arithmetic.
+
 - `fn length_squared() -> int`
+
+  Squared length, exact in integers (no square root).
 
 - `fn abs() -> ivec2`
 
+  Each component's absolute value.
+
 - `fn min(o: ivec2) -> ivec2`
+
+  Componentwise minimum.
 
 - `fn max(o: ivec2) -> ivec2`
 
+  Componentwise maximum.
+
 - `fn clamp(lo: ivec2, hi: ivec2) -> ivec2`
+
+  Each component limited to `lo..hi`; `lo` is tested first, so lo > hi yields `lo`.
 
 ### ivec3
 
@@ -394,43 +471,79 @@ struct ivec2: Add, Sub, Mul, Neg
 struct ivec3: Add, Sub, Mul, Neg
 ```
 
+A 3-component integer vector (grid cell or tile coordinate); `+ - *` and unary `-` work componentwise.
+
 **Fields**
 
 - `var x = 0`
 
+  The x component.
+
 - `var y = 0`
 
+  The y component.
+
 - `var z = 0`
+
+  The z component.
 
 **Methods**
 
 - `static fn of(x: int, y: int, z: int) -> ivec3`
 
+  An `ivec3` from its components.
+
 - `static fn floor_of(v: vec3) -> ivec3`
+
+  Each component of `v` rounded down (toward negative infinity).
 
 - `fn to_vec() -> vec3`
 
+  The same value as a float vector.
+
 - `fn add(o: ivec3) -> ivec3`
+
+  Componentwise sum (the `+` operator).
 
 - `fn sub(o: ivec3) -> ivec3`
 
+  Componentwise difference (the `-` operator).
+
 - `fn mul(o: ivec3) -> ivec3`
+
+  Componentwise product (the `*` operator), not a dot product.
 
 - `fn neg() -> ivec3`
 
+  Each component negated (unary `-`).
+
 - `fn scaled(k: int) -> ivec3`
+
+  Every component multiplied by the int `k`.
 
 - `fn dot(o: ivec3) -> int`
 
+  Dot product, computed in `int` arithmetic.
+
 - `fn length_squared() -> int`
+
+  Squared length, exact in integers (no square root).
 
 - `fn abs() -> ivec3`
 
+  Each component's absolute value.
+
 - `fn min(o: ivec3) -> ivec3`
+
+  Componentwise minimum.
 
 - `fn max(o: ivec3) -> ivec3`
 
+  Componentwise maximum.
+
 - `fn clamp(lo: ivec3, hi: ivec3) -> ivec3`
+
+  Each component limited to `lo..hi`; `lo` is tested first, so lo > hi yields `lo`.
 
 ### ivec4
 
@@ -438,45 +551,83 @@ struct ivec3: Add, Sub, Mul, Neg
 struct ivec4: Add, Sub, Mul, Neg
 ```
 
+A 4-component integer vector (grid cell or tile coordinate); `+ - *` and unary `-` work componentwise.
+
 **Fields**
 
 - `var x = 0`
 
+  The x component.
+
 - `var y = 0`
+
+  The y component.
 
 - `var z = 0`
 
+  The z component.
+
 - `var w = 0`
+
+  The w component.
 
 **Methods**
 
 - `static fn of(x: int, y: int, z: int, w: int) -> ivec4`
 
+  An `ivec4` from its components.
+
 - `static fn floor_of(v: vec4) -> ivec4`
+
+  Each component of `v` rounded down (toward negative infinity).
 
 - `fn to_vec() -> vec4`
 
+  The same value as a float vector.
+
 - `fn add(o: ivec4) -> ivec4`
+
+  Componentwise sum (the `+` operator).
 
 - `fn sub(o: ivec4) -> ivec4`
 
+  Componentwise difference (the `-` operator).
+
 - `fn mul(o: ivec4) -> ivec4`
+
+  Componentwise product (the `*` operator), not a dot product.
 
 - `fn neg() -> ivec4`
 
+  Each component negated (unary `-`).
+
 - `fn scaled(k: int) -> ivec4`
+
+  Every component multiplied by the int `k`.
 
 - `fn dot(o: ivec4) -> int`
 
+  Dot product, computed in `int` arithmetic.
+
 - `fn length_squared() -> int`
+
+  Squared length, exact in integers (no square root).
 
 - `fn abs() -> ivec4`
 
+  Each component's absolute value.
+
 - `fn min(o: ivec4) -> ivec4`
+
+  Componentwise minimum.
 
 - `fn max(o: ivec4) -> ivec4`
 
+  Componentwise maximum.
+
 - `fn clamp(lo: ivec4, hi: ivec4) -> ivec4`
+
+  Each component limited to `lo..hi`; `lo` is tested first, so lo > hi yields `lo`.
 
 ### Rect2
 
@@ -492,11 +643,17 @@ the width and height. A rectangle with a negative size is "inverted"; use
 
 - `var pos: vec2`
 
+  The top-left corner (y down).
+
 - `var size: vec2`
+
+  Width and height; negative values make the rectangle inverted.
 
 **Methods**
 
 - `static fn of(x: float, y: float, w: float, h: float) -> Rect2`
+
+  A rectangle from its top-left corner `(x, y)` and its width and height.
 
 - `static fn from_corners(a: vec2, b: vec2) -> Rect2`
 
@@ -508,13 +665,19 @@ the width and height. A rectangle with a negative size is "inverted"; use
 
 - `fn center() -> vec2`
 
+  The point halfway between `pos` and `end()`.
+
 - `fn area() -> float`
+
+  Width times height (negative if exactly one side is negative).
 
 - `fn has_area() -> bool`
 
   True when both width and height are positive.
 
 - `fn contains(p: vec2) -> bool`
+
+  True when `p` is inside; the `pos` edges count, the `end()` edges do not.
 
 - `fn encloses(o: Rect2) -> bool`
 
@@ -560,25 +723,45 @@ identity.
 
 - `var a = 1.0`
 
+  Matrix entry: x-axis x term (scale/rotation).
+
 - `var b = 0.0`
+
+  Matrix entry: x-axis y term (how input x feeds output y).
 
 - `var c = 0.0`
 
+  Matrix entry: y-axis x term (how input y feeds output x).
+
 - `var d = 1.0`
+
+  Matrix entry: y-axis y term (scale/rotation).
 
 - `var tx = 0.0`
 
+  Translation along x, applied after the linear part.
+
 - `var ty = 0.0`
+
+  Translation along y, applied after the linear part.
 
 **Methods**
 
 - `static fn identity() -> Transform2D`
 
+  The transform that leaves every point unchanged.
+
 - `static fn translate(t: vec2) -> Transform2D`
+
+  A pure translation by `t`.
 
 - `static fn scale(s: vec2) -> Transform2D`
 
+  A pure scale about the origin by `s` per axis.
+
 - `static fn rotate(radians: float) -> Transform2D`
+
+  A pure rotation about the origin by `radians` (clockwise on screen, y down).
 
 - `static fn from_trs(position: vec2, rotation: float, scale_by: vec2) -> Transform2D`
 
@@ -594,11 +777,15 @@ identity.
 
 - `fn determinant() -> float`
 
+  The determinant of the linear part; negative means a mirror, 0 means an axis collapses.
+
 - `fn inverse() -> Transform2D`
 
   The identity when the transform isn't invertible.
 
 - `fn mul(r: Transform2D) -> Transform2D`
+
+  Composition: `self * r` applies `r` first, then `self`. Used by the `*` operator.
 
 - `fn origin() -> vec2`
 
@@ -705,11 +892,19 @@ Colors are authored in sRGB (DESIGN.md 7.2); components are 0..1.
 
 - `var r = 1.0`
 
+  Red, 0..1.
+
 - `var g = 1.0`
+
+  Green, 0..1.
 
 - `var b = 1.0`
 
+  Blue, 0..1.
+
 - `var a = 1.0`
+
+  Opacity, 0..1 (0 is invisible).
 
 **Methods**
 
@@ -849,6 +1044,11 @@ actions, never raw devices.
 
   The mouse pointer in virtual coordinates, recorded in the input frame.
 
+- `static fn text() -> str`
+
+  The character typed this tick ("" if none): one Unicode code point, from
+  the input frame, so it replays. Text fields read it (UI.wants_text).
+
 ### Canvas
 
 ```pluma
@@ -925,6 +1125,16 @@ Without `fill` or `stroke` a shape is filled white.
 
   Back to the screen view (world = virtual pixels), like set_view.
 
+- `fn set_clip(pos: vec2, size: vec2)`
+
+  Cuts everything drawn after this to the rectangle (virtual pixels, the
+  screen view) until clear_clip(); UI scroll areas use it. Not nested:
+  set_clip replaces the previous rectangle (UI.push_clip intersects).
+
+- `fn clear_clip()`
+
+  Ends set_clip.
+
 - `fn new_layer()`
 
   Everything drawn after this covers everything drawn before it (shapes
@@ -998,7 +1208,11 @@ lifecycle methods above. It has no position (Node2D adds one).
 
 - `var ready_done = false`
 
+  True once ready() has run.
+
 - `var freed = false`
+
+  True after queue_free() was called.
 
 **Methods**
 
@@ -1008,9 +1222,20 @@ lifecycle methods above. It has no position (Node2D adds one).
 
 - `fn update(dt: float)`
 
+  Called every tick with the fixed step `dt` in seconds, parent before children.
+
 - `fn draw(g: Canvas)`
 
+  Called every frame to draw this node with `g`; draw only, never change game state here.
+
+- `fn draw_overlay(g: Canvas)`
+
+  Drawn after everything else, above all canvas layers, when the node
+  queued itself in `Scene.overlays` from draw_tree (popups, tooltips).
+
 - `fn exit()`
+
+  Called once when the node leaves the tree (freed or removed).
 
 - `fn on_hit(tag: name, count: int)`
 
@@ -1022,6 +1247,11 @@ lifecycle methods above. It has no position (Node2D adds one).
   Appends `child`. If this node is in the tree the child enters it now
   (its ready() runs before add_child returns). Panics if `child` already
   has a parent.
+
+- `fn create_tween() -> Tween`
+
+  A Tween (animation.plm) that runs with this node, in ticks, and stops
+  when the node leaves the tree. Chain tweeners on the result.
 
 - `fn queue_free()`
 
@@ -1073,9 +1303,15 @@ moves it (the order Node2D composes with).
 
 - `var position = vec2(0.0, 0.0)`
 
+  Translation, applied last.
+
 - `var rotation = 0.0`
 
+  Rotation in radians, applied after scaling.
+
 - `var scale = vec2(1.0, 1.0)`
+
+  Scale per axis, applied first.
 
 **Methods**
 
@@ -1136,6 +1372,8 @@ non-uniform scale on a rotated ancestor that is the closest rotation + scale
 **Methods**
 
 - `fn draw_tree(g: Canvas)`
+
+  Draws the node and its children, or nothing while `visible` is false.
 
 - `fn inherits_transform() -> bool`
 
@@ -1216,6 +1454,8 @@ moves the scene's root by its own `position` when the root is a Node2D. A scene 
 
 - `fn ready()`
 
+  Instantiates `scene` as a child when the node enters the tree.
+
 - `fn instantiate()`
 
   Loads `scene` if it isn't loaded yet (ready() calls this).
@@ -1238,15 +1478,21 @@ order, after the rest of the tree.
 
 - `@export var visible = true`
 
+  Hides the layer and everything under it when false.
+
 **Methods**
 
 - `fn draw_tree(g: Canvas)`
+
+  Draws the layer's children unless it is hidden.
 
 ### Scene
 
 ```pluma
 class Scene
 ```
+
+Access to the running scene tree: the root and tree-wide operations.
 
 **Fields**
 
@@ -1266,6 +1512,11 @@ class Scene
 - `static var layers = List<CanvasLayer>()`
 
   Engine-internal: the canvas layers drawn this frame.
+
+- `static var overlays = List<Node>()`
+
+  Engine-internal: nodes whose draw_overlay() runs after the layers, in
+  order, each covering what came before. draw_tree adds them.
 
 **Methods**
 
@@ -1922,6 +2173,1308 @@ emits `screen_entered` if it is already visible.
 
   Draws the rectangle in the editor only (the preview never runs ready()).
 
+## animation.plm
+
+Engine API: animation (DESIGN.md 4.17 "Clarified (Milestone 9.4)").
+
+Three layers, all measured in simulation *ticks* (never wall-clock time) so
+they replay bit for bit:
+
+```
+Animation / AnimationPlayer   keyframed property tracks over any `@export`
+                              field of any node, method-call and event
+                              tracks, loop modes, speed, a queue.
+Tween                         scripted, chainable tweens (sequence and
+                              parallel), owned by a node.
+AnimationTree                 a state machine over a player's animations
+                              with condition-driven, cross-fading
+                              transitions and a travel / goto API.
+```
+
+A property track is "NodePath:field" (e.g. "Body/Head:position") with a
+list of keys. Values travel as a vec4 (float, int, bool, enum, vec2/3/4 and
+Color pack into it); the field's own type decides how a value is written
+(`Anim.write`, the only native piece). Every written value also folds into
+the state hash, so replays notice animation drift.
+
+Cutout, skeletal and morph animation plug in as more track kinds: a track is
+"a path that samples to a vec4 per tick", so a bone transform or a blend
+shape weight is another path scheme resolved by `AnimBinder`.
+
+Source: `cuervo/script/prelude/animation.plm`
+
+### Constants and functions
+
+- `fn anim_shape(interp: AnimInterp, kind: Ease, curve: float, u: float) -> float`
+
+  The 0..1 progress `u` shaped by an interpolation mode.
+
+- `fn anim_resolve(root: Node, np: str) -> Node`
+
+  The node `np` ("A/B", ".." and "." allowed) relative to `root`, or null.
+
+- `fn anim_blend(a: AnimPose, b: AnimPose, w: float, binder: AnimBinder, root: Node, out: AnimPose)`
+
+  Blends `a` into `b` at weight `w` (0 = a, 1 = b) into `out` (a third pose).
+  Paths only one pose sets keep that pose's value.
+
+### Anim
+
+```pluma
+class Anim
+```
+
+Reflection helpers and tick conversion.
+
+**Methods**
+
+- `static fn kind(node: Node, field: str) -> int`
+
+  How the field `field` of `node` can be driven: 0 = missing or not
+  `@export`, 1 float, 2 int, 3 bool, 4 vec2, 5 vec3, 6 vec4, 7 Color,
+  8 enum, 9 name, 10 other (not animatable).
+
+- `static fn read(node: Node, field: str) -> vec4`
+
+  The field's value packed into a vec4 (zero for an unusable field).
+
+- `static fn write(node: Node, field: str, value: vec4, text: str) -> bool`
+
+  Writes `value` into the field according to its type (rounded for ints,
+  >= 0.5 for bools, `text` for names). False when it can't be driven.
+
+- `static fn call(node: Node, method: str) -> bool`
+
+  Calls a method of `node` that takes no arguments.
+
+- `static fn ticks(seconds: float) -> int`
+
+  `seconds` as whole ticks, at least 1.
+
+- `static fn pack_color(c: Color) -> vec4`
+
+  A Color packed for color tracks.
+
+### AnimInterp
+
+```pluma
+enum AnimInterp
+```
+
+How a key reaches the next one.
+
+**Variants**
+
+- `Step`
+
+  holds its value until the next key
+
+- `Linear`
+
+  straight line
+
+- `EaseIn`
+
+  `ease_kind` curve, slow start
+
+- `EaseOut`
+
+  `ease_kind` curve, slow end
+
+- `EaseInOut`
+
+  `ease_kind` curve, slow at both ends
+
+- `Curve`
+
+  Godot-style power ease with `curve` (see `ease`)
+
+### AnimLoop
+
+```pluma
+enum AnimLoop
+```
+
+What an animation does at its end.
+
+**Variants**
+
+- `None`
+
+  stops on the last tick and finishes
+
+- `Loop`
+
+  wraps to the start
+
+- `PingPong`
+
+  runs back and forth
+
+### AnimTrackKind
+
+```pluma
+enum AnimTrackKind
+```
+
+What a track does.
+
+**Variants**
+
+- `Property`
+
+  sets `Node:field` to the sampled value
+
+- `Method`
+
+  calls `Node:method()` (no arguments) when a key is crossed
+
+- `Event`
+
+  emits the player's `event(key.text)` when a key is crossed
+
+### AnimKey
+
+```pluma
+struct AnimKey
+```
+
+One keyframe. `interp` (with `ease_kind` or `curve`) shapes the segment from
+this key to the next one, so every key can ease differently.
+
+**Fields**
+
+- `var time = 0`
+
+  Tick of the key within the animation.
+
+- `var value = vec4(0.0)`
+
+  The packed value (see Anim.write). Unused by method and event tracks.
+
+- `var text = ""`
+
+  Name tracks: the name to set. Event tracks: the event name.
+
+- `var interp = AnimInterp.Linear`
+
+  How this key reaches the next.
+
+- `var ease_kind = Ease.Sine`
+
+  The easing family for EaseIn / EaseOut / EaseInOut.
+
+- `var curve = 1.0`
+
+  The exponent of AnimInterp.Curve.
+
+### AnimPose
+
+```pluma
+class AnimPose
+```
+
+The values of one pose: which fields are set and to what. A player or tree
+samples animations into poses and blends poses during cross-fades.
+
+**Fields**
+
+- `var index = Map<str, int>()`
+
+  Track path -> slot in `paths`/`values`/`texts`.
+
+- `var paths = List<str>()`
+
+  Track paths ("NodePath:field") in first-set order.
+
+- `var values = List<vec4>()`
+
+  The value of each set field (numbers and vectors, widened to vec4).
+
+- `var texts = List<str>()`
+
+  The text of each set field, for fields that hold text.
+
+**Methods**
+
+- `fn clear()`
+
+  Forgets everything.
+
+- `fn put(path: str, v: vec4, text: str)`
+
+  Sets the value of `path`.
+
+- `fn copy_from(o: AnimPose)`
+
+  Becomes a copy of `o`.
+
+- `fn has(path: str) -> bool`
+
+  True when `path` has a value.
+
+- `fn value_of(path: str) -> vec4`
+
+  The value of `path` (zero when missing).
+
+### AnimTrack
+
+```pluma
+struct AnimTrack
+```
+
+One track: a path and its keys, sorted by time.
+
+**Fields**
+
+- `var path = ""`
+
+  "NodePath:field" relative to the animation's root; event tracks ignore it.
+
+- `var kind = AnimTrackKind.Property`
+
+  What the track drives: a property, a method call or an event.
+
+- `var keys = List<AnimKey>()`
+
+  The keys, sorted by time.
+
+**Methods**
+
+- `fn sample_into(t: float, pose: AnimPose)`
+
+  Samples a property track at tick `t` into `pose`.
+
+### Animation
+
+```pluma
+struct Animation
+```
+
+A keyframed animation: tracks over a length in ticks. Saved in scene files as
+part of AnimationPlayer.animations (docs/SCENES.md).
+
+**Fields**
+
+- `var name = ""`
+
+  Looked up by AnimationPlayer.play and AnimStateDef.animation.
+
+- `var length = 60`
+
+  Length in ticks.
+
+- `var mode = AnimLoop.None`
+
+  What happens at the end.
+
+- `var tracks = List<AnimTrack>()`
+
+  The animation's tracks.
+
+**Methods**
+
+- `fn track_index(path: str, kind: AnimTrackKind) -> int`
+
+  Index of the track with `path` and `kind`, or -1.
+
+- `fn add_key(path: str, key: AnimKey, kind: AnimTrackKind = AnimTrackKind.Property)`
+
+  Adds `key` to the track `path` (created when missing), keeping keys
+  sorted by time; a key at the same time as another goes after it.
+
+- `fn key_value(path: str, time: int, value: vec4, interp: AnimInterp = AnimInterp.Linear, ease_kind: Ease = Ease.Sine, curve: float = 1.0)`
+
+  A key with a raw packed value (enum discriminants, anything).
+
+- `fn key_float(path: str, time: int, v: float, interp: AnimInterp = AnimInterp.Linear, ease_kind: Ease = Ease.Sine, curve: float = 1.0)`
+
+  Float field key.
+
+- `fn key_int(path: str, time: int, v: int, interp: AnimInterp = AnimInterp.Step, ease_kind: Ease = Ease.Sine, curve: float = 1.0)`
+
+  Integer field key (interpolated as a float, rounded when written).
+
+- `fn key_bool(path: str, time: int, v: bool)`
+
+  Bool field key (a bool changes at its key: use Step).
+
+- `fn key_vec2(path: str, time: int, v: vec2, interp: AnimInterp = AnimInterp.Linear, ease_kind: Ease = Ease.Sine, curve: float = 1.0)`
+
+  vec2 field key.
+
+- `fn key_vec3(path: str, time: int, v: vec3, interp: AnimInterp = AnimInterp.Linear, ease_kind: Ease = Ease.Sine, curve: float = 1.0)`
+
+  vec3 field key.
+
+- `fn key_vec4(path: str, time: int, v: vec4, interp: AnimInterp = AnimInterp.Linear, ease_kind: Ease = Ease.Sine, curve: float = 1.0)`
+
+  vec4 field key.
+
+- `fn key_color(path: str, time: int, c: Color, interp: AnimInterp = AnimInterp.Linear, ease_kind: Ease = Ease.Sine, curve: float = 1.0)`
+
+  Color field key.
+
+- `fn key_name(path: str, time: int, text: str)`
+
+  Name field key (a name changes at its key).
+
+- `fn key_call(path: str, time: int)`
+
+  Calls `Node:method()` at `time` (path is "NodePath:method").
+
+- `fn key_event(time: int, event_name: str)`
+
+  Emits the player's `event(event_name)` at `time`.
+
+- `fn sample(t: float, pose: AnimPose)`
+
+  Samples every property track at tick `t` into `pose` (not cleared).
+
+### AnimFired
+
+```pluma
+struct AnimFired
+```
+
+A method or event key a playhead crossed.
+
+**Fields**
+
+- `var kind = AnimTrackKind.Method`
+
+  Whether a method key or an event key fired.
+
+- `var path = ""`
+
+  The key's track path (the method's target).
+
+- `var text = ""`
+
+  The key's text: the method name or the event text.
+
+### AnimPlayhead
+
+```pluma
+class AnimPlayhead
+```
+
+Where an animation is playing: a position in ticks and a direction, moved by
+`advance` with the loop mode applied. Shared by AnimationPlayer and
+AnimationTree.
+
+**Fields**
+
+- `var animations = List<Animation>()`
+
+  The player's animation list and the animation's index in it.
+
+- `var index = 0`
+
+  Index of the animation in `animations`.
+
+- `var pos = 0.0`
+
+  Position in ticks, 0 .. length.
+
+- `var dir = 1.0`
+
+  +1, or -1 while a ping-pong runs back.
+
+- `var finished = false`
+
+  A non-looping animation reached its end.
+
+- `var wrapped = false`
+
+  A looping animation wrapped on the last advance.
+
+**Methods**
+
+- `fn init(list: List<Animation>, i: int)`
+
+  Starts the playhead on animation `i` of `list`.
+
+- `fn length() -> float`
+
+  The animation's length in ticks.
+
+- `fn at_end() -> bool`
+
+  True when the animation ended (non-looping) or wrapped (looping) on the
+  last advance.
+
+- `fn collect(lo: float, hi: float, lo_inc: bool, hi_inc: bool, fired: List<AnimFired>)`
+
+  Collects the method and event keys with time in the range.
+
+- `fn advance(amount: float, fired: List<AnimFired>)`
+
+  Moves `step` ticks (negative runs backwards; the ping-pong direction
+  applies on top), appending the method / event keys it crossed to `fired`.
+
+- `fn sample_into(pose: AnimPose)`
+
+  Samples the animation at the current position into `pose` (cleared).
+
+### AnimBinding
+
+```pluma
+class AnimBinding
+```
+
+A resolved track target.
+
+**Fields**
+
+- `var node: Node`
+
+  The bound node (null when the path did not resolve).
+
+- `var prop = ""`
+
+  The field name on the node.
+
+- `var kind = 0`
+
+  The field's kind, as resolved by the binder (how a pose value is written to it).
+
+- `var warned = false`
+
+  True once an unresolved path was reported, so the warning is logged once.
+
+### AnimBinder
+
+```pluma
+class AnimBinder
+```
+
+Resolves "NodePath:field" track paths against a root node, caching the node
+and the field's kind (re-resolved when the node was freed), and writes poses.
+
+**Fields**
+
+- `var bindings = Map<str, AnimBinding>()`
+
+  Cached bindings by track path; used by the animation internals.
+
+**Methods**
+
+- `fn lookup(root: Node, path: str) -> AnimBinding`
+
+  The binding of `path` under `root`.
+
+- `fn continuous(root: Node, path: str) -> bool`
+
+  True when values of this track blend (numbers, vectors, colors); bools,
+  enums and names switch at half weight.
+
+- `fn apply(root: Node, pose: AnimPose)`
+
+  Writes every value of `pose`. A target that can't be found or driven is
+  reported once and skipped.
+
+- `fn call(root: Node, path: str)`
+
+  Calls the method named by a method track path.
+
+### AnimationPlayer
+
+```pluma
+class AnimationPlayer extends Node
+```
+
+Plays Animations from its `animations` list on the nodes under its parent
+(or `root_path`): property tracks over any `@export` field, method and event
+tracks, loop modes, speed and a queue. It advances once per tick before its
+siblings' update(), so scripts see the animated values.
+
+Use either the player (`play`) or an AnimationTree over it, not both.
+
+**Signals**
+
+- `signal animation_finished(animation: str)`
+
+  Emitted when a non-looping animation reaches its end (before the queue
+  moves on).
+
+- `signal animation_started(animation: str)`
+
+  Emitted when `play` starts an animation.
+
+- `signal event(event_name: str)`
+
+  Emitted when an event track key is crossed.
+
+**Fields**
+
+- `@export var animations = List<Animation>()`
+
+  The animations this player (and an AnimationTree using it) can play.
+
+- `@export var autoplay = ""`
+
+  The animation to play when the node enters the tree ("" = none).
+
+- `@export var speed = 1.0`
+
+  Ticks advanced per tick; negative plays backwards.
+
+- `@export var root_path = ".."`
+
+  The animated tree's root, relative to this node (".." = the parent).
+
+- `@export var active = true`
+
+  False stops the player from advancing (an AnimationTree drives instead).
+
+- `var playing = false`
+
+  True while an animation runs.
+
+- `var current = ""`
+
+  The running animation's name ("" when none ever ran).
+
+- `var play_speed = 1.0`
+
+  A per-play speed multiplier (play's `speed` argument).
+
+- `var head: AnimPlayhead`
+
+  The playhead of the running animation; used by the animation internals.
+
+- `var queued = List<str>()`
+
+  Names waiting to play after the current animation finishes.
+
+- `var binder = AnimBinder()`
+
+  Resolves and writes track targets; used by the animation internals.
+
+- `var pose = AnimPose()`
+
+  The pose sampled on the last advance.
+
+- `var fired = List<AnimFired>()`
+
+  Method and event keys crossed on the last advance.
+
+- `var root_cache: Node`
+
+  The resolved root node, cached between ticks.
+
+- `var root_cache_path = "?"`
+
+  The `root_path` the cache was resolved for.
+
+**Methods**
+
+- `fn ready()`
+
+  Starts `autoplay`.
+
+- `fn root_node() -> Node`
+
+  The node the track paths are relative to.
+
+- `fn index_of(name: str) -> int`
+
+  Index of the animation named `name`, or -1.
+
+- `fn has_animation(name: str) -> bool`
+
+  True when an animation has that name.
+
+- `fn add_animation(a: Animation)`
+
+  Adds an animation, replacing one with the same name.
+
+- `fn animation_length(name: str) -> int`
+
+  The length in ticks of the animation `name` (0 when missing).
+
+- `fn play(name: str, play_speed: float = 1.0)`
+
+  Plays `name` from its start (its end when the speed is negative), and
+  applies the first pose right away. `play_speed` multiplies `speed` for
+  this play. Unknown names are reported and ignored.
+
+- `fn play_backwards(name: str)`
+
+  Plays `name` backwards from its end.
+
+- `fn queue(name: str)`
+
+  Plays `name` after the current non-looping animation finishes (at once
+  when nothing plays).
+
+- `fn clear_queue()`
+
+  Empties the queue.
+
+- `fn stop()`
+
+  Stops where it is (no animation_finished) and clears the queue.
+
+- `fn seek(t: float)`
+
+  Moves the running animation to tick `t` and applies it (no events).
+
+- `fn is_playing() -> bool`
+
+  True while an animation runs.
+
+- `fn position_ticks() -> float`
+
+  The running animation's position in ticks.
+
+- `fn apply_current()`
+
+  Samples the running animation and writes it to the tree.
+
+- `fn apply_pose(p: AnimPose)`
+
+  Writes a pose (AnimationTree).
+
+- `fn dispatch()`
+
+  Runs the method and event keys collected in `fired`.
+
+- `fn dispatch_list(list: List<AnimFired>)`
+
+  Runs the method and event keys in `list` (AnimationTree).
+
+- `fn update_tree(dt: float)`
+
+  Engine-internal: advances one tick before the children's update().
+
+### Tweener
+
+```pluma
+class Tweener
+```
+
+One piece of a Tween: a property change, a wait, a call or a method sweep.
+
+**Fields**
+
+- `var kind = 0`
+
+  0 property, 1 interval, 2 callback, 3 method sweep.
+
+- `var target: Node`
+
+  The node whose field is tweened.
+
+- `var prop = ""`
+
+  The field name on `target`.
+
+- `var from_value = vec4(0.0)`
+
+  The start value, widened to vec4.
+
+- `var to_value = vec4(0.0)`
+
+  The end value, widened to vec4.
+
+- `var text = ""`
+
+  The text for name tweens (and the method name for sweeps).
+
+- `var prop_kind = 0`
+
+  The field's kind, which decides how values are written back.
+
+- `var ticks = 1`
+
+  Duration in ticks.
+
+- `var delay = 0`
+
+  Ticks to wait before starting.
+
+- `var interp = AnimInterp.Linear`
+
+  How progress is shaped (see `with_ease`).
+
+- `var ease_kind = Ease.Sine`
+
+  The easing family used by `interp`.
+
+- `var curve = 1.0`
+
+  The curve parameter for the easing.
+
+- `var callback: fn() = fn() {}`
+
+  The function a callback tweener calls.
+
+- `var method: fn(float) = fn(v: float) {}`
+
+  The function a method sweep calls with the interpolated value.
+
+- `var from_f = 0.0`
+
+  The start value of a method sweep.
+
+- `var to_f = 0.0`
+
+  The end value of a method sweep.
+
+- `var elapsed = 0`
+
+  Ticks run so far.
+
+- `var has_from = false`
+
+  True when the start value was given; otherwise it is read from the target when the tweener starts.
+
+**Methods**
+
+- `fn instant() -> bool`
+
+  True for tweeners that take no time (callbacks).
+
+- `fn begin()`
+
+  Starts the tweener: captures the start value, or runs a callback.
+
+- `fn tick() -> bool`
+
+  Advances one tick; true while it still has ticks to run.
+
+### TweenStep
+
+```pluma
+class TweenStep
+```
+
+A step of tweeners that run together.
+
+**Fields**
+
+- `var items = List<Tweener>()`
+
+  The tweeners that run together in this step.
+
+### Tween
+
+```pluma
+class Tween
+```
+
+A scripted, chainable animation: a sequence of steps, each holding tweeners
+that run in parallel. Create one with `Node.create_tween()`; it runs with
+that node and stops when the node leaves the tree. Time is in ticks.
+
+```
+create_tween()
+    .tween_vec2(sprite, "position", vec2(200.0, 100.0), 30)
+    .with_ease(AnimInterp.EaseOut, Ease.Cubic)
+    .tween_float(sprite, "rotation", PI, 30)
+    .parallel()
+    .tween_callback(() => print("done"))
+```
+
+**Signals**
+
+- `signal finished`
+
+  Emitted when every step (and loop) has run.
+
+**Fields**
+
+- `var steps = List<TweenStep>()`
+
+  The steps, run one after another.
+
+- `var task: Task`
+
+  The task that drives the tween; used by the animation internals.
+
+- `var parallel_next = false`
+
+  Set by `parallel()`: the next tweener joins the current step.
+
+- `var all_parallel = false`
+
+  Set by `set_parallel()`: every tweener joins the current step.
+
+- `var loops = 1`
+
+  How many times the sequence runs (0 = forever).
+
+- `var killed = false`
+
+  True after `kill()`.
+
+- `var paused = false`
+
+  True while paused.
+
+- `var done = false`
+
+  True once every step and loop has run.
+
+- `var last: Tweener`
+
+  The most recently added tweener, which `with_ease` and `with_delay` modify.
+
+**Methods**
+
+- `fn set_parallel(on: bool = true) -> Tween`
+
+  Everything after this runs one step at a time, in order (the default) or,
+  with `true`, all at once.
+
+- `fn parallel() -> Tween`
+
+  The next tweener starts together with the previous one.
+
+- `fn set_loops(n: int) -> Tween`
+
+  Repeats the sequence `n` times (0 = forever).
+
+- `fn add(t: Tweener)`
+
+  Adds a tweener to the current step, or to a new one.
+
+- `fn tween_value(target: Node, prop: str, to: vec4, ticks: int, text: str = "") -> Tween`
+
+  Tweens any field to a packed value; the typed helpers below call it.
+
+- `fn tween_float(target: Node, prop: str, to: float, ticks: int) -> Tween`
+
+  Tweens a float field.
+
+- `fn tween_int(target: Node, prop: str, to: int, ticks: int) -> Tween`
+
+  Tweens an int field (interpolated as a float, rounded when written).
+
+- `fn tween_vec2(target: Node, prop: str, to: vec2, ticks: int) -> Tween`
+
+  Tweens a vec2 field.
+
+- `fn tween_vec3(target: Node, prop: str, to: vec3, ticks: int) -> Tween`
+
+  Tweens a vec3 field.
+
+- `fn tween_vec4(target: Node, prop: str, to: vec4, ticks: int) -> Tween`
+
+  Tweens a vec4 field.
+
+- `fn tween_color(target: Node, prop: str, to: Color, ticks: int) -> Tween`
+
+  Tweens a Color field.
+
+- `fn tween_bool(target: Node, prop: str, to: bool, ticks: int) -> Tween`
+
+  Sets a bool field after `ticks`.
+
+- `fn tween_name(target: Node, prop: str, to: str, ticks: int) -> Tween`
+
+  Sets a name field after `ticks`.
+
+- `fn interval(ticks: int) -> Tween`
+
+  Waits `ticks`.
+
+- `fn tween_callback(f: fn()) -> Tween`
+
+  Calls `f` (after the previous tweener, or together with it after
+  `parallel()`).
+
+- `fn tween_method(f: fn(float), from: float, to: float, ticks: int) -> Tween`
+
+  Calls `f` every tick with a value moving from `from` to `to`.
+
+- `fn with_ease(interp: AnimInterp, ease_kind: Ease = Ease.Sine) -> Tween`
+
+  Easing of the last added tweener (default Linear).
+
+- `fn with_curve(curve: float) -> Tween`
+
+  Godot-style power ease (see `ease`) for the last added tweener.
+
+- `fn with_delay(ticks: int) -> Tween`
+
+  Delays the last added tweener by `ticks`.
+
+- `fn with_from(v: vec4) -> Tween`
+
+  Starts the start value from `v` instead of the field's value at start.
+
+- `fn kill()`
+
+  Stops the tween for good (no `finished`).
+
+- `fn pause()`
+
+  Holds the tween without ending it.
+
+- `fn resume()`
+
+  Continues after `pause()`.
+
+- `fn is_running() -> bool`
+
+  True until it finishes or is killed.
+
+- `fn run()`
+
+  Engine-internal: the coroutine Node.create_tween starts (owned by the
+  node). It begins on the next tick so the chain is built first.
+
+### AnimCondOp
+
+```pluma
+enum AnimCondOp
+```
+
+What a condition compares a state-machine parameter with.
+
+**Variants**
+
+- `IsTrue`
+
+  parameter >= 0.5
+
+- `IsFalse`
+
+  parameter < 0.5
+
+- `Eq`
+
+  True when the parameter equals the value.
+
+- `Ne`
+
+  True when the parameter differs from the value.
+
+- `Lt`
+
+  True when the parameter is less than the value.
+
+- `Le`
+
+  True when the parameter is at most the value.
+
+- `Gt`
+
+  True when the parameter is greater than the value.
+
+- `Ge`
+
+  True when the parameter is at least the value.
+
+- `Trigger`
+
+  set by AnimationTree.trigger(), consumed by the transition that fires
+
+### AnimCondition
+
+```pluma
+struct AnimCondition
+```
+
+One test of a transition: `param op value`.
+
+**Fields**
+
+- `var param = ""`
+
+  The parameter to test.
+
+- `var op = AnimCondOp.IsTrue`
+
+  How the parameter is compared with `value`.
+
+- `var value = 0.0`
+
+  The value compared against (unused by the boolean and trigger ops).
+
+### AnimStateDef
+
+```pluma
+struct AnimStateDef
+```
+
+A state of an AnimationTree: plays the animation `animation` of the player.
+
+**Fields**
+
+- `var name = ""`
+
+  The state's name, which transitions and `goto` refer to.
+
+- `var animation = ""`
+
+  The name of the player's animation this state plays.
+
+- `var speed = 1.0`
+
+  Playback speed multiplier for this state.
+
+### AnimTransition
+
+```pluma
+struct AnimTransition
+```
+
+A transition between states. It fires when its conditions all hold (none =
+immediately) and, with `at_end`, the source animation has ended or wrapped.
+
+**Fields**
+
+- `var from_state = "*"`
+
+  The source state, or "*" for any.
+
+- `var to_state = ""`
+
+  The destination state.
+
+- `var conditions = List<AnimCondition>()`
+
+  All must hold for the transition to fire (none = always).
+
+- `var duration = 6`
+
+  Cross-fade length in ticks (0 = cut).
+
+- `var interp = AnimInterp.Linear`
+
+  How the blend weight follows time.
+
+- `var ease_kind = Ease.Sine`
+
+  The easing family used by `interp`.
+
+- `var curve = 1.0`
+
+  The curve parameter for the easing.
+
+- `var at_end = false`
+
+  Waits for the source animation to end (or wrap).
+
+### AnimationTree
+
+```pluma
+class AnimationTree extends Node
+```
+
+A state machine over an AnimationPlayer's animations. Transitions fire from
+conditions on parameters (`set_param`, `set_bool`, `trigger`); each cross-fade
+blends the outgoing and incoming poses over `duration` ticks. A transition
+that fires during a fade freezes the current blended pose as the outgoing
+side. `goto` jumps, `travel` walks the shortest route over the transitions.
+
+The player is the first AnimationPlayer sibling (or `player_path`, a sibling's
+name); it stops advancing on its own and applies the tree's poses. Tracks one
+side doesn't set keep the other side's value, so animations that share a
+character should key the same fields.
+
+**Signals**
+
+- `signal state_changed(from_state: str, to_state: str)`
+
+  Emitted when a transition starts (the cross-fade begins).
+
+**Fields**
+
+- `@export var player_path = ""`
+
+  The name of the AnimationPlayer sibling ("" = the first one).
+
+- `@export var states = List<AnimStateDef>()`
+
+  The states.
+
+- `@export var transitions = List<AnimTransition>()`
+
+  The transitions between states.
+
+- `@export var start_state = ""`
+
+  The state to start in ("" = the first state).
+
+- `@export var active = true`
+
+  False freezes the tree.
+
+- `@export var speed = 1.0`
+
+  Time scale of every state.
+
+- `var current = ""`
+
+  The current state's name.
+
+- `var params = Map<str, float>()`
+
+  Numeric parameters by name (set with `set_param` and `set_bool`).
+
+- `var pulses = List<str>()`
+
+  Triggers raised since the last evaluation.
+
+- `var player: AnimationPlayer`
+
+  The AnimationPlayer driven by this tree.
+
+- `var head: AnimPlayhead`
+
+  The playhead of the current state; used by the animation internals.
+
+- `var from_head: AnimPlayhead`
+
+  The playhead of the outgoing state during a cross-fade.
+
+- `var head_speed = 1.0`
+
+  Speed multiplier of the current state.
+
+- `var from_speed = 1.0`
+
+  Speed multiplier of the outgoing state.
+
+- `var fade_total = 0`
+
+  Length of the running cross-fade in ticks (0 = none).
+
+- `var evaluating = false`
+
+  Guards against re-entrant evaluation from signal handlers.
+
+- `var fade_t = 0`
+
+  Ticks into the running cross-fade.
+
+- `var fade_interp = AnimInterp.Linear`
+
+  The running cross-fade's interpolation.
+
+- `var fade_kind = Ease.Sine`
+
+  The running cross-fade's easing family.
+
+- `var fade_curve = 1.0`
+
+  The running cross-fade's curve parameter.
+
+- `var route = List<str>()`
+
+  The remaining states of a `travel` route.
+
+- `var snapshot = AnimPose()`
+
+  The frozen outgoing pose when a transition interrupts a fade.
+
+- `var last_pose = AnimPose()`
+
+  The last pose applied.
+
+- `var pose_a = AnimPose()`
+
+  Scratch pose for the outgoing side of a blend.
+
+- `var pose_b = AnimPose()`
+
+  Scratch pose for the incoming side of a blend.
+
+- `var pose_out = AnimPose()`
+
+  The blended result written to the nodes.
+
+- `var fired = List<AnimFired>()`
+
+  Method and event keys crossed on the last evaluation.
+
+**Methods**
+
+- `fn set_param(name: str, v: float)`
+
+  Sets a numeric parameter.
+
+- `fn set_bool(name: str, v: bool)`
+
+  Sets a parameter to 1 or 0.
+
+- `fn param(name: str) -> float`
+
+  A parameter's value (0 when never set).
+
+- `fn trigger(name: str)`
+
+  Raises a trigger for the next evaluation. It is consumed by the transition
+  that uses it and cleared at the end of that evaluation otherwise.
+
+- `fn state_index(name: str) -> int`
+
+  Index of the state `name`, or -1.
+
+- `fn state_time() -> float`
+
+  The current state's time in ticks.
+
+- `fn is_fading() -> bool`
+
+  True during a cross-fade.
+
+- `fn fade_progress() -> float`
+
+  The cross-fade's progress, 0..1 (1 when not fading).
+
+- `fn travel_target() -> str`
+
+  The state being walked to by `travel` ("" when not travelling).
+
+- `fn goto(state: str, duration: int = 0) -> bool`
+
+  Enters `state` now, cross-fading over `duration` ticks (0 = cut). Cancels
+  a travel. False for an unknown state.
+
+- `fn travel(state: str) -> bool`
+
+  Walks to `state` along the shortest chain of transitions, using each
+  one's cross-fade (conditions are skipped, `at_end` is honored). False
+  when no route exists.
+
+- `fn find_player() -> AnimationPlayer`
+
+  Finds the player sibling.
+
+- `fn make_head(si: int) -> AnimPlayhead`
+
+  A playhead for the state at `si`.
+
+- `fn init_if_needed()`
+
+  Starts in `start_state` (or the first state) once.
+
+- `fn enter(state: str, duration: int, interp: AnimInterp, ease_kind: Ease, curve: float)`
+
+  Switches to `state`, fading from the old pose over `duration` ticks.
+
+- `fn conditions_hold(t: AnimTransition) -> bool`
+
+  True when every condition of `t` holds.
+
+- `fn decide()`
+
+  Takes the first transition out of the current state that can fire.
+
+- `fn evaluate()`
+
+  One evaluation: advance, decide, blend, apply.
+
+- `fn update_tree(dt: float)`
+
+  Engine-internal: evaluates once per tick before the children's update().
+
 ## collision.plm
 
 Engine API, part 3a: the collision world (DESIGN.md 4.7), backed by
@@ -2130,11 +3683,15 @@ What every particle of one shot gets (ParticleTemplate).
 
 - `var speed_jitter = 0.0`
 
+  Random speed spread per particle, in pixels per second.
+
 - `var life = 6.0`
 
   seconds; <= 0: until it leaves the screen
 
 - `var life_jitter = 0.0`
+
+  Random lifetime spread per particle, in seconds.
 
 - `var size = 4.0`
 
@@ -2142,6 +3699,8 @@ What every particle of one shot gets (ParticleTemplate).
   `radius` is 0).
 
 - `var color = Color {}`
+
+  Particle color; the emitter's fade can tint it further.
 
 - `var spin = 0.0`
 
@@ -2512,7 +4071,11 @@ control's `theme` (or change UI.theme) to restyle a tree.
 
 - `var title_size = 52.0`
 
+  Font size of Label #title.
+
 - `var small_size = 16.0`
+
+  Font size of Label #small.
 
 - `var text = Color.hex("e8ecff")`
 
@@ -2521,13 +4084,23 @@ control's `theme` (or change UI.theme) to restyle a tree.
 
 - `var text_dim = Color.hex("8890b0")`
 
+  Color of dim and small labels.
+
 - `var text_disabled = Color.hex("4c5370")`
+
+  Color of the text of a disabled widget.
 
 - `var accent = Color.hex("7fe6ff")`
 
+  Highlight color: focused widgets, title and accent labels.
+
 - `var danger = Color.hex("ff5a8a")`
 
+  Color of Label #danger.
+
 - `var gold = Color.hex("ffd866")`
+
+  Color of Label #gold.
 
 - `var panel = Color.hex("0d1124f6")`
 
@@ -2535,11 +4108,19 @@ control's `theme` (or change UI.theme) to restyle a tree.
 
 - `var panel_border = Color.hex("2c3560")`
 
+  Border color of panels.
+
 - `var button = Color.hex("161c38")`
+
+  Fill of a button, toggle or slider at rest.
 
 - `var button_focus = Color.hex("22305e")`
 
+  Fill of a focused widget.
+
 - `var button_pressed = Color.hex("3a4c90")`
+
+  Fill of a widget while pressed.
 
 - `var padding = vec2(20.0, 10.0)`
 
@@ -2558,6 +4139,8 @@ control's `theme` (or change UI.theme) to restyle a tree.
   Corner radius and border width of panels and widgets.
 
 - `var border = 2.0`
+
+  Border width in pixels of panels and widgets.
 
 ### Control
 
@@ -2584,9 +4167,15 @@ top of this file).
 
 - `@export var anchor_max = vec2(0.0, 0.0)`
 
+  Anchor of the bottom-right edge (see `anchor_min`).
+
 - `@export var offset_min = vec2(0.0, 0.0)`
 
+  Pixels added to the top-left edge after anchoring.
+
 - `@export var offset_max = vec2(0.0, 0.0)`
+
+  Pixels added to the bottom-right edge after anchoring.
 
 - `@export var min_size = vec2(0.0, 0.0)`
 
@@ -2608,6 +4197,11 @@ top of this file).
 
   null: the nearest ancestor's theme, else UI.theme.
 
+- `@export var tooltip = ""`
+
+  Shown in a small box next to the control after it has had the focus
+  for a few ticks (keyboard, gamepad or pointer hover). "" shows nothing.
+
 **Methods**
 
 - `fn inherits_transform() -> bool`
@@ -2620,6 +4214,8 @@ top of this file).
   The size the content needs (a label's text); override in custom controls.
 
 - `fn can_focus() -> bool`
+
+  True if the control takes the focus (buttons, toggles and sliders do).
 
 - `fn activate()`
 
@@ -2637,15 +4233,72 @@ top of this file).
 
   The pointer moved to `p` while held after a click on this control.
 
+- `fn floating() -> bool`
+
+  Controls that float (popups) aren't laid out by their parent and take
+  input as roots of their own.
+
+- `fn in_layout() -> bool`
+
+  True when the parent's layout places it: visible and not floating.
+
+- `fn clips_children() -> bool`
+
+  Containers that cut their children to their rect (scroll areas): the
+  pointer only reaches the children inside it.
+
+- `fn is_editing() -> bool`
+
+  Text fields while being edited: UI routes the typed text to edit_tick().
+
+- `fn edit_tick()`
+
+  Called every tick while is_editing(); a text field applies the typed text and edit keys here.
+
+- `fn on_cancel() -> bool`
+
+  ui_cancel while focused; true if the control used it (a text field
+  stops editing) so the root doesn't see the cancel.
+
+- `fn on_root_input()`
+
+  UI roots only, once per tick before the pointer is handled (popups
+  close on a click outside).
+
+- `fn find_scroll(p: vec2, dir: float) -> Control`
+
+  The innermost scroll container under `p` that can scroll `dir`
+  (-1 up, 1 down, 0 any), or null.
+
+- `fn find_any_scroll(dir: float) -> Control`
+
+  The first scroll container of this subtree that can scroll `dir`
+  (-1 up, 1 down), wherever it is: what a gamepad stick scrolls when the
+  focus isn't inside one.
+
+- `fn scroll_by(amount: vec2) -> bool`
+
+  Scroll containers: scroll by `amount` pixels; true if it moved.
+
+- `fn scroll_step() -> float`
+
+  Scroll containers: pixels per wheel notch.
+
 - `fn combined_min_size() -> vec2`
 
   The larger of content_min_size() and `min_size`.
 
 - `fn center() -> vec2`
 
+  The middle of the control's rect.
+
 - `fn contains(p: vec2) -> bool`
 
+  True if `p` is inside the control's rect.
+
 - `fn has_focus() -> bool`
+
+  True if this control holds the focus.
 
 - `fn grab_focus()`
 
@@ -2665,6 +4318,8 @@ top of this file).
 
 - `fn is_ancestor_of(c: Node) -> bool`
 
+  True if this control is `c` or above it in the tree.
+
 - `fn set_anchors(preset: name, margin = 0.0)`
 
   Anchor presets: #full (with `margin` on every side), #center, #top,
@@ -2678,15 +4333,36 @@ top of this file).
 
 - `fn set_rect(pos: vec2, sz: vec2)`
 
+  Places the control at `pos` with size `sz`, then lays out its children.
+
 - `fn layout_children()`
 
+  Lays out the Control children in this rect; containers override it to arrange them.
+
+- `fn draw_tree(g: Canvas)`
+
+  Queues the tooltip of a control that has had the focus a while.
+
+- `fn draw_overlay(g: Canvas)`
+
+  Draws the tooltip on the overlay layer; UI internals call it after the tree has been drawn.
+
 - `fn collect_focusable(out: List<Control>)`
+
+  Appends the visible focusable controls in this subtree to `out`, in tree order.
 
 - `fn focusable_at(p: vec2) -> Control`
 
   The topmost (last drawn) focusable control under `p`.
 
+- `fn root_control() -> Control`
+
+  The UI root this control belongs to (the nearest ancestor-or-self that
+  is a root), or null.
+
 - `fn emit_cancelled()`
+
+  Emits `cancelled` (used by the focus handling).
 
 - `fn update_tree(dt: float)`
 
@@ -2697,6 +4373,8 @@ top of this file).
 ```pluma
 class Container extends Control
 ```
+
+A control that arranges its children; the base of VBox, HBox, Margin, Panel and Center.
 
 ### BoxContainer
 
@@ -2722,11 +4400,19 @@ left over goes to `expand` children, else `align` places the stack.
 
 - `fn vertical() -> bool`
 
+  True stacks top to bottom; HBox overrides it to stack left to right.
+
 - `fn gap() -> float`
+
+  The space between children: `separation`, or the theme's when it is negative.
 
 - `fn content_min_size() -> vec2`
 
+  The stack's minimum size: children along the stack plus gaps, the widest across.
+
 - `fn layout_children()`
+
+  Stacks the visible children, shares leftover space among `expand` children and applies `align`.
 
 ### VBox
 
@@ -2734,15 +4420,21 @@ left over goes to `expand` children, else `align` places the stack.
 class VBox extends BoxContainer
 ```
 
+A BoxContainer that stacks children top to bottom.
+
 ### HBox
 
 ```pluma
 class HBox extends BoxContainer
 ```
 
+A BoxContainer that stacks children left to right.
+
 **Methods**
 
 - `fn vertical() -> bool`
+
+  False: HBox stacks left to right.
 
 ### Margin
 
@@ -2756,13 +4448,21 @@ Children fill the rect minus `margins` (left, top, right, bottom).
 
 - `@export var margins = vec4(0.0, 0.0, 0.0, 0.0)`
 
+  Left, top, right and bottom, in pixels.
+
 **Methods**
 
 - `fn inset() -> vec4`
 
+  The empty border around the children (`margins`).
+
 - `fn content_min_size() -> vec2`
 
+  The children's minimum size plus the inset.
+
 - `fn layout_children()`
+
+  Gives the children the rect minus the inset.
 
 ### Panel
 
@@ -2776,7 +4476,11 @@ A Margin with a themed background; adds the theme's panel padding.
 
 - `fn inset() -> vec4`
 
+  The empty border around the children (the theme's panel padding).
+
 - `fn draw(g: Canvas)`
+
+  Draws the panel's rounded background and border.
 
 ### Center
 
@@ -2790,7 +4494,11 @@ Children at their minimum size, centered.
 
 - `fn content_min_size() -> vec2`
 
+  The largest child's minimum size.
+
 - `fn layout_children()`
+
+  Centers each child at its minimum size.
 
 ### Label
 
@@ -2798,9 +4506,13 @@ Children at their minimum size, centered.
 class Label extends Control
 ```
 
+A line of text. `style` picks the size and color from the theme.
+
 **Fields**
 
 - `@export var text = ""`
+
+  The text shown.
 
 - `@export var style = #normal`
 
@@ -2818,17 +4530,27 @@ class Label extends Control
 
 - `fn text_size() -> float`
 
+  The font size: `font_size` if set, else the style's size from the theme.
+
 - `fn text_color() -> Color`
+
+  The text color for `style`, from the theme.
 
 - `fn content_min_size() -> vec2`
 
+  The size of the measured text.
+
 - `fn draw(g: Canvas)`
+
+  Draws the text, aligned within the rect.
 
 ### Button
 
 ```pluma
 class Button extends Control
 ```
+
+A push button: ui_accept or a click while focused emits `pressed`.
 
 **Signals**
 
@@ -2840,6 +4562,8 @@ class Button extends Control
 
 - `@export var text = ""`
 
+  The caption.
+
 - `var flash = 0`
 
   ticks of "pressed" highlight
@@ -2848,13 +4572,23 @@ class Button extends Control
 
 - `fn can_focus() -> bool`
 
+  Buttons take the focus unless disabled.
+
 - `fn activate()`
+
+  Emits `pressed` (nothing while disabled).
 
 - `fn update(dt: float)`
 
+  Counts down the brief pressed look after an activation.
+
 - `fn content_min_size() -> vec2`
 
+  The caption's size plus the theme padding.
+
 - `fn draw(g: Canvas)`
+
+  Draws the button fill by state, its border and the caption.
 
 ### Toggle
 
@@ -2874,17 +4608,29 @@ An on/off switch with a label; ui_accept or a click flips it.
 
 - `@export var text = ""`
 
+  The caption beside the check box.
+
 - `@export var on = false`
+
+  True when checked.
 
 **Methods**
 
 - `fn can_focus() -> bool`
 
+  Toggles take the focus unless disabled.
+
 - `fn activate()`
+
+  Flips `on` and emits `toggled`.
 
 - `fn content_min_size() -> vec2`
 
+  The caption's size plus the box and theme padding.
+
 - `fn draw(g: Canvas)`
+
+  Draws the toggle fill by state, the check box and the caption.
 
 ### Slider
 
@@ -2905,11 +4651,19 @@ change it while focused, the pointer drags it.
 
 - `@export var text = ""`
 
+  The caption left of the track; empty for a bare track.
+
 - `@export var value = 0.5`
+
+  The current value, between `min_value` and `max_value`.
 
 - `@export var min_value = 0.0`
 
+  The lowest value.
+
 - `@export var max_value = 1.0`
+
+  The highest value.
 
 - `@export var increment = 0.1`
 
@@ -2919,25 +4673,1114 @@ change it while focused, the pointer drags it.
 
 - `fn can_focus() -> bool`
 
+  Sliders take the focus unless disabled.
+
 - `fn set_value(v: float)`
 
   Sets `value` clamped and snapped, emitting `changed` if it moved.
 
 - `fn ratio() -> float`
 
+  `value` as a fraction of the range, 0..1.
+
 - `fn nudge(dir: vec2) -> bool`
+
+  ui_left and ui_right step the value by `increment`; true if it was used.
 
 - `fn track_x() -> float`
 
+  The left end of the track in screen pixels.
+
 - `fn track_width() -> float`
+
+  The track's length in pixels.
 
 - `fn pointer_down(p: vec2)`
 
+  A click sets the value from the pointer position.
+
 - `fn pointer_drag(p: vec2)`
+
+  Dragging sets the value from the pointer position.
 
 - `fn content_min_size() -> vec2`
 
+  The caption's size plus the track's minimum length.
+
 - `fn draw(g: Canvas)`
+
+  Draws the fill by state, the caption, the track and the value.
+
+### GridContainer
+
+```pluma
+class GridContainer extends Container
+```
+
+Children in a grid of `columns` columns, filled row by row. A column is as
+wide as its widest cell and a row as tall as its tallest; children fill
+their cell. Space left over goes equally to the columns (rows) that hold an
+`expand` child.
+
+**Fields**
+
+- `@export var columns = 2`
+
+  Cells per row.
+
+- `@export var h_separation = -1.0`
+
+  Gap between columns / rows; < 0: the theme's separation.
+
+- `@export var v_separation = -1.0`
+
+  Gap between rows (see h_separation).
+
+**Methods**
+
+- `fn hgap() -> float`
+
+  The column gap in effect: h_separation, or the theme's separation if negative.
+
+- `fn vgap() -> float`
+
+  The row gap in effect: v_separation, or the theme's separation if negative.
+
+- `fn cells() -> List<Control>`
+
+  The laid-out children, in order.
+
+- `fn measure_grid(widths: List<float>, heights: List<float>, grow_x: List<bool>, grow_y: List<bool>)`
+
+  Minimum column widths and row heights, and which of them grow.
+
+- `fn content_min_size() -> vec2`
+
+  Sum of the column widths and row heights plus the gaps.
+
+- `fn layout_children()`
+
+  Sizes the columns and rows (growing those holding an `expand` child) and places each child in its cell.
+
+### FlowContainer
+
+```pluma
+class FlowContainer extends Container
+```
+
+Children placed left to right in rows that wrap when the next child would
+pass the right edge (`vertical`: top to bottom in columns that wrap at the
+bottom). Children keep their minimum size. Its minimum size follows the
+size it was last given (a wrapped height needs the width), so a flow inside
+a box settles one tick after its width changes.
+
+**Fields**
+
+- `@export var vertical = false`
+
+  true: columns that fill downwards instead of rows.
+
+- `@export var h_separation = -1.0`
+
+  Gaps along the flow and between lines; < 0: the theme's separation.
+
+- `@export var v_separation = -1.0`
+
+  Gap between lines (see h_separation).
+
+**Methods**
+
+- `fn hgap() -> float`
+
+  The gap along the flow in effect: h_separation, or the theme's separation if negative.
+
+- `fn vgap() -> float`
+
+  The gap between lines in effect: v_separation, or the theme's separation if negative.
+
+- `fn flow(limit: float, place: bool) -> vec2`
+
+  Lays the children out within `limit` along the flow; places them when
+  `place`. Returns the used size.
+
+- `fn content_min_size() -> vec2`
+
+  The widest child's size; when it has a size, the extent along the flow is wrapped to it and the other axis grows to fit the lines.
+
+- `fn layout_children()`
+
+  Places the children in wrapping lines within the container's size along the flow.
+
+### SplitContainer
+
+```pluma
+class SplitContainer extends Container
+```
+
+Two children side by side (`vertical`: one above the other) with a bar
+between them. The bar is focusable: ui_left/right (ui_up/down when
+vertical) move it, and the pointer drags it. Each child keeps at least its
+minimum size.
+
+**Signals**
+
+- `signal split_changed(value: float)`
+
+  `split` changed (keys or dragging).
+
+**Fields**
+
+- `@export var vertical = false`
+
+  true: the first child on top, the bar horizontal.
+
+- `@export var split = 0.5`
+
+  The first child's share of the space left after the bar, 0..1.
+
+- `@export var bar_size = 12.0`
+
+  The bar's thickness in pixels.
+
+- `@export var handle_step = 24.0`
+
+  Pixels a ui_* press moves the bar.
+
+**Methods**
+
+- `fn can_focus() -> bool`
+
+  Focusable unless disabled, so the bar can be moved with the keys.
+
+- `fn pair() -> List<Control>`
+
+  The first two laid-out children.
+
+- `fn along(v: vec2) -> float`
+
+  The component of `v` along the split direction (y when vertical, else x).
+
+- `fn available() -> float`
+
+  Space for the children along the split direction.
+
+- `fn first_length() -> float`
+
+  The first child's length, within the children's minimum sizes.
+
+- `fn set_split(v: float)`
+
+  Sets `split` (clamped to 0..1), emitting `split_changed` when it changed.
+
+- `fn bar_rect_pos() -> vec2`
+
+  Top-left corner of the bar.
+
+- `fn bar_rect_size() -> vec2`
+
+  Size of the bar.
+
+- `fn center() -> vec2`
+
+  Center of the bar.
+
+- `fn focusable_at(p: vec2) -> Control`
+
+  The control to focus at `p`: the bar itself, or a focusable control inside the children.
+
+- `fn nudge(dir: vec2) -> bool`
+
+  Moves the bar by `handle_step` pixels per press along its direction; false if the direction doesn't apply.
+
+- `fn pointer_down(p: vec2)`
+
+  Starts dragging: moves the bar under the pointer.
+
+- `fn pointer_drag(p: vec2)`
+
+  Moves the bar to follow the pointer.
+
+- `fn content_min_size() -> vec2`
+
+  The bar plus the first two children's minimum sizes along the split, and the larger across.
+
+- `fn layout_children()`
+
+  Gives the first child the space before the bar and the second the rest; a lone child fills the container.
+
+- `fn draw(g: Canvas)`
+
+  Draws the bar with a grip line, highlighted while focused.
+
+### AspectRatioContainer
+
+```pluma
+class AspectRatioContainer extends Container
+```
+
+Fits its children into the largest rectangle of width : height = `ratio`
+that fits (#fit) or the smallest that covers the whole container (#cover,
+clipped), placed by `align` (0 = left/top, 1 = right/bottom).
+
+**Fields**
+
+- `@export var ratio = 1.0`
+
+  Width divided by height.
+
+- `@export var stretch = #fit`
+
+  \#fit or #cover.
+
+- `@export var align = vec2(0.5, 0.5)`
+
+  Where the child sits in the spare space: (0, 0) top-left, (1, 1) bottom-right.
+
+**Methods**
+
+- `fn clips_children() -> bool`
+
+  Only #cover clips, since the child then overflows the container.
+
+- `fn content_min_size() -> vec2`
+
+  The largest minimum size among the children.
+
+- `fn child_size() -> vec2`
+
+  The child rectangle's size for the current container size.
+
+- `fn layout_children()`
+
+  Gives every child the ratio-fitted rectangle, placed by `align`.
+
+- `fn draw_tree(g: Canvas)`
+
+  Draws the children; with #cover they are clipped to the container.
+
+### ScrollContainer
+
+```pluma
+class ScrollContainer extends Container
+```
+
+One child inside a view onto it: the child gets its minimum size or the
+view's, whichever is larger, and the content scrolls by the wheel and
+`ui_scroll_up/down` actions (over the container, or when the focus is
+inside it), by dragging the bar or empty content, and by keyboard/gamepad
+focus moves (the focused control is scrolled into view). Content outside
+the view is clipped and can't be clicked.
+
+**Signals**
+
+- `signal scrolled(offset: vec2)`
+
+  `scroll` changed.
+
+**Fields**
+
+- `@export var vertical = true`
+
+  Which directions scroll. A direction that doesn't scroll gives the
+  content the view's size there (and the container its minimum size).
+
+- `@export var horizontal = false`
+
+  Scroll horizontally too (see vertical).
+
+- `@export var wheel_step = 56.0`
+
+  Pixels per wheel notch / first scroll press (held presses go slower).
+
+- `@export var follow_focus = true`
+
+  Scroll the focused control into view when focus moves into the content.
+
+- `@export var show_bars = true`
+
+  Draw the scroll bars (10 px wide, over the right/bottom edge).
+
+- `@export var scroll = vec2(0.0, 0.0)`
+
+  The content's offset: how far it is scrolled, 0 .. max_scroll().
+
+**Methods**
+
+- `fn clips_children() -> bool`
+
+  Always clips: the content outside the view is hidden.
+
+- `fn bar_width() -> float`
+
+  Width of a scroll bar in pixels.
+
+- `fn scroll_step() -> float`
+
+  Pixels one scroll press moves; the wheel step.
+
+- `fn content() -> Control`
+
+  The content child: the first laid-out Control.
+
+- `fn content_min_size() -> vec2`
+
+  The content's minimum size across any direction that doesn't scroll, and nothing along the scrolling ones.
+
+- `fn max_scroll() -> vec2`
+
+  The farthest `scroll` can go.
+
+- `fn needs_vertical_bar() -> bool`
+
+  True if vertical scrolling is on and the content is taller than the view.
+
+- `fn needs_horizontal_bar() -> bool`
+
+  True if horizontal scrolling is on and the content is wider than the view.
+
+- `fn set_scroll(v: vec2)`
+
+  Sets `scroll` (clamped), emitting `scrolled` when it moved.
+
+- `fn scroll_by(amount: vec2) -> bool`
+
+  Scrolls by `amount` pixels; true if the offset changed.
+
+- `fn find_scroll(p: vec2, dir: float) -> Control`
+
+  The control to scroll for a wheel at `p` in direction `dir` (-1 up, 1 down): an inner scroller first, else self if it can move that way; null if none.
+
+- `fn find_any_scroll(dir: float) -> Control`
+
+  The control to scroll for `dir` when the pointer position doesn't matter (focus scrolling): an inner scroller first, else self if it can move that way.
+
+- `fn reveal(rel_pos: vec2, rel_size: vec2)`
+
+  Scrolls so the rectangle (relative to the content's top-left) is inside the view.
+
+- `fn layout_children()`
+
+  Sizes the content (bars take space only when it overflows), scrolls a newly focused control into view, and places it offset by `scroll`.
+
+- `fn pointer_down(p: vec2)`
+
+  Starts a drag: on a scroll bar it jumps the thumb to the pointer, elsewhere it drags the content.
+
+- `fn pointer_drag(p: vec2)`
+
+  Continues the drag started in pointer_down(): moves the thumb or the content.
+
+- `fn thumb_length(vert: bool) -> float`
+
+  Length of the scroll bar thumb for the vertical (`vert`) or horizontal bar, proportional to the view and at least 28 px.
+
+- `fn draw_tree(g: Canvas)`
+
+  Draws the container, then the children clipped to the view, then the scroll bars.
+
+- `fn draw_bars(g: Canvas)`
+
+  Draws the scroll bars that are needed.
+
+### Image
+
+```pluma
+class Image extends Control
+```
+
+A vector image (SVG or .evec, like Sprite's `asset`) in a layout rect.
+Raster images come with the asset pipeline of milestone 11.2.
+
+**Fields**
+
+- `@export var asset = ""`
+
+  The image file, relative to the project ("" draws nothing).
+
+- `@export var stretch = #keep_aspect`
+
+  \#keep: natural size at the top-left; #scale: fills the rect, ignoring
+  the proportions; #keep_aspect: as large as fits, centered; #cover: as
+  small as covers the rect, centered and clipped.
+
+- `@export var tint = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }`
+
+  Multiplies the image's colors (alpha included).
+
+- `@export var flip_h = false`
+
+  Mirror the image horizontally.
+
+- `@export var flip_v = false`
+
+  Mirror the image vertically.
+
+- `@export var ignore_natural_size = false`
+
+  true: the natural size doesn't count towards the minimum size (so a
+  layout can shrink the image); `min_size` still does.
+
+**Methods**
+
+- `fn natural_size() -> vec2`
+
+  The document size of `asset` ((0, 0) when it can't be read).
+
+- `fn content_min_size() -> vec2`
+
+  The natural size, or nothing with `ignore_natural_size`.
+
+- `fn draw(g: Canvas)`
+
+  Draws the image placed and scaled by `stretch`, flipped and tinted.
+
+### TextureRect
+
+```pluma
+class TextureRect extends Image
+```
+
+Godot's name for Image.
+
+### ProgressBar
+
+```pluma
+class ProgressBar extends Control
+```
+
+A value in [min_value, max_value] shown as a filled bar (not focusable).
+
+**Signals**
+
+- `signal changed(value: float)`
+
+  `value` changed.
+
+**Fields**
+
+- `@export var text = ""`
+
+  Optional label at the left of the bar.
+
+- `@export var value = 0.0`
+
+  The current value.
+
+- `@export var min_value = 0.0`
+
+  The value at which the bar is empty.
+
+- `@export var max_value = 1.0`
+
+  The value at which the bar is full.
+
+- `@export var show_percentage = true`
+
+  Draw "NN%" at the right.
+
+**Methods**
+
+- `fn set_value(v: float)`
+
+  Sets `value`, clamped, emitting `changed` if it moved.
+
+- `fn ratio() -> float`
+
+  0..1.
+
+- `fn content_min_size() -> vec2`
+
+  The label size plus padding and at least 160 px wide.
+
+- `fn draw(g: Canvas)`
+
+  Draws the track, the filled part, the label and the percentage.
+
+### LineEdit
+
+```pluma
+class LineEdit extends Control
+```
+
+A single-line text field. Focus it and press ui_accept (or click it) to
+edit; typed text comes from the input frame (Input.text, so it replays),
+ui_backspace / ui_delete / ui_home / ui_end and left/right edit and move
+the caret, ui_accept finishes (`text_submitted`) and ui_cancel stops
+editing. Up/down stop editing and move the focus. Bind the ui_* actions to
+keys that don't type characters (arrows, Enter, Escape): a character typed
+on the tick of a ui_* press cancels that press.
+
+**Signals**
+
+- `signal text_changed(value: str)`
+
+  Typing, deleting or set_text() changed `text`.
+
+- `signal text_submitted(value: str)`
+
+  ui_accept while editing.
+
+**Fields**
+
+- `@export var text = ""`
+
+  The text in the field.
+
+- `@export var placeholder = ""`
+
+  Shown dimmed while empty.
+
+- `@export var max_length = 0`
+
+  > 0: the most characters the field takes.
+
+- `@export var secret = false`
+
+  Draw every character as "*" (the text itself is unchanged).
+
+- `@export var editable = true`
+
+  false: focusable and selectable, but can't be edited.
+
+- `var editing = false`
+
+  Whether the field is being edited (typed text and edit keys reach it).
+
+- `var caret = 0`
+
+  The caret, in characters (0 .. char count).
+
+**Methods**
+
+- `fn can_focus() -> bool`
+
+  Focusable unless disabled.
+
+- `fn is_editing() -> bool`
+
+  Whether the field is being edited.
+
+- `fn char_count() -> int`
+
+  Number of characters (not bytes) in `text`.
+
+- `fn set_text(s: str)`
+
+  Replaces the text (no `text_changed` unless it differs); the caret goes to the end.
+
+- `fn set_caret(i: int)`
+
+  Moves the caret to character `i`, clamped to the text.
+
+- `fn insert_text(s: str)`
+
+  Inserts typed text at the caret (respecting max_length).
+
+- `fn delete_range(from: int, to: int)`
+
+  Removes characters `from` up to (not including) `to`, puts the caret at `from` and emits `text_changed`.
+
+- `fn backspace()`
+
+  Deletes the character before the caret.
+
+- `fn delete_forward()`
+
+  Deletes the character after the caret.
+
+- `fn edit_tick()`
+
+  What UI routes to the field every tick while it is being edited.
+
+- `fn activate()`
+
+  Starts editing; while editing, finishes it and emits `text_submitted`. Does nothing if not editable.
+
+- `fn nudge(dir: vec2) -> bool`
+
+  Left/right move the caret while editing; up/down stop editing and return false so the focus moves.
+
+- `fn on_cancel() -> bool`
+
+  ui_cancel: stops editing and returns true; false if it wasn't editing.
+
+- `fn pointer_down(p: vec2)`
+
+  Clicking starts editing and puts the caret where it landed.
+
+- `fn update(dt: float)`
+
+  Stops editing when focus is lost or the field is disabled, and asks the window for text input while editing.
+
+- `fn display_text() -> str`
+
+  The text as drawn: `text`, or one "*" per character when `secret`.
+
+- `fn content_min_size() -> vec2`
+
+  Wide enough for about twelve characters, plus padding.
+
+- `fn text_offset() -> float`
+
+  Pixels the text is shifted left so the caret stays inside the field.
+
+- `fn draw(g: Canvas)`
+
+  Draws the field, the text or placeholder scrolled to keep the caret visible, and a blinking caret while editing.
+
+### TabBar
+
+```pluma
+class TabBar extends Control
+```
+
+A row of tab titles; the current one is highlighted. ui_left/right (while
+the bar has the focus) and the pointer switch tabs. TabContainer wraps a
+TabBar around pages.
+
+**Signals**
+
+- `signal tab_changed(index: int)`
+
+  `current` changed; `index` is the new tab.
+
+**Fields**
+
+- `@export var tabs = List<str>()`
+
+  The titles.
+
+- `@export var current = 0`
+
+  The selected tab.
+
+- `@export var min_tab_width = 0.0`
+
+  Every tab is at least this wide (also makes tab positions independent
+  of the font, e.g. for replays checked on a host without one).
+
+**Methods**
+
+- `fn can_focus() -> bool`
+
+  Focusable unless disabled or empty.
+
+- `fn tab_width(i: int) -> float`
+
+  Width of tab `i`: its title plus padding, at least `min_tab_width`.
+
+- `fn tab_x(i: int) -> float`
+
+  Left edge of tab `i` relative to the bar.
+
+- `fn set_current(i: int)`
+
+  Selects tab `i` (clamped), emitting `tab_changed` when it changed.
+
+- `fn tab_at(x: float) -> int`
+
+  The tab under x (a screen coordinate), or -1.
+
+- `fn nudge(dir: vec2) -> bool`
+
+  Left/right select the previous/next tab; false at the ends or for other directions.
+
+- `fn pointer_down(p: vec2)`
+
+  Selects the tab under the pointer.
+
+- `fn activate()`
+
+  Does nothing: tabs change by nudge or pointer.
+
+- `fn content_min_size() -> vec2`
+
+  Total width of the tabs and one text line plus padding in height.
+
+- `fn draw(g: Canvas)`
+
+  Draws the tabs, marking the current one.
+
+### TabContainer
+
+```pluma
+class TabContainer extends Container
+```
+
+A TabBar above pages: the Control children (except its bar) are the pages,
+and only the current one is shown. Titles come from `titles` (by index) or
+else the page's `name`. ui_tab_prev / ui_tab_next (shoulder buttons,
+optional actions) switch tabs while the focus is anywhere in the same UI root.
+
+**Signals**
+
+- `signal tab_changed(index: int)`
+
+  `current` changed; `index` is the new page.
+
+**Fields**
+
+- `@export var current = 0`
+
+  The selected page.
+
+- `@export var titles = List<str>()`
+
+  Titles by page index; an empty or missing title uses the page's name.
+
+- `@export var tab_min_width = 0.0`
+
+  The bar's `min_tab_width`.
+
+- `var bar: TabBar`
+
+  The tab bar, created in ready().
+
+**Methods**
+
+- `fn ready()`
+
+  Creates the TabBar and syncs the pages.
+
+- `fn pages() -> List<Control>`
+
+  The pages: laid-out Controls other than the bar. Hidden pages count.
+
+- `fn sync_pages()`
+
+  Brings the bar's titles and the pages' visibility up to date. Without a bar (the editor's preview
+  builds a scene without running ready()) the pages still show one at a time.
+
+- `fn set_current(i: int)`
+
+  Shows page `i` (clamped), emitting `tab_changed` when it changed.
+
+- `fn update(dt: float)`
+
+  Switches pages with ui_tab_prev / ui_tab_next while the focus is in the same UI root.
+
+- `fn content_min_size() -> vec2`
+
+  The largest page (or bar width) wide; the bar plus the tallest page high.
+
+- `fn layout_children()`
+
+  Places the bar on top and the current page below it.
+
+### Popup
+
+```pluma
+class Popup extends Panel
+```
+
+A panel that floats above the UI as a root of its own. Open it with
+popup_centered() or popup_at(); close() hides it. While open and `modal`,
+it traps the focus and input (UI.modal) and a dimmed backdrop covers the
+rest; the previous focus comes back on close. ui_cancel closes it
+(`cancel_closes`), and with `light_dismiss` so does a click outside (menus).
+It may be a child of any control: its parent doesn't lay it out.
+
+**Signals**
+
+- `signal opened`
+
+  Opened / closed (by close(), ui_cancel or a click outside).
+
+- `signal closed`
+
+  Emitted when it closes.
+
+**Fields**
+
+- `@export var modal = true`
+
+  Takes all input while open and dims what is behind.
+
+- `@export var light_dismiss = false`
+
+  A click outside closes it.
+
+- `@export var cancel_closes = true`
+
+  ui_cancel closes it.
+
+- `var initial_focus: Control`
+
+  Open: visible. The control that takes the focus on opening (null: the first focusable).
+
+**Methods**
+
+- `fn floating() -> bool`
+
+  Always floating: its parent doesn't lay it out.
+
+- `fn is_ui_root() -> bool`
+
+  A popup is a UI root of its own.
+
+- `fn is_open() -> bool`
+
+  Whether it is currently open.
+
+- `fn ready()`
+
+  Starts hidden unless already opened.
+
+- `fn popup_centered()`
+
+  Opens it in the middle of the screen.
+
+- `fn popup_at(pos: vec2, min_width = 0.0)`
+
+  Opens it with its top-left corner at `pos` (moved to stay on screen),
+  at least `min_width` wide.
+
+- `fn open(centered: bool, pos: vec2, min_width: float)`
+
+  Shows it (centered or at `pos`, at least `min_width` wide), takes the modal state and moves the focus in; used by popup_centered() and popup_at().
+
+- `fn close()`
+
+  Hides it and gives the focus back.
+
+- `fn emit_cancelled()`
+
+  Called on ui_cancel: closes it if `cancel_closes`, then emits `cancelled`.
+
+- `fn on_root_input()`
+
+  Handles clicks outside it: a modal or light-dismiss popup swallows them, and light_dismiss also closes it.
+
+- `fn layout_in(parent_pos: vec2, parent_size: vec2)`
+
+  Placed where it was opened, as small as its content allows, on screen.
+
+- `fn draw_tree(g: Canvas)`
+
+  Queues itself for the overlay layer instead of drawing in place when open.
+
+- `fn draw_overlay(g: Canvas)`
+
+  Draws the dimmed backdrop (when modal), the popup and its children above everything else.
+
+### PopupMenu
+
+```pluma
+class PopupMenu extends Popup
+```
+
+A popup listing `items` as buttons; choosing one emits `item_chosen` and
+closes it. It is what OptionButton opens, and works as a context menu.
+
+**Signals**
+
+- `signal item_chosen(index: int)`
+
+  `index` was chosen.
+
+**Fields**
+
+- `@export var items = List<str>()`
+
+  The entries.
+
+- `@export var selected = -1`
+
+  The entry that takes the focus when it opens (-1: the first).
+
+- `@export var item_min_size = vec2(0.0, 0.0)`
+
+  At least this size for every entry button (a fixed size keeps the menu
+  independent of the font).
+
+**Methods**
+
+- `fn inset() -> vec4`
+
+  Less padding than a dialog panel.
+
+- `fn ready()`
+
+  Sets light dismissal and creates the box that holds the entry buttons.
+
+- `fn popup_menu(pos: vec2, min_width = 0.0)`
+
+  Open as a dropdown below `pos`.
+
+- `fn rebuild()`
+
+  Brings the entry buttons up to date with `items`: adds missing ones, sets text and size, hides extras.
+
+- `fn choose(index: int)`
+
+  Closes the menu and emits `item_chosen`.
+
+### OptionButton
+
+```pluma
+class OptionButton extends Control
+```
+
+A button showing the selected entry of `items`; pressing it opens a
+dropdown (PopupMenu) below it.
+
+**Signals**
+
+- `signal item_selected(index: int)`
+
+  `selected` changed by the user or set_selected().
+
+**Fields**
+
+- `@export var items = List<str>()`
+
+  The entries.
+
+- `@export var selected = 0`
+
+  The chosen entry, -1 for none.
+
+- `@export var item_height = 0.0`
+
+  At least this tall for every dropdown entry (0: the font's height).
+
+**Methods**
+
+- `fn can_focus() -> bool`
+
+  Focusable unless disabled.
+
+- `fn selected_text() -> str`
+
+  The text of the chosen entry ("" for none).
+
+- `fn set_selected(index: int)`
+
+  Selects entry `index` (clamped, -1 for none), emitting `item_selected` when it changed.
+
+- `fn is_open() -> bool`
+
+  Whether the dropdown is open.
+
+- `fn activate()`
+
+  Opens the dropdown below the button with the current entries; does nothing when disabled or empty.
+
+- `fn content_min_size() -> vec2`
+
+  The widest entry plus padding and room for the arrow, one line tall.
+
+- `fn draw(g: Canvas)`
+
+  Draws the button with the selected text and a dropdown arrow.
+
+### ConfirmDialog
+
+```pluma
+class ConfirmDialog extends Popup
+```
+
+A modal dialog with a title, a message and OK / Cancel buttons. Open it
+with popup_centered(); `confirmed` fires for OK, `cancelled` for Cancel or
+ui_cancel. The focus starts on Cancel (`focus_ok` puts it on OK).
+
+**Signals**
+
+- `signal confirmed`
+
+  OK was pressed.
+
+**Fields**
+
+- `@export var title = "Confirm"`
+
+  Title line.
+
+- `@export var message = ""`
+
+  Message text.
+
+- `@export var ok_text = "OK"`
+
+  Text of the OK button.
+
+- `@export var cancel_text = "Cancel"`
+
+  Text of the Cancel button.
+
+- `@export var focus_ok = false`
+
+  true: the focus starts on OK instead of Cancel.
+
+**Methods**
+
+- `fn ready()`
+
+  Builds the title, message and the two buttons.
+
+- `fn sync_text()`
+
+  Copies title, message and button texts into their labels.
+
+- `fn popup_centered()`
+
+  Refreshes the texts and initial focus, then opens it in the middle of the screen.
+
+### UIExtra
+
+```pluma
+class UIExtra
+```
+
+Per-tick UI input state that is not part of the state hash: the hash covers
+every numeric static, and widgets added after the first UI (DESIGN.md 4.17,
+9.3) keep their counters in this object so existing replays stay valid.
+
+**Fields**
+
+- `var focus_ticks = 0`
+
+  Ticks the current control has had the focus.
+
+- `var tooltip_delay = 24`
+
+  Ticks the focus must rest before a tooltip shows.
+
+- `var scroll_dir = 0.0`
+
+  Scrolling: -1 up, 1 down, 0 none, and whether it started this tick.
+
+- `var scroll_first = false`
+
+  Whether a scroll press started this tick.
+
+- `var scroll_ticks = 0`
+
+  Ticks the scroll key has been held.
+
+- `var backspace_pressed = false`
+
+  Repeating edit keys (ui_backspace, ui_delete, ui_home, ui_end).
+
+- `var delete_pressed = false`
+
+  ui_delete was pressed (or repeated) this tick.
+
+- `var home_pressed = false`
+
+  ui_home was pressed this tick.
+
+- `var end_pressed = false`
+
+  ui_end was pressed this tick.
+
+- `var bs_ticks = 0`
+
+  Ticks ui_backspace has been held.
+
+- `var del_ticks = 0`
+
+  Ticks ui_delete has been held.
 
 ### UI
 
@@ -2945,7 +5788,14 @@ change it while focused, the pointer drags it.
 class UI
 ```
 
+Focus, modal state and input handling shared by every UI tree; all static.
+
 **Fields**
+
+- `static var x = UIExtra()`
+
+  Ticks the focus has rested (focus_ticks), the tooltip delay, scrolling
+  and edit-key state.
 
 - `static var theme = Theme()`
 
@@ -2957,12 +5807,26 @@ class UI
 
 - `static var dragging: Control`
 
-  The control being dragged (a slider), or null.
+  The control being dragged (a slider, a scroll area), or null.
 
 - `static var modal: Node`
 
   When set, only UI roots under this node take input (a modal dialog
-  over other menus).
+  over other menus). Popup sets and restores it.
+
+- `static var pointer_pos = vec2(-1.0, -1.0)`
+
+  The pointer position this tick; used by the UI internals.
+
+- `static var click_pending = false`
+
+  A click happened this tick and no control has taken it yet; used by the UI internals.
+
+- `static var typed_text = ""`
+
+  Scrolling: -1 up, 1 down, 0 none, and whether it started this tick.
+  Text editing: the character typed this tick ("" if none) and the
+  repeating edit keys (actions ui_backspace, ui_delete, ui_home, ui_end).
 
 **Methods**
 
@@ -2970,6 +5834,29 @@ class UI
 
   Size of `text` laid out with the game's font at `size` (one line per
   '\n'): the width of the widest line and the height of all lines.
+
+- `static fn image_size(asset: str) -> vec2`
+
+  The natural size of a vector image file in the project (Image), or
+  (0, 0) if it can't be read.
+
+- `static fn wants_text(on: bool)`
+
+  Called while a text field is being edited, every tick: the window then
+  delivers typed text (and raises an on-screen keyboard where there is one).
+
+- `static fn modal_allows(n: Node) -> bool`
+
+  True when `n` may take input given UI.modal.
+
+- `static fn push_clip(g: Canvas, pos: vec2, sz: vec2)`
+
+  Cuts drawing to the rectangle (intersected with the clip in effect)
+  until the matching pop_clip().
+
+- `static fn pop_clip(g: Canvas)`
+
+  Ends the clip started by the matching push_clip().
 
 - `static fn begin_tick()`
 
@@ -2982,7 +5869,11 @@ class UI
 
 - `static fn is_under(n: Node, ancestor: Node) -> bool`
 
+  True if `n` is `ancestor` or below it.
+
 - `static fn process(root: Control)`
+
+  Handles one tick of input for the UI tree under `root`: focus moves, activation, clicks and drags.
 
 - `static fn neighbor(root: Control, from: Control, dir: vec2) -> Control`
 
@@ -3057,15 +5948,23 @@ Buses: #master, #music, #sfx, #ui, #voice. Every bus feeds #master.
 
 - `static fn stop_music(fade = 1.0)`
 
+  Fades the current track out over `fade` seconds and stops it.
+
 - `static fn set_volume(bus: name, volume: float, fade = 0.0)`
 
   Bus volume (linear gain, 1.0 = unchanged), ramped over `fade` seconds.
 
 - `static fn volume(bus: name) -> float`
 
+  The bus's current linear gain.
+
 - `static fn set_muted(bus: name, muted: bool)`
 
+  Mutes or unmutes `bus` without changing its volume.
+
 - `static fn muted(bus: name) -> bool`
+
+  True if `bus` is muted.
 
 ### AudioPlayer
 

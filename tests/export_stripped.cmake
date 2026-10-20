@@ -37,7 +37,9 @@ endif()
 file(REMOVE_RECURSE "${OUT}/src")
 file(RENAME "${OUT}/dist" "${OUT}/shipped")
 
-set(ENV{SDL_VIDEO_DRIVER} offscreen)
+if(NOT CMAKE_HOST_WIN32)
+    set(ENV{SDL_VIDEO_DRIVER} offscreen)
+endif()
 set(ENV{CUERVO_USER_DIR} "${OUT}/user")
 set(ENV{CUERVO_SCREENSHOT_TICK} 240)
 execute_process(

@@ -253,6 +253,20 @@ Value VM::call_lib(std::uint16_t id, Value* args, std::uint32_t argc) {
             if (s.empty() || s[0] == '+') return Value::null();
             float f = 0.0f;
             auto r = std::from_chars(s.data(), s.data() + s.size(), f);
+            if (r.ec == std::errc::result_out_of_range && r.ptr == s.data() + s.size()) {
+                // Too large or too small for a float is still a number: round it
+                // as IEEE 754 does (to infinity or to zero), through a double
+                // that is wide enough for any sane input.
+                double d = 0.0;
+                auto rd = std::from_chars(s.data(), s.data() + s.size(), d);
+                if (rd.ec == std::errc() && rd.ptr == s.data() + s.size()) return Value::f32(static_cast<float>(d));
+                if (rd.ec != std::errc::result_out_of_range || rd.ptr != s.data() + s.size()) return Value::null();
+                std::size_t e = s.find_first_of("eE");
+                bool tiny = e != std::string_view::npos && e + 1 < s.size() && s[e + 1] == '-';
+                bool neg = s[0] == '-';
+                float mag = tiny ? 0.0f : std::numeric_limits<float>::infinity();
+                return Value::f32(neg ? -mag : mag);
+            }
             if (r.ec != std::errc() || r.ptr != s.data() + s.size()) return Value::null();
             return Value::f32(f);
         }
@@ -271,6 +285,8 @@ Value VM::call_lib(std::uint16_t id, Value* args, std::uint32_t argc) {
             // the same on every platform (DESIGN.md 4.1).
             char buf[512];
             std::to_chars_result r{};
+            // Like printing: a NaN's sign bit is never shown.
+            if (args[0].tag == Tag::F32 ? args[0].f != args[0].f : args[0].d != args[0].d) return new_str_value("nan");
             if (args[0].tag == Tag::F32) {
                 r = std::to_chars(buf, buf + sizeof(buf), args[0].f, std::chars_format::fixed, static_cast<int>(digits));
             } else {

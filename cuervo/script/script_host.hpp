@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -91,6 +92,11 @@ struct DrawTargets {
     std::function<void(DrawFlush what, const Affine2& view, float zoom)> flush;
     // Framebuffer pixels per virtual unit (tessellation level of vectors).
     float pixels_per_unit = 1.0f;
+    // Canvas.set_clip / clear_clip (UI scroll areas): everything flushed from
+    // now on is cut to the rectangle (`pos`, `size` in virtual pixels), or
+    // uncut when `on` is false. ScriptHost flushes the batchers before calling
+    // it. Null (editor views): clipping is ignored.
+    std::function<void(bool on, vec2 pos, vec2 size)> clip;
     // false ignores Canvas.set_view (the editor's scene view has its own
     // camera); the game draws through the scene's Camera2D.
     bool cameras = true;
@@ -202,6 +208,9 @@ public:
     std::uint64_t reloads() const { return reloads_; }
     // Scene.quit() was called.
     bool quit_requested() const { return quit_requested_; }
+    // A text field had the focus in the last tick (UI.wants_text): the window
+    // should deliver typed text (Window::set_text_input).
+    bool wants_text_input() const { return text_wanted_; }
 
     // Fingerprint of the simulation (particles, RNG, tick, and the script
     // globals' numbers), for replay comparison.
@@ -240,6 +249,7 @@ private:
     }
     void bind();
     void bind_scene_and_ui(); // script_host_scene.cpp
+    void bind_animation();    // anim_bindings.cpp
     bool finish_load(std::unique_ptr<pluma::Session> next, const std::string& main_class);
     // A project-relative scene file through the VFS (Scene.load, main_scene).
     std::optional<scene::SceneDoc> load_scene(std::string_view path, std::string& error, scene::LoadInfo* info) const;
@@ -309,8 +319,14 @@ private:
     render::SdfBatcher* shape_target();
     void flush_draw(DrawFlush what);
     bool quit_requested_ = false;
+    bool text_wanted_ = false;
+    // UI.image_size results by path (layout reads them in the simulation).
+    std::map<std::string, vec2, std::less<>> image_sizes_;
 
     std::uint64_t tick_ = 0;
+    // Fold of every animated value written (Anim.set); joins the state hash once non-zero,
+    // so games without animation keep their hashes.
+    std::uint64_t anim_digest_ = 0;
     std::uint64_t idle_ticks_ = 0;
     std::uint64_t reloads_ = 0;
     bool panicked_ = false;

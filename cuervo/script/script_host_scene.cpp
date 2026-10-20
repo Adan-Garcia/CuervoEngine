@@ -12,6 +12,7 @@
 #include "cuervo/render/text_layout.hpp"
 #include "cuervo/scene/scene_file.hpp"
 #include "cuervo/script/scene_bridge.hpp"
+#include "cuervo/script/vector_cache.hpp"
 #include "cuervo/script/script_host.hpp"
 
 namespace cuervo::script {
@@ -29,6 +30,26 @@ bool resolve_path(std::string_view p, std::string& out, std::string& error) {
         return false;
     }
     return true;
+}
+
+vec2 to_vec2(const float* d) { return {d[0], d[1]}; }
+
+void append_utf8(std::string& out, std::uint32_t cp) {
+    if (cp < 0x80) {
+        out += static_cast<char>(cp);
+    } else if (cp < 0x800) {
+        out += static_cast<char>(0xC0 | (cp >> 6));
+        out += static_cast<char>(0x80 | (cp & 0x3F));
+    } else if (cp < 0x10000) {
+        out += static_cast<char>(0xE0 | (cp >> 12));
+        out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+        out += static_cast<char>(0x80 | (cp & 0x3F));
+    } else {
+        out += static_cast<char>(0xF0 | (cp >> 18));
+        out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+        out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+        out += static_cast<char>(0x80 | (cp & 0x3F));
+    }
 }
 
 int field_index(const pluma::RecordRT* rt, std::string_view name) {
@@ -167,6 +188,43 @@ void ScriptHost::bind_scene_and_ui() {
     b.add_native("Input.pointer", [host](NativeCall&) {
         const InputFrame& f = host->input_.frame();
         return nv::vec2_result(static_cast<float>(f.pointer[0]), static_cast<float>(f.pointer[1]));
+    });
+    // Typed text (DESIGN.md 4.8, 9.3): the tick's code point as a string.
+    b.add_native("Input.text", [host](NativeCall&) {
+        std::uint32_t cp = host->input_.frame().text;
+        std::string out;
+        if (cp != 0) append_utf8(out, cp);
+        return nv::str_result(std::move(out));
+    });
+    b.add_native("UI.wants_text", [host](NativeCall& c) {
+        host->text_wanted_ = host->text_wanted_ || nv::boolean(c, 0);
+        return Value{};
+    });
+    // The natural size of a vector image, for layout (0, 0 when unreadable).
+    b.add_native("UI.image_size", [host](NativeCall& c) {
+        const std::string path(nv::str(c, 0));
+        auto it = host->image_sizes_.find(path);
+        if (it == host->image_sizes_.end()) {
+            vec2 size{0.0f, 0.0f};
+            if (!path.empty() && host->options_.vfs) size = vector_file_size(*host->options_.vfs, path);
+            it = host->image_sizes_.emplace(path, size).first;
+        }
+        return nv::vec2_result(it->second.x(), it->second.y());
+    });
+    // Clipping (UI scroll areas): what is drawn after this is cut to the
+    // rectangle until clear_clip(). The batchers flush first so what came
+    // before keeps its own clip.
+    b.add_native("Canvas.set_clip", [host](NativeCall& c) {
+        if (host->targets_ == nullptr || !host->targets_->clip) return Value{};
+        host->flush_draw(DrawFlush::Layer);
+        host->targets_->clip(true, to_vec2(nv::vec(c, 1)), to_vec2(nv::vec(c, 2)));
+        return Value{};
+    });
+    b.add_native("Canvas.clear_clip", [host](NativeCall&) {
+        if (host->targets_ == nullptr || !host->targets_->clip) return Value{};
+        host->flush_draw(DrawFlush::Layer);
+        host->targets_->clip(false, vec2{0.0f, 0.0f}, vec2{0.0f, 0.0f});
+        return Value{};
     });
     b.add_native("Canvas.new_layer", [host](NativeCall&) {
         host->flush_draw(DrawFlush::Layer);

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "cuervo/rhi/rhi.hpp"
+#include "cuervo/script/support.hpp"
 
 // Render-tier migration report (DESIGN.md 4.4: "Changing tier is a migration.
 // The editor lists every asset, shader or API use that the new tier doesn't
@@ -75,10 +76,15 @@ struct TierCheckReport {
 };
 
 // Scans `dir` for the target tier (default: the declared one). nullopt +
-// `error` if the project can't be read at all (no project.toml).
+// `error` if the project can't be read at all (no project.toml). With a
+// `platform`, the report also refuses claims the platform does not provide
+// (docs/support.json via support::check_claims): a Full tier on the web, AOT
+// scripts off Linux. `native_scripts` says the export compiles scripts to native code.
 std::optional<TierCheckReport> check_project_tier(const std::filesystem::path& dir, std::optional<rhi::Tier> target,
                                                   std::string& error,
-                                                  const TierRules& rules = default_tier_rules());
+                                                  const TierRules& rules = default_tier_rules(),
+                                                  std::optional<support::Target> platform = std::nullopt,
+                                                  bool native_scripts = false);
 
 // The human-readable report (`cuervo-tools tier check`).
 std::string format_tier_report(const TierCheckReport& report);

@@ -28,6 +28,9 @@ using GLubyte = unsigned char;
 using GLboolean = unsigned char;
 using GLchar = char;
 using GLintptr = std::ptrdiff_t;
+using GLuint64 = unsigned long long;
+struct __GLsync;
+using GLsync = __GLsync*; // opaque, as in the GL headers
 using GLsizeiptr = std::ptrdiff_t;
 
 inline constexpr GLenum GL_NO_ERROR = 0;
@@ -42,6 +45,13 @@ inline constexpr GLenum GL_UNIFORM_BUFFER = 0x8A11;
 inline constexpr GLenum GL_STATIC_DRAW = 0x88E4;
 inline constexpr GLenum GL_DYNAMIC_DRAW = 0x88E8;
 inline constexpr GLenum GL_STREAM_DRAW = 0x88E0;
+// Fences (GLES 3.0 / WebGL2).
+inline constexpr GLenum GL_SYNC_GPU_COMMANDS_COMPLETE = 0x9117;
+inline constexpr GLbitfield GL_SYNC_FLUSH_COMMANDS_BIT = 0x00000001;
+inline constexpr GLenum GL_ALREADY_SIGNALED = 0x911A;
+inline constexpr GLenum GL_TIMEOUT_EXPIRED = 0x911B;
+inline constexpr GLenum GL_CONDITION_SATISFIED = 0x911C;
+inline constexpr GLenum GL_WAIT_FAILED = 0x911D;
 inline constexpr GLboolean GL_FALSE = 0;
 inline constexpr GLboolean GL_TRUE = 1;
 inline constexpr GLuint GL_INVALID_INDEX = 0xFFFFFFFFu;
@@ -113,6 +123,10 @@ inline constexpr GLenum GL_FRAMEBUFFER_SRGB = 0x8DB9;
     X(void, glBindBuffer, (GLenum target, GLuint buffer))                            \
     X(void, glBufferData, (GLenum target, GLsizeiptr size, const void* data, GLenum usage)) \
     X(void, glBufferSubData, (GLenum target, GLintptr offset, GLsizeiptr size, const void* data)) \
+    X(GLsync, glFenceSync, (GLenum condition, GLbitfield flags))                     \
+    X(GLenum, glClientWaitSync, (GLsync sync, GLbitfield flags, GLuint64 timeout))   \
+    X(void, glDeleteSync, (GLsync sync))                                             \
+    X(void, glFinish, ())                                                            \
     X(void, glBindBufferRange, (GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size)) \
     X(void, glBindBufferBase, (GLenum target, GLuint index, GLuint buffer))         \
     X(void, glEnable, (GLenum cap))                                                  \

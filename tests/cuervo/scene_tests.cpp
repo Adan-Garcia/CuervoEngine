@@ -179,6 +179,32 @@ TEST_CASE("scene files: version 1 files migrate to the current version") {
     CHECK(migrations().size() == format_version - 1);
 }
 
+TEST_CASE("scene files: migrating version 1 numbers siblings of one type so every node has its own path") {
+    SceneDoc doc;
+    auto add = [&](const char* type, std::int32_t parent) {
+        Node n;
+        n.type = type;
+        n.parent = parent;
+        doc.nodes.push_back(n);
+    };
+    add("Node2D", -1);
+    add("Shape", 0);
+    add("Shape", 0);
+    add("Node2D", 0);
+    add("Shape", 3); // a different parent: starts again at "Shape"
+    add("Shape", 0);
+    std::string error;
+    auto back = read_binary(write_binary_v1(doc), error);
+    REQUIRE_MESSAGE(back.has_value(), error);
+    std::vector<std::string> names;
+    for (const Node& n : back->nodes) names.push_back(n.name);
+    CHECK(names == std::vector<std::string>{"Node2D", "Shape", "Shape2", "Node2D", "Shape", "Shape3"});
+    // Saved in the current version, the names stay.
+    auto again = read_binary(write_binary(*back), error);
+    REQUIRE(again.has_value());
+    CHECK(*again == *back);
+}
+
 TEST_CASE("scene files: broken input is rejected with a reason") {
     std::string error;
     const std::vector<std::byte> good = write_binary(sample());

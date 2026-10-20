@@ -4,6 +4,8 @@
 #include <atomic>
 #include <format>
 #include <fstream>
+#include <string>
+#include <vector>
 #if defined(_WIN32)
 #include <process.h>
 #else
@@ -39,7 +41,9 @@ namespace nv = pluma::native;
 using pluma::NativeCall;
 using pluma::Value;
 
-// The prelude sources (cuervo/script/prelude/*.plm), embedded at build time.
+// The prelude sources (cuervo/script/prelude/*.plm), embedded at build time;
+// a long file is split over consecutive entries with the same path
+// (cuervo_append_prelude in cuervo/CMakeLists.txt).
 struct PreludeSource {
     const char* path;
     const char* text;
@@ -47,6 +51,16 @@ struct PreludeSource {
 constexpr PreludeSource prelude_sources[] = {
 #include "cuervo_script_preludes.inc"
 };
+
+// One part per prelude file, its split entries joined back.
+std::vector<pluma::SourceFile::Part> joined_preludes() {
+    std::vector<pluma::SourceFile::Part> parts;
+    for (const PreludeSource& p : prelude_sources) {
+        if (parts.empty() || parts.back().path != p.path) parts.push_back({p.path, {}});
+        parts.back().text += p.text;
+    }
+    return parts;
+}
 
 vec2 to_vec2(const float* d) { return {d[0], d[1]}; }
 
@@ -170,7 +184,7 @@ ScriptHost::ScriptHost(HostOptions options, const InputMap& input_map)
         audio_ = own_audio_.get();
     }
 #endif
-    for (const PreludeSource& p : prelude_sources) bindings_.add_prelude(p.path, p.text);
+    for (pluma::SourceFile::Part& p : joined_preludes()) bindings_.add_prelude(std::move(p.path), std::move(p.text));
     bind();
 #if CUERVO_FEATURE_AUDIO
     bind_audio(bindings_, *audio_);
@@ -659,6 +673,7 @@ void ScriptHost::bind() {
 #endif
 
     bind_scene_and_ui();
+    bind_animation();
 
 #if CUERVO_FEATURE_COLLISION
     // --- Collision (DESIGN.md 4.7)
@@ -966,7 +981,8 @@ void ScriptHost::tick_scripts(const InputFrame& frame) {
 #endif
     set_time_globals();
     input_.push(frame);
-    bool any = frame.held != 0;
+    text_wanted_ = false; // UI.wants_text sets it again while a field is being edited
+    bool any = frame.held != 0 || frame.text != 0;
     for (std::int16_t a : frame.axes) any = any || a != 0;
     idle_ticks_ = any ? 0 : idle_ticks_ + 1;
 
@@ -1136,6 +1152,7 @@ std::uint64_t ScriptHost::state_hash() const {
     h.value(0ULL);
 #endif
     h.value(tick_);
+    if (anim_digest_ != 0) h.value(anim_digest_);
     if (session_ != nullptr) {
         // Script globals that are numbers or vectors (scores, timers...).
         pluma::VM& vm = session_->vm();
@@ -1240,14 +1257,7 @@ std::optional<std::vector<std::byte>> compile_aot_scripts(const std::vector<plum
     return bytes;
 }
 
-std::vector<pluma::SourceFile::Part> engine_preludes() {
-    std::vector<pluma::SourceFile::Part> parts;
-    parts.reserve(std::size(prelude_sources));
-    for (const auto& p : prelude_sources) {
-        parts.push_back({p.path, p.text});
-    }
-    return parts;
-}
+std::vector<pluma::SourceFile::Part> engine_preludes() { return joined_preludes(); }
 
 pluma::lsp::ServerOptions default_lsp_options(std::string root_path, bool check_style) {
     pluma::lsp::ServerOptions opts;

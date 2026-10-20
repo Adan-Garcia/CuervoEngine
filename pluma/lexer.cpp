@@ -82,6 +82,8 @@ Token Lexer::error(std::string_view message) const {
 }
 
 bool Lexer::skip_whitespace_and_comments(Token& error_token) {
+    // Editors on Windows put a UTF-8 byte order mark at the start of a file.
+    if (pos_ == 0 && source_.size() >= 3 && source_.compare(0, 3, "\xEF\xBB\xBF") == 0) pos_ = 3;
     for (;;) {
         char c = peek();
         if (c == ' ' || c == '\t' || c == '\r') {
@@ -201,7 +203,13 @@ Token Lexer::next() {
                 case '|':
                     if (match('|')) return make(TokenKind::PipePipe);
                     return make(match('=') ? TokenKind::PipeEqual : TokenKind::Pipe);
-                default: return error("unexpected character");
+                default:
+                    if (static_cast<unsigned char>(c) >= 0x80) {
+                        // One diagnostic per character, not per UTF-8 byte.
+                        while ((static_cast<unsigned char>(peek()) & 0xC0) == 0x80) advance();
+                        return error("unexpected non-ASCII character (identifiers are ASCII; other text belongs in strings and comments)");
+                    }
+                    return error("unexpected character");
             }
         }();
         space_before_ = false;
@@ -229,6 +237,10 @@ Token Lexer::number() {
                (peek(1) == '0' || peek(1) == '1')) {
         advance();
         while (peek() == '0' || peek() == '1' || peek() == '_') advance();
+        if (is_digit(peek())) {
+            while (is_alnum(peek())) advance();
+            return error("invalid digit in a binary literal (only 0 and 1)");
+        }
         based = true;
     } else {
         while (is_digit(peek()) || peek() == '_') advance();

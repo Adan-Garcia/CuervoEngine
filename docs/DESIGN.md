@@ -1,8 +1,15 @@
 # Cuervo Engine & Pluma Design
 
-> Status: v0.1. The engine is **Cuervo Engine**, its scripting language
+> Status: Beta (v0.1). The engine is **Cuervo Engine**, its scripting language
 > is **Pluma**, and script files use `.plm` (see 7.1 "Names"). The
 > text below often says just "the engine" and "the language".
+>
+> **How to read this document.** It is the architecture and decision record, not the
+> support statement. What is shipped, experimental, planned or unsupported is in
+> [STATUS.md](STATUS.md). In sections 4 and 5, the opening paragraphs state the design
+> and the **Clarified (...)** notes record what was built and any deviation from it; where
+> they differ, the Clarified note and STATUS.md are current. Section 6 lists every
+> milestone and marks the finished ones "done".
 
 ## 1. Vision
 
@@ -29,19 +36,19 @@ for users.
 | Area | Decision |
 |---|---|
 | Engine language | C++20, CMake |
-| Platforms | Linux, Windows, Web (WASM) |
+| Platforms | Linux and Web (WASM) are verified; Windows is being validated (7.4; the Clang debug build passes all tests and matches the Linux hashes, docs/WINDOWS.md) |
 | Dimensionality | 2D. Generic `Vec<T,N>` (vec1…vecN) for extra axes, not 3D transforms |
 | Simulation | Deterministic, fixed timestep, seeded RNG, strict float rules |
-| Scene model | ECS core (SoA) + node tree on top for authoring |
-| Graphics backends | Vulkan (desktop), OpenGL / WebGL2 (web + legacy), behind an RHI |
+| Scene model | Node tree (script objects) for authoring and gameplay; hot systems (particles, collision) keep their own SoA arrays; a general ECS is not exposed (decision in 12.4) |
+| Graphics backends | Vulkan (desktop), OpenGL 3.3 / GLES 3.0 / WebGL2 (web + legacy), behind an RHI; both implement every feature |
 | Render tiers | `compatible` (exports to all backends) or `full` (Vulkan-only features) |
 | Vector rendering | SDF primitives + tessellated SVG + MSDF text + raster fallback |
 | SVG | Practical subset |
-| Vector animation | Cutout/transform, skeletal + mesh deformation, shape morphing |
+| Vector animation | Property, method and event tracks, `Tween` and an `AnimationTree` state machine (9.4); cutout, skeletal and morph animation are planned |
 | Runtime drawing | Canvas-style script API |
 | Resolution | Virtual coordinate space + scale mode; vectors render at native resolution |
 | Particles | General particle system: gameplay (CPU, deterministic, collidable) and visual (GPU) modes, native modules + script `foreach`. No dedicated bullet system: bullets are built on particles |
-| Collision | Circles + capsules in a spatial hash; general physics is separate and optional |
+| Collision | Circles + capsules in a spatial hash (AABB/OBB planned); general physics is separate and optional (planned, 9.6) |
 | Input | Named actions/axes, rebindable, recorded per tick |
 | Audio | miniaudio + mixer buses + voice limiting |
 | Game UI | Retained UI nodes in the scene tree |
@@ -51,7 +58,7 @@ for users.
 | Threading | Scripts single-threaded; engine uses a job system (1 thread on web) |
 | Netcode | None yet; stay rollback-ready |
 | Modding | None at engine level |
-| Script execution | Bytecode VM in development + AOT-to-C for release |
+| Script execution | Bytecode VM in development + AOT-to-C for native (host-platform) release exports |
 | Typing | Static with inference |
 | Syntax | Braces, `//` and `/* */` comments, indentation inside braces by style guide |
 | Memory | Refcount + incremental cycle collector; opt-in checked manual memory, `unsafe` escape |
@@ -63,7 +70,7 @@ for users.
 | Modules | Global class names (no imports) |
 | Hot reload | Keep object state, migrate fields by name |
 | Colors | `Color.hex("ff4060")` |
-| License | Undecided; project private for now |
+| License | Source-available Fair-Code EULA ([LICENSE.md](../LICENSE.md)): free during Beta, commercial terms introduced at Version 1.0 with grandfathering for Beta products (4.18) |
 | Names | Cuervo Engine, Pluma language, `.plm` files (7.1) |
 
 ## 3. Architecture
@@ -72,51 +79,63 @@ for users.
 cuervo/
   core/       fixed-timestep loop, logging, allocators, file system, events, RNG
   math/       Vec<T,N>, Mat, transforms, deterministic trig
-  platform/   SDL3 window + input devices, timing
+  platform/   SDL3 window + input devices, timing, file watching, EULA gate
   rhi/        render hardware interface
     vulkan/   desktop backend
     gl/       OpenGL 3.3 / GLES 3.0 / WebGL2 backend
-  render/     vector renderer, SDF batcher, mesh batcher, text (MSDF), camera, canvas API
-  vector/     SVG parser (subset), tessellator (import + runtime), stroker, animation
-  scene/      ECS, node tree, serialization (binary), scene dump
-  particles/  emitters, SoA pools, native modules, GPU visual particles
-  collision/  shapes, spatial hash, queries
-  physics/    optional general physics (later)
-  audio/      miniaudio wrapper, buses, voice limiting
-  input/      action maps, input frames, recording/playback
-  ui/         retained UI nodes, layout, focus navigation
-  assets/     handles, importers, file watcher, pack format
+  render/     SDF batcher, mesh batcher, text (MSDF), camera
+  vector/     SVG parser (subset), tessellator (import + runtime), stroker
+  scene/      binary scene files and migrations (the node tree itself is Pluma, in script/prelude/)
+  particles/  emitters, SoA pools, native modules (visual mode runs on the CPU; GPU compute planned)
+  collision/  shapes (circle, capsule), spatial hash, queries
+  physics/    optional general physics (planned, 9.6; not in the tree yet)
+  audio/      miniaudio decoding + the engine's own mixer, buses, voice limiting
+  input/      action maps, input frames, recording/playback, replay files
+  assets/     virtual file system, pack format, manifest
+  brand/      generated brand tokens and the embedded app icon
   jobs/       job system
-  script/     engine bindings for the language runtime
-pluma/        standalone: lexer, parser, type checker, bytecode compiler, VM, AOT-to-C, REPL
-editor/       Dear ImGui editor, hosts the engine
-runtime/      thin player executable for exported games (`cuervo`)
-tools/        CLI: import, pack, scene dump, export
+  script/     engine bindings, project loading, game session, and the engine prelude
+              (`prelude/*.plm`: nodes, UI controls, collision, particles, audio)
+pluma/        standalone: lexer, parser, type checker, bytecode compiler, VM, AOT-to-C, formatter,
+              LSP, DAP debugger, profiler, REPL (`plm`), and the math library (`std/math.plm`)
+editor/       Dear ImGui editor (`cuervo-editor`), hosts the engine; desktop only
+runtime/      the player executable (`cuervo`), also the exported game's player
+tools/        `cuervo-tools` (pack, export, scenes, tiers, formatter, LSP, API docs), the
+              docs-site generator, shader_tool, rhi_parity, the web smoke test, the VS Code extension
+web/          the web shell page and pack loader
 docs/
-tests/        cuervo/ and pluma/ tests (internal; users get no test framework)
+tests/        cuervo/, pluma/ and editor/ doctest suites plus the end-to-end ctest scripts
+              (internal; users get no test framework)
 ```
+
+Not in the tree yet (planned): `physics/` (9.6), a general ECS exposed to scripts (decision
+in 12.4), `ui/` as native code (the UI is Pluma nodes, 4.10), networking (11.1).
 
 **Rule:** `pluma/` does not depend on `cuervo/`. The engine registers its API with the
 language through `script/`. This keeps the language testable on its own and gives it a REPL.
 
 ### Third-party libraries
 
-| Purpose | Library | License |
-|---|---|---|
-| Window, input, platform | SDL3 | zlib |
-| Vulkan helpers | volk + VMA | MIT |
-| Shaders | glslang/shaderc → SPIR-V, SPIRV-Cross → GLSL 330 / ES 300 | Apache-2.0 |
-| ECS | EnTT (or in-house) | MIT |
-| Audio | miniaudio | MIT-0 / public domain |
-| SVG parsing base | nanosvg (extended), or in-house parser | zlib |
-| SVG raster fallback | lunasvg | MIT |
-| MSDF fonts | msdfgen + msdf-atlas-gen | MIT |
-| Font loading (for msdfgen) | FreeType | FTL (BSD-style) |
-| Editor UI | Dear ImGui | MIT |
-| Images | stb_image | public domain |
-| Internal tests | doctest | MIT |
+| Purpose | Library | License | Status |
+|---|---|---|---|
+| Window, input, platform | SDL3 | zlib | used |
+| Vulkan helpers | Vulkan-Headers + volk + VMA | Apache-2.0 / MIT | used |
+| Shaders | `glslangValidator` (build tool) → SPIR-V, SPIRV-Cross → GLSL 330 / ES 300 | Apache-2.0 | used at build time |
+| Audio | miniaudio | MIT-0 / public domain | used |
+| SVG parsing | in-house subset parser | n/a | used |
+| Path tessellation | libtess2 | SGI Free Software License B 2.0 | used |
+| MSDF fonts | msdfgen + msdf-atlas-gen | MIT | used |
+| Font loading (for msdfgen) | FreeType | FTL (BSD-style) | used (optional) |
+| Editor UI | Dear ImGui (docking branch) | MIT | used |
+| Profiler bridge | Tracy | BSD-3-Clause | optional, off by default |
+| Internal tests | doctest | MIT | used |
+| General physics | Box2D v3 | MIT | planned (9.6) |
+| Text shaping | HarfBuzz | MIT | planned (11.3) |
+| Raster images | stb_image | public domain | planned (11.2) |
 
-All permissive, so any license chosen later stays open.
+The full list with versions and license texts is [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+Third-party components keep their own permissive licenses; the engine's own license is
+described in 4.18.
 
 ## 4. Engine systems
 
@@ -130,8 +149,9 @@ All permissive, so any license chosen later stays open.
 - Iteration order of every container that the simulation touches is defined (no unordered
   hash-map iteration in sim code).
 - Audio, rendering and the cycle collector's timing never feed back into the simulation.
-- Guarantee: bit-identical on the same build and platform. Goal: identical across platforms
-  (verified by replay comparison in CI).
+- Guarantee: bit-identical on the same build and platform. Goal: identical across platforms,
+  checked by comparing state hashes (the shmup reaches the same hash natively on Linux and in
+  the web build).
 
 ### 4.2 Math: `Vec<T,N>`
 ```cpp
@@ -143,17 +163,18 @@ Transforms are 2D by default: `vec2` position, `float` rotation, `vec2` scale, `
 Components that need more axes use larger vectors explicitly.
 
 ### 4.3 Scene model: ECS + node tree
-- **Runtime:** ECS with components in SoA arrays. Hot systems (particles, collision, rendering,
-  animation) iterate the arrays directly.
-- **Authoring:** a node tree (parent/child, names, scripts) sits on top. Each node is an
-  entity plus a `Parent`/`Children` relation. Users mostly see nodes; systems see components.
-- Entities are referenced by **generational handles** (`index + generation`), never raw pointers.
+- **Runtime:** the hot systems (particles, collision, rendering) iterate SoA arrays directly.
+  There is no general-purpose ECS in the tree: gameplay objects are nodes, and whether to expose
+  component queries to scripts or drop the ECS from the design is milestone 12.4.
+- **Authoring:** a node tree (parent/child, names, scripts). Users see nodes; systems see their
+  own arrays.
+- Native objects are referenced by **generational handles** (`index + generation`), never raw
+  pointers.
 
 **Clarified (Phase 3, `cuervo/script/`):** the node tree is written in the language itself
 (`cuervo/script/prelude/scene.plm`: `Node`, `Node2D`, `Scene`), so scripts extend it like
-any class and hot reload migrates it like any object. The ECS core stays minimal for now:
-the hot data (particles, collision) already lives in SoA systems that nodes drive through
-bindings; nodes get entity handles when scene files and the editor need them (Phase 4+).
+any class and hot reload migrates it like any object. The hot data (particles, collision) lives
+in SoA systems that nodes drive through bindings; nodes have no entity handles.
 One fixed tick of a script project runs, in this order: Time/input update, coroutines due
 this tick (start order), the tree's `update(dt)` (parents before children, children in
 insertion order), the particle system tick (simulate, spawn, collide), `on_hit(tag, count)`
@@ -206,7 +227,7 @@ new tier doesn't support before applying the change.
   load, TTF/OTF needing `.efont` on the web, web download size). Each item has a
   severity (error blocks the tier, warning, note) and a file:line:column.
   `cuervo-tools tier set <project> <tier> [--force]` applies the change only when
-  nothing blocks it. The editor will show the same report.
+  nothing blocks it. The editor shows the same report in its Tier Report panel (4.13).
 - *Parity:* every RHI entry point is implemented identically on both backends
   (audit table in `cuervo/rhi/README.md`); `tools/rhi_parity` renders one scene per
   feature through `capture_frame`, and the `rhi_parity` test compares GL 3.3 vs GLES 3.0
@@ -214,6 +235,41 @@ new tier doesn't support before applying the change.
   viewport mirrors the MSAA sample pattern and half-pixel rounding).
 - *GLES on desktop:* `--gl-es` / `CUERVO_GL_ES=1` asks the GL backend for an OpenGL ES
   3.0 context, so the web's shader path (GLSL ES 300) is testable without a browser.
+
+**Clarified (frame pacing and stream buffers, `cuervo/rhi/gl/README.md`, `docs/PERFORMANCE.md`):**
+- *GL bounds the frames it queues.* The GL backend puts a fence after each presented frame and
+  waits on the one from two frames ago (`rhi::FenceRing`), matching Vulkan's two frames in
+  flight; the web build keeps none (WebGL2 cannot block, the browser paces frames). GL
+  frame times and peak memory therefore measure GPU completion, not how far the driver let the CPU run ahead.
+- *Stream buffers are a small ring on both backends.* GL rotates three buffers; Vulkan
+  renames only when it must. A second update in a frame beside the first (the batchers'
+  per-layer flush) writes in place on both. Uploads past 1 MB are sliced on GL, and
+  Vulkan puts large streams in system memory when their versions would crowd the CPU-writable
+  VRAM window. **Decision:** a batcher's instance buffer grows by a quarter, not double, so a
+  1.9M-instance frame does not allocate 168 MB x 3.
+
+**Clarified (Milestone 8.8, `docs/support.json`, `docs/STATUS.md`, `cuervo/script/support.hpp`):**
+- *One source for support.* `docs/support.json` lists every feature with its status
+  (stable, experimental, planned, unsupported), the platforms it works on (Linux, Windows,
+  Web), the desktop-only and web-compatible flags, the render tier it needs and a note.
+  `tools/support_matrix.py` generates the tables in `docs/STATUS.md` and the summary in
+  `README.md` from it (the `support_matrix_up_to_date` test fails when they are stale, and
+  the docs site build refuses a stale page); CMake compiles the same file into the tools
+  (`cmake/SupportData.cmake`), so the checks below read the data the documents show.
+- *The tiers as a contract.* `compatible` runs on Vulkan, GL 3.3, GLES 3.0 and WebGL2 on
+  every platform; the device is clamped to the limits in 4.4 above, shader stages and
+  constructs GLES 3.0 cannot express are tier errors, and Full-only RHI calls on a gated
+  device are ignored with one log line. `full` is Vulkan on the desktop only, has no numeric
+  minimums yet, and its Full-only RHI features are required. The documented RHI feature
+  table and the compatible limits are compared with `rhi::feature_tier`, `feature_required`
+  and `compatible_limits()` in code by the `support.json` tests, so the documents cannot drift.
+- *Claims are checked against the target.* `tier check <project> [--to TIER] [--platform
+  linux|windows|web]` and `export` call `support::check_claims`: the project's render tier
+  (and AOT-compiled scripts, which also need host == target) must be listed for the target platform and shipped; otherwise
+  it is an error (a `full` project cannot be exported with `--platform web`, which used to be
+  silently checked as `compatible`), and an experimental target or feature is a warning.
+  The runtime already refuses a Full project on a device that cannot serve Full. The export
+  gate no longer retargets the check to `compatible` for the web: migrate with `tier set`.
 
 **Shaders** are written once in GLSL 450, compiled to SPIR-V for Vulkan and
 cross-compiled to GLSL 330 / ES 300 for GL. Shader variants are built at import time, not
@@ -226,7 +282,7 @@ at runtime.
 | Particles, UI panels, primitives | Analytic SDF shapes (circle, capsule, rounded rect, polygon, star, ring), instanced; one draw call per material |
 | SVG art | Tessellated to triangle meshes at import; anti-aliased with MSAA where available, otherwise with feathered edge geometry |
 | Text | MSDF font atlases |
-| SVG filters, blurs | Rasterized to an atlas at the needed scale, cached |
+| SVG filters, blurs | Planned: rasterized to an atlas at the needed scale, cached |
 | Canvas API, shape morphing | Runtime tessellator; meshes cached until the path changes |
 
 **Resolution.** A project defines a virtual coordinate space (e.g. 1280×720) and a scale
@@ -236,26 +292,32 @@ mode: `fit` (default; renders vectors at native resolution), `integer` (pixel ar
 ### 4.5 Vector assets and animation
 **SVG subset:** paths, basic shapes, fills (nonzero/evenodd), strokes (width, joins, caps,
 miter limit, dashes), linear and radial gradients, transforms, groups, opacity, clip paths.
-Unsupported features (filters, masks, CSS, embedded text) fall back to rasterization, with
-an import warning.
+Unsupported features (filters, masks, CSS, embedded text) are skipped with an import warning;
+the rasterized fallback is planned (11.2).
 
-**Animation:**
-- *Cutout/transform:* SVG groups become parts animated on a timeline (position, rotation,
-  scale, opacity, draw order).
-- *Skeletal + mesh deformation:* bones with weighted vertices of the tessellated mesh.
-- *Shape morphing:* keyframed path points, interpolated and re-tessellated. Paths must have
-  compatible topology; the importer resamples or reports an error if they don't.
+**Animation** (implemented in milestone 9.4, §4.17):
+- *Implemented:* `AnimationPlayer` with property tracks over any `@export` field, method
+  tracks and event tracks, with step, linear and eased interpolation; `Tween`, a
+  chainable script-driven animation; and `AnimationTree`, a state machine with parameter
+  conditions and cross-fades between states. Animations are saved in scene files.
+- *Planned:* these are not implemented, and the track system is built to carry them.
+  - *Cutout/transform:* SVG groups become parts animated on a timeline (position, rotation,
+    scale, opacity, draw order).
+  - *Skeletal + mesh deformation:* bones with weighted vertices of the tessellated mesh.
+  - *Shape morphing:* keyframed path points, interpolated and re-tessellated. Paths must have
+    compatible topology; the importer resamples or reports an error if they don't.
+- *Not implemented in 9.4:* Bezier handles on keys, blend spaces and layered blending.
 
 ### 4.6 Particle system
 There is **no dedicated bullet system**. The engine provides a general particle system;
-bullets (and any other projectile) are built on top of it by games or a later library.
+bullets (and any other projectile) are built on top of it by games or a library.
 
 **Two simulation modes**, chosen per emitter:
 
 | Mode | Runs on | Deterministic | Collision | Use for |
 |---|---|---|---|---|
 | `gameplay` | CPU (SoA arrays, job system) | Yes | Opt-in | Bullets, pickups, anything that affects game state |
-| `visual` | GPU compute on the Full tier; CPU fallback on Compatible / web | No | No | Sparks, smoke, dust, ambient effects |
+| `visual` | CPU today on every tier; GPU compute on the Full tier is planned | No | No | Sparks, smoke, dust, ambient effects |
 
 Visual particles never feed back into the simulation, so they can't break replays.
 
@@ -295,7 +357,7 @@ emitter {
   layer as circles or capsules in the spatial hash (§4.7). Hits emit
   `on_hit(particle, target)` in a deterministic order.
 - **Budget targets:** gameplay mode 50k particles at 60 Hz on a mid-range desktop and 10k
-  on the web; visual mode 1M+ on the Full tier.
+  on the web; visual mode 1M+ on the Full tier once GPU compute exists (planned).
 
 **Clarified (Phase 4A, see `cuervo/particles/README.md`):**
 - *Tick order* of a `ParticleSystem`: simulate every emitter in id order (integrate,
@@ -305,7 +367,7 @@ emitter {
   per-emitter independent (the job-system split point); spawning was serial because
   gameplay emitters shared the one simulation RNG (superseded in milestone 5.5: every
   emitter has its own child stream, §4.15).
-- *Visual mode* runs on the CPU for now (GPU compute is a Full-tier TODO), uses its own
+- *Visual mode* runs on the CPU (GPU compute on the Full tier is planned), uses its own
   seeded RNG and never collides (collision is forced off).
 - The `foreach` hook may kill but not spawn; scripts spawn with `emit` from `update()`.
 - Events (`on_spawn` opt-in, `on_death`, `on_hit`) are kept per emitter until its next
@@ -322,14 +384,14 @@ emitter {
 - Typical queries: gameplay particles vs. hitboxes (e.g. shots vs. the player), overlap
   queries, proximity radius (e.g. graze).
 - Results come back in a deterministic order.
-- **Clarified (Phase 4A):** circles and capsules are implemented; AABB/OBB hitboxes come
-  later. 32 layers, each proxy on one layer, queries take a layer mask. Touching shapes
+- **Clarified (Phase 4A):** circles and capsules are implemented; AABB/OBB hitboxes are
+  planned. 32 layers, each proxy on one layer, queries take a layer mask. Touching shapes
   overlap. The hash is a stable counting sort into power-of-two buckets (no unordered
   containers); results are sorted by proxy id (insertion order), and `pairs(A, B)`
   reports a pair whose proxies are both in A and B once, as (lower id, higher id).
   Proxies spanning more than 1024 cells go to a list every query scans (replaced in
   milestone 5.5 by a coarse secondary hash, §4.15).
-- General rigid-body physics is a separate, optional module (later).
+- General rigid-body physics is a separate, optional module (planned, 9.6).
 
 ### 4.8 Input
 ```
@@ -341,6 +403,8 @@ axis   move  = [Keys.Arrows, Pad.LeftStick]
 - Each tick's input is packed into an **input frame**. A replay is `seed + input frames`.
   **Clarified (Phase 4):** the frame also carries the mouse pointer in virtual pixels
   (for UI); project bindings gained `Pad.LeftStickUp/Down/Left/Right` (stick as button).
+  **Clarified (Milestone 9.3):** the frame also carries the character typed that tick
+  (`InputFrame::text`, one code point; replay format version 2, docs/REPLAYS.md).
 - Bindings are rebindable at runtime and saved per player.
 - **Clarified (Phase 6B):** replay files (seed + frames + per-tick state hashes) are
   `cuervo/input/replay.hpp`, documented in docs/REPLAYS.md.
@@ -401,7 +465,7 @@ themes. Rendered with SDF primitives and MSDF text.
 - UI nodes are written in the language like the rest of the node tree (§4.3): `Control`
   (extends `Node2D`: anchors, offsets, `min_size`, `expand`, `disabled`, a computed
   rect), containers `VBox`, `HBox`, `Margin`, `Panel` (a themed Margin), `Center`, and
-  widgets `Label`, `Button`, `Toggle`, `Slider`. `Image` and `Grid` are deferred.
+  widgets `Label`, `Button`, `Toggle`, `Slider`. `Image` and the grid container were added in 9.3 (4.17).
 - **Layout** runs in the simulation, every tick, before the UI root updates (so focus
   and hit tests see this tick's rects): a `Control` whose parent isn't a Control is a
   UI root placed in the virtual screen. Anchors/offsets are Godot-style; a control never
@@ -460,9 +524,9 @@ themes. Rendered with SDF primitives and MSDF text.
   miniaudio decodes it everywhere) → scripts → engine entries
   (`.cuervo/default.efont`, `.cuervo/export.toml`) → pack → assemble. The
   `.import/` cache is never packed: export re-imports.
-- Scripts ship as **sources** (`scripts = "source"` in the manifest): `pluma/`
-  has no bytecode serialization yet, so precompiled bytecode is a 7B follow-up.
-  AOT-to-C (7B, 5.12) plugs in as the scripts step with form `native`.
+- Scripts ship as **sources** (`scripts = "source"` in the manifest) or AOT-compiled C
+  (`native`, 7B, 5.12). `pluma/` has no bytecode serialization, so there is no
+  precompiled-bytecode form (`--scripts bytecode` is refused).
 - Linux: the player is copied under the game's name and finds `game.pak` next to
   itself; `--pack <file>` overrides. Web: a game-independent runtime
   (`CUERVO_WEB_PACK=fetch`, preset `web-pack`) fetches `game.pak` into MEMFS
@@ -497,6 +561,15 @@ themes. Rendered with SDF primitives and MSDF text.
   (`CUERVO_WEB_PACK=fetch`, verified in headless Chrome); Windows players are a follow-up
   (10.5a).
 
+  **Clarified (Milestone 8.9, `tests/workflow_smoke.cmake`):** the exporter's naming and
+  launch contract is covered end to end by the workflow test: a project named `Workflow
+  Game` ships as `workflow-game` (lowercased, spaces as `-`), the shipped directory alone
+  runs from any working directory with a private user directory and no EULA acceptance, exits
+  0 after `--quit-after` or at the screenshot tick, and reaches the editor-play state hash.
+  The state hash covers the tick, particles and numeric script globals, not node fields, so
+  a workflow check that must notice a scene or script change needs a script global that
+  depends on it.
+
 ### 4.12 Scene and project files
 - Binary format: a header (magic, format version, schema hash), then tables.
 - Every schema change bumps the version and adds a **migration**. Old projects always load.
@@ -518,7 +591,7 @@ docs/SCENES.md):**
   string table. The schema hash fingerprints the (class, field, type) triples used.
 - Versions: 1 = inline strings, unnamed nodes; 2 (current) = string table and node names.
   Old versions are decoded by their own reader and then pass through `migrations()`
-  (v1→v2 names nodes after their class); `cuervo-tools scene upgrade` rewrites a file.
+  (v1→v2 names nodes after their class, numbering same-class siblings "Shape", "Shape2"); `cuervo-tools scene upgrade` rewrites a file.
 - Script-side schema drift is handled like hot reload (§5.13): fields match by name;
   a field that no longer exists, is no longer exported or changed declared type keeps its
   default, with a warning. Unknown classes / non-Node classes are errors (a panic).
@@ -530,9 +603,23 @@ docs/SCENES.md):**
 - `cuervo-tools scene dump | build | upgrade` (tools/cuervo_tools). `dump` is the
   textconv view: nested `node Class "name" { field: type = value }` blocks, floats in
   shortest round-trip form, so equal scenes dump to identical text; `build` parses that
-  text back (the authoring path until the editor exists).
+  text back (the text authoring path; the editor is the main one).
 - Hot reload (§5.13) does not re-read scene files; instances loaded earlier keep their
   (migrated) state. F6 (restart) picks up edited scenes.
+
+  **Clarified (Milestone 8.7, `tests/examples_sweep.cmake`, `tests/editor/editor_87_tests.cpp`):**
+  - *The sweep.* Every example runs the whole release path in one ctest each
+    (`examples_sweep_<name>`): a headless run to a screenshot tick on 1 and 4 job threads
+    (same state hash), every scene through `scene dump | build` and `scene upgrade` (same
+    bytes), a recorded run verified by `cuervo-editor --replay-verify` on 1 and 4 threads
+    (a drifted project refused), a scripted edit plus forced hot reload while playing and
+    recording, and bytecode and `--aot` exports launched from another directory with the same
+    input and the same hash (`-DCUERVO_SLOW_TESTS=ON` adds the stripped player).
+  - *Migration names.* Version 1 nodes had no names; the migration now numbers siblings of
+    one class ("Shape", "Shape2") the way the editor numbers new nodes, so every migrated
+    node has a unique path.
+  - *Every node class.* A test adds every built-in node class to one scene with every field
+    changed, saves it, reopens it, goes through the text view and runs and draws it.
 
 ### 4.13 Editor
 A standalone Dear ImGui application built on the engine:
@@ -611,8 +698,8 @@ reload, the replay viewer/debugger and the tier report as panels in the same reg
 - *Scene instancing* had no representation in the scene format; instead of a format
   change, the prelude gained `SceneInstance` (a `Node2D` with `@export var scene`): when it
   enters the tree it loads that scene and adds its root as a transient child, moved by the
-  instance's `position` when it is a `Node2D` (nodes draw in world coordinates; there is no
-  transform hierarchy). Saving keeps the reference, not a copy; the editor's view expands
+  instance's `position` when it is a `Node2D` (nodes drew in world coordinates before 9.1;
+  with the transform hierarchy on, the root is an ordinary child, 4.17). Saving keeps the reference, not a copy; the editor's view expands
   instances; a scene that instances itself panics. Dropping a `.scene` into the view
   creates one.
 - *Input map editing* keeps project.toml as written: only the changed `key = [...]` lines
@@ -626,19 +713,38 @@ reload, the replay viewer/debugger and the tier report as panels in the same reg
   when not playing. The tier report panel shows `check_project_tier` with entries linked
   to their files.
 
+  **Clarified (Milestone 8.7, `editor/command_script.cpp`, `cuervo/script/prelude/ui.plm`):**
+  - *Hot reload from a command script.* `append-file <path> <text>` edits a project file and
+    `reload` forces the playing game to hot-reload, so reload is testable headless. A reload
+    re-runs field initializers of migrated objects, so a project with coroutines or emitter
+    fields is not bit-exact across it; a replay recorded across a reload plays on with the
+    scripts as they are then (§5.13), and only reload-free recordings are verified.
+  - *Scene view.* The preview builds scenes without `ready()`; a `TabContainer` has no tab
+    bar there and now lays its pages out instead of panicking.
+
+  **Clarified (Milestone 8.9, `editor/main.cpp`, `editor/command_script.cpp`):**
+  - *Project creation without a window.* `cuervo-editor --new-project <dir> [--template
+    empty|walker] [--name <name>]` runs `create_project()`, the code behind the welcome
+    screen's New project, then exits. It is headless, so it follows the command-line EULA
+    rules, and it refuses a folder that already has files.
+  - *Hash from a script.* `print-hash` logs `at tick N (state hash H)`, the runtime's wording,
+    so a test hands the editor-play hash to the exported game's run.
+  - The fresh-checkout path (new project, edit and save a scene, play, add a script, hot
+    reload, export, launch outside the project) is `workflow_smoke`.
+
 ### 4.14 Threading
 - Scripts run on the main thread, in a fixed order.
 - A job system runs particle simulation, collision broadphase, animation, tessellation and
   render preparation. Jobs write to disjoint ranges and merge in a fixed order, so
   results stay deterministic.
-- On the web the job system runs inline on one thread. WASM threads are an optional later
-  addition.
+- On the web the job system runs inline on one thread by default. WASM threads are opt-in
+  (`CUERVO_WEB_THREADS`, presets `web-threads` and `web-pack-threads`, docs/WEB.md "Threads").
 
 **Clarified (Phase 5, `cuervo/platform/`, docs/WEB.md):** the frame loop is callback-driven
 (`platform::FrameLoop` / `run_main_loop`): natively a `while`, on the web
 `emscripten_set_main_loop_arg`, so all per-run state lives in a heap object. The web
-build has no threads at all (no `-pthread`: no SharedArrayBuffer/COOP/COEP; miniaudio
-mixes on the main thread via Web Audio), no file watching (the project is a read-only
+build has no threads by default (no `-pthread`: no SharedArrayBuffer/COOP/COEP; miniaudio
+mixes on the main thread via Web Audio; the opt-in threaded build has a real job system), no file watching (the project is a read-only
 preloaded MEMFS bundle) and no runtime font import. Code asks `platform::has_threads`
 / `has_file_watching` instead of testing `__EMSCRIPTEN__`. The WASM simulation matched
 the native one bit for bit on the shmup (state hash at tick 240), consistent with 4.1.
@@ -739,6 +845,27 @@ results are bit-identical regardless of thread count or whether a SIMD path is t
   demo, ~52k bullets: 2.42 ms/tick scalar single-threaded -> 1.80 (sse2) / 1.71 (avx2)
   with SIMD -> 0.50 / 0.47 at 8 threads (`cuervo/particles/README.md` has the table).
 
+
+**Clarified (Milestone 8.6, `tools/bench.py`, `docs/PERFORMANCE.md`, `docs/perf/`):**
+- *Baselines.* `tools/bench.py record` runs `examples/bench` at 1k/10k/50k/100k per backend and
+  build, three runs each, and stores the median frame-time statistics, the simulation time per tick
+  (mean and p95), peak RSS, the state hash at tick 600 (with the default job count and with
+  `--jobs 1`) and the export sizes in `docs/perf/baseline-<machine-id>.json` (schema in
+  PERFORMANCE.md). The `--bench` log line gained the p95/max tick time and the tick count.
+- *Regressions.* `tools/bench.py compare` exits 1 on a changed state hash (or a hash that differs
+  between backends), simulation tick time +15% (mean) / +25% (p95), frame p95 +25%, peak RSS +10%,
+  export size +5%, capacity -15% (CPU limit) / -25% (frame limit). The thresholds live in one table
+  in the tool; timings are only enforced on the same machine id. **Decision:** CPU-only checks are
+  the strict ones; anything that includes the GPU or the driver is looser.
+- *Capacity.* `tools/bench.py capacity` searches for the largest particle count whose p95 frame
+  time (and, separately, p95 sim tick time) fits 16.67 ms with VSync off, on a dense scene
+  (`examples/bench`) and a low-overdraw one (`examples/bench_spread`), reported as a range with the
+  binding limit named. The figures are facts about the measured machine, not engine promises.
+- *Measured.* On the reference machine (Ryzen 7 5800X3D, RTX 3060 Ti) the 50k and 100k workloads
+  hold 60 fps in debug and release on GL and Vulkan with wide margins, and the release build holds
+  about 1.5 million (GL) / 1.8 million (Vulkan) particles at 60 fps (after the GL frame limit and stream-buffer fixes, PERFORMANCE.md "Findings"). Web (WebGL2) is measured by hand
+  (PERFORMANCE.md "Web"); no web baseline is committed.
+
 ### 4.16 Polish milestones (8.1-8.4)
 The brand, a node library, an editor overhaul and
 real documentation, as four milestones in that order (each later one uses the earlier).
@@ -748,7 +875,7 @@ real documentation, as four milestones in that order (each later one uses the ea
   "Raven" `#111214`, Ember as the single accent, Sage for success), and the type
   (Outfit display, Figtree UI, JetBrains Mono code). `tokens/tokens.css` is the kit's
   source of truth and `tokens.json` is generated from it. Only the visual identity applies;
-  the kit's product copy and CuervoOS flows are for another product. Plan:
+  the kit's product copy and CuervoOS flows are for another product. Approach:
   - The kit lives outside the repo, and exports and the web build need the files in-tree,
     so a sync script copies the logo SVG/PNGs and `tokens.json` into `assets/brand/` and
     records the kit's source commit. The copy is regenerated by the script, never edited.
@@ -783,7 +910,7 @@ real documentation, as four milestones in that order (each later one uses the ea
     25 KB, so packs and exported players need no file) and `Window::create` sets it for every
     window (`WindowDesc::brand_icon`, `Window::set_icon_png`) with SDL 3.4's `SDL_LoadPNG_IO`:
     `cuervo` and `cuervo-editor` both. With an SDL older than 3.4 (the fetched 3.2.10
-    fallback) there is no PNG loader and no icon. A game-chosen icon is left for later.
+    fallback) there is no PNG loader and no icon. A game-chosen icon is not supported yet.
   - *Editor theme.* `--theme light|dark` (default: the OS preference, `SDL_GetSystemTheme`)
     and *View > Theme*. `editor/theme.cpp` maps the semantic tokens onto every ImGui color
     (Ember only for selection, checks, sliders and the active tab's overline; 4 px radii);
@@ -807,16 +934,16 @@ real documentation, as four milestones in that order (each later one uses the ea
     (a browser favicon the engine never draws). The welcome screen proper is 8.3.
   - *Title bar and README.* Windows are titled "… — Cuervo Engine Editor"; README.md opens
     with the two-tone mark (light/dark via `<picture>`).
-- **8.2 Node library.** Today the prelude has `Node`, `Node2D`, `SceneInstance`,
-  `CanvasLayer` and the UI controls (§4.10); everything else is built in scripts. New nodes
+- **8.2 Node library.** Before this milestone the prelude had `Node`, `Node2D`, `SceneInstance`,
+  `CanvasLayer` and the UI controls (§4.10); everything else was built in scripts. The new nodes
   are prelude classes extending `Node2D` that wrap existing systems, so the editor and
   scene files pick them up through the usual reflection (`@export` fields, §4.12, §4.13).
-  Candidates: `Shape` (SDF primitive: circle, rect, rounded rect, capsule, with fill and
+  The nodes: `Shape` (SDF primitive: circle, rect, rounded rect, capsule, with fill and
   stroke), `Path` (polyline/bezier stroke), `Sprite` (an imported SVG), `Text` (MSDF text
   in the world), `Camera2D`, `Timer`, `Area` (collision shape with layers and signals,
   §4.7), `Emitter2D` (a particle emitter as a node, §4.6) and `AudioPlayer` (§4.9). Each
   one is deterministic in sim paths (§3) and has doctest coverage plus a scene-file
-  round-trip test. Animation nodes stay in Phase 8.
+  round-trip test. Animation nodes are covered by milestone 9.4.
 
   **Clarified (Milestone 8.2, `cuervo/script/prelude/nodes.plm`, `collision.plm`,
   `particles.plm`, `audio.plm`, `cuervo/script/vector_cache.hpp`, docs/API.md):**
@@ -952,10 +1079,45 @@ real documentation, as four milestones in that order (each later one uses the ea
     gate itself; the export test strips it for the shipped launchers.
 - **8.4 Documentation.** This makes Phase 8's "docs" concrete: a user manual (editor,
   projects, export), a Pluma guide and tutorial built from `docs/LANGUAGE.md`, a node and
-  engine API reference generated from the prelude's doc comments (`cuervo-tools doc`,
+  engine API reference generated from the prelude's doc comments (`cuervo-tools docs`,
   reusing the LSP's symbol index, §5), and a "first game" tutorial that is checked by
   building it in CI. The output is a static site styled with the 8.1 brand, and a test
   fails on any public prelude symbol that has no documentation.
+  **Clarified (Milestone 8.4, `tools/build_site.py`, `tools/site/`, `tools/cuervo_tools/api_docs.*`,
+  `docs/PLUMA_GUIDE.md`):**
+  - **The site generator is Python (stdlib only), not C++:** `python3 -I tools/build_site.py -o <dir>
+    --font role=ttf ...` (CMake: `--target docs_site`, output `<build>/site`). The inputs are Markdown, JSON
+    and fonts, nothing that needs the engine, and a C++ Markdown renderer would add code to a binary
+    whose job is project files. `tools/site/mdlite.py` is the Markdown subset the docs use,
+    `highlight.py` reads its Pluma keywords from `tools/vscode-pluma/syntaxes/pluma.tmLanguage.json`.
+    Colors come from `assets/brand/tokens.json` (light, and dark under `prefers-color-scheme` or the Theme
+    button), type from the three brand fonts (Outfit, Figtree, JetBrains Mono; the TTFs CMake already pins
+    are copied into the site with their OFL texts), the mark and wordmark from `assets/brand`.
+  - **Pages:** Manual (GUIDE sections 1-3, 6-9, editor, scenes, replays, export, web, Windows, VS Code), Pluma
+    (five minutes, the new `docs/PLUMA_GUIDE.md` in chapters, LANGUAGE.md as the reference split by section),
+    Tutorial (GUIDE section 5, one page per step, plus the finished files), API (docs/API.md split into one page per
+    prelude file and per type, with an A-Z index and anchors per member), Design (DESIGN.md), About (the
+    license, third-party notices, every license text). Relative links between documents are rewritten to site
+    pages; a link that points at nothing is a build error. Search is a JSON index plus vanilla JS.
+  - **Docs coverage:** `cuervo-tools docs --check-coverage` fails on any public (non-`_`) prelude type, constant,
+    function, variant, signal, field or method with no leading or trailing doc comment
+    (`api_docs_coverage`; `api_docs_tests.cpp`). Every public symbol is documented.
+  - **Tests:** `docs_site` builds the site and checks every internal link and fragment in the output;
+    `docs_site_unit` tests the renderer and runs every self-contained example of the Pluma guide through `plm`;
+    `tutorial_tests` fails when a line of `examples/tutorial` is missing from GUIDE.md's code blocks (the
+    guide lacked the `[scene]` table); `run_tutorial` and `export_tutorial` (source and AOT, shipped alone, hash
+    `519ec4a631d8254d` at tick 240) cover the tutorial's build and export in CI.
+- **8.5 Documentation reconciliation.** **Clarified (Milestone 8.5, `docs/STATUS.md`):**
+  - *One place for support.* `docs/STATUS.md` states what is Stable, Experimental, Planned or
+    Unsupported, by platform, rendering backend and system. The other pages describe how things
+    work and link to it. It is maintained by hand until 8.8 turns it into a checked contract.
+  - *How the documents relate.* The opening paragraphs of §4 and §5 are the design; the
+    **Clarified** notes record what was built and win where they differ; §6 marks finished
+    milestones "done". User-facing pages (README, guide, WEB, WINDOWS, EXPORT, editor, module
+    READMEs, LANGUAGE) describe the current state and do not narrate milestones. `LICENSE.md` is
+    the source of truth for license summaries.
+  - *Style.* Status lines carry no dates; decisions are written **Decision:**; measurements may name
+    machines and versions.
 
 ### 4.17 Advanced local systems (9.1-9.8)
 Phase 9 holds what a Godot comparison found missing (transform hierarchy, more nodes, a
@@ -963,11 +1125,11 @@ bigger Pluma library, more UI, animation, tilemaps, navigation, scene-tree physi
 of the original Box2D and lighting plans. The target games are shmups, platformers,
 top-down RPGs, UI-heavy and puzzle games, and general 2D. 3D stays in Phase 13. The
 sub-milestones build on each other in order, and each keeps replay hashes identical at 1
-and N job threads (§3, §4.15). Nodes already planned in 8.2 (`Shape`, `Path`, `Sprite`,
+and N job threads (§3, §4.15). Nodes from 8.2 (`Shape`, `Path`, `Sprite`,
 `Text`, `Camera2D`, `Timer`, `Area`, `Emitter2D`, `AudioPlayer`) are not repeated here.
-- **9.1 Transform hierarchy and node gaps.** Today nodes draw in world coordinates
-  (scene.plm). `Node2D` gains parent-relative transforms (`global_position`,
-  `global_rotation`, `global_scale`, `to_local`, `to_global`). **Decided:** it is the
+- **9.1 Transform hierarchy and node gaps.** Before 9.1 nodes drew in world coordinates
+  (scene.plm). `Node2D` gained parent-relative transforms (`global_position`,
+  `global_rotation`, `global_scale`, `to_local`, `to_global`). **Decision:** it is the
   default but can be switched off (per project or per node), and a switched-off tree
   behaves exactly as before, so existing games and replays don't change. Adds `Line2D`,
   `Polygon2D`, `Marker2D` and `VisibleOnScreenNotifier2D`.
@@ -1027,10 +1189,10 @@ and N job threads (§3, §4.15). Nodes already planned in 8.2 (`Shape`, `Path`, 
     merge sort (identical on every platform and in VM and AOT), floats sort NaN last;
     `PriorityQueue` is FIFO among equals. `shuffle` draws from `VmOptions::random_below` (the
     host's seeded stream), else the VM's own PCG32 seeded by `VmOptions::random_seed`; the
-    engine does not install the hook yet. Accessors run outside their own body; method values
+    engine installs the hook (9.2b). Accessors run outside their own body; method values
     capture the receiver when bound and dispatch virtually. Cut: built-in methods as values,
     `Optional` helpers on reference types (they are already nullable), the `[x; N]` repeat
-    literal, new `IndexSet` behavior for custom types, and the engine RNG hookup for `shuffle`.
+    literal, and new `IndexSet` behavior for custom types.
 - **9.2b Pluma math, geometry and random.**
   - Scalar: `trunc`, `fract`, `fposmod`, `cbrt`, `hypot`, `copysign`, `snapped`,
     `pingpong`, `ease` curves, `bezier`, `lerp_angle`, `angle_difference`,
@@ -1076,9 +1238,140 @@ and N job threads (§3, §4.15). Nodes already planned in 8.2 (`Shape`, `Path`, 
   `SplitContainer`, `AspectRatioContainer`, `Image`/`TextureRect`, `ProgressBar`,
   `LineEdit` (text input recorded in the input frame so it replays), `OptionButton`, tabs
   and popups, all through the focus and layout model of §4.10.
+  **Clarified (Milestone 9.3, `cuervo/script/prelude/ui.plm`, `tests/cuervo/ui_widget_tests.cpp`,
+  `examples/ui_menus`, `tests/ui_menus.cmake`):**
+  - *Widgets* (all `@export`-configured, doc-commented, laid out in the simulation with the same
+    `UI.measure` as before). `GridContainer` (`columns`, separations; columns/rows size to their
+    widest/tallest cell, leftover space goes to the columns and rows holding an `expand` child),
+    `FlowContainer` (`vertical`; wraps at its width/height, so its minimum size follows the size
+    it was last given and settles one tick after a width change), `SplitContainer` (two
+    children and a focusable bar: `split`, `bar_size`, `handle_step`; keys and dragging move it,
+    children keep their minimum sizes), `AspectRatioContainer` (`ratio`, `stretch` #fit/#cover,
+    `align`), `ScrollContainer` (`vertical`, `horizontal`, `wheel_step`, `follow_focus`,
+    `show_bars`, `scroll`; signal `scrolled`), `Image` (vector asset like `Sprite`, `stretch`
+    #keep/#scale/#keep_aspect/#cover, `tint`, flips, `ignore_natural_size`) with the alias
+    `TextureRect`, `ProgressBar`, `LineEdit` (`text`, `placeholder`, `max_length`, `secret`,
+    `editable`; signals `text_changed`, `text_submitted`), `OptionButton` (`items`, `selected`,
+    `item_height`; signal `item_selected`), `TabBar` (`tabs`, `current`, `min_tab_width`),
+    `TabContainer` (pages are its Control children, `titles`, `tab_min_width`), `Popup`
+    (`modal`, `light_dismiss`, `cancel_closes`; `popup_centered`, `popup_at`, `close`),
+    `PopupMenu` (`items`, `item_min_size`; `item_chosen`) and `ConfirmDialog` (`title`,
+    `message`, `ok_text`, `cancel_text`, `focus_ok`; `confirmed`, `cancelled`). `Control` gained
+    `tooltip` (shown after the focus rests 24 ticks, drawn above everything).
+  - *Focus and input model.* Everything goes through §4.10's focus model. A control that
+    `floating()` (a popup) is not laid out by its parent and is a UI root of its own, wherever it
+    sits in the tree; popups set `UI.modal` (restored on close) and take the focus, which comes
+    back on close, so focus is trapped. A root's input is "focus inside" by `root_control()`, not
+    by ancestry. New actions, all optional: `ui_scroll_up/down` (bind `Wheel.Up/Down`, the right
+    stick), `ui_backspace`, `ui_delete`, `ui_home`, `ui_end`, `ui_tab_prev/next` (shoulders). The
+    wheel scrolls the area under the pointer, else the one around the focus, else (gamepad) the
+    first scrollable area of the root; the first press moves `wheel_step`, held presses a quarter
+    of it per tick. Dragging empty content or the bar scrolls too; focus moves scroll the
+    focused control into view in the next layout. A `LineEdit` edits after `ui_accept` or a
+    click; typed characters, backspace/delete, caret keys and `ui_accept` (submit) / `ui_cancel`
+    (stop) are consumed by it. Up/down leave the field. Printable keys bound to `ui_*` actions
+    would also type: a character typed on the tick of a `ui_*` press cancels that press, but
+    projects with text fields should bind navigation to arrows/Enter/Escape. There is no
+    on-screen keyboard yet, so gamepads can focus a `LineEdit` but not type into it.
+  - *Rendering.* New natives `Canvas.set_clip` / `clear_clip` (scroll areas, `#cover`, text
+    fields) cut everything drawn after them: the host flushes the batchers and the runner sets
+    the existing RHI scissor (`Device::set_scissor`, already in both backends, so no RHI change);
+    `UI.push_clip` / `pop_clip` intersect nested rectangles. `Scene.overlays` +
+    `Node.draw_overlay` draw popups and tooltips after every canvas layer. The editor's scene
+    view ignores clipping for now (its draw targets have no clip hook). `UI.image_size` reads a
+    vector file's document size for layout.
+  - *Input and replays.* `InputFrame::text` carries one typed code point per tick (the devices
+    queue typed characters, so a burst is spread over ticks and none is lost); the window turns
+    SDL text input on only while a field is being edited (`UI.wants_text`). Replay format
+    version 2 stores it; version 1 files still load (docs/REPLAYS.md). `cuervo --game` gained
+    `--pointer "tick:x:y,..."`, `--type "tick:text,..."` and tick ranges in `--press`
+    (`"10-20:ui_click"`) so automated runs can drive pointers and text.
+  - *State hash.* The hash covers every numeric static in declaration order, so the counters of
+    the 9.3 input handling live in an object (`UI.x`), not in statics: the shmup, tictak and
+    other recorded hashes are unchanged.
+  - *Done-when.* `examples/ui_menus` (tabs, sliders, toggles, `OptionButton`, `LineEdit`,
+    `ConfirmDialog`; a `GridContainer` of slots in a `ScrollContainer`, `SplitContainer`,
+    `AspectRatioContainer` + `Image`, `FlowContainer`, `ProgressBar`, tooltips and a popup menu)
+    runs three scripted scenarios (keyboard, gamepad, pointer; `tests/ui_menus.cmake`) whose
+    recordings verify on 1 and 8 job threads, plus doctests that drive the same menus through
+    real `DeviceState` key, pad button, stick, wheel, mouse and typed-text events. Every control
+    there has an explicit `min_size`, so what a recorded click hits does not depend on the font
+    (the verifying editor may have none). Cut: raster images (11.2), IME composition, an
+    on-screen keyboard, horizontal wheel/shift-wheel, selection and clipboard in `LineEdit`.
 - **9.4 Animation.** `AnimationPlayer` with property tracks (any `@export` field) saved
   in scene files, `Tween`, and an `AnimationTree` state machine with blending. Time is
   measured in ticks (§5.9). Cutout, skeletal and morph animation from Phase 8 plug in here.
+  **Clarified (Milestone 9.4, `cuervo/script/prelude/animation.plm`, `cuervo/script/anim_bindings.cpp`,
+  `tests/cuervo/animation_tests.cpp`, `examples/anim_character`):**
+  - *Layout.* Almost everything is Pluma prelude code in one new file; the only native piece is
+    four reflection functions on the `Anim` class: `Anim.kind(node, field)`, `Anim.read`,
+    `Anim.write(node, field, value: vec4, text)` and `Anim.call(node, method)`. They reach only
+    `@export` fields (the same set scene files and the inspector see). `Anim.write` decides by the
+    field's own type: float (f32 or f64), int (rounded half up, no libm), bool (`>= 0.5`), `vec2/3/4`,
+    `Color` (written in place), plain enum (the discriminant) and `name` (the key's `text`); anything
+    else (`str`, lists, structs) is not animatable and the track is skipped with one message.
+    Prelude names are prefixed (`Anim*`, `Animation`, `Tween`) so user classes don't clash, and no
+    numeric statics were added (they would change every recorded state hash).
+  - *Time* is ticks only: key times, `length`, durations and delays are `int`s; the playhead is a
+    float so `speed` can be fractional or negative. `Anim.ticks(seconds)` converts. All easing goes
+    through the 9.2b `ease_in/out/in_out(Ease, t)` and `ease(x, curve)`, i.e. `dmath`.
+  - *Tracks.* A track is `AnimTrack { path, kind, keys }`; a path is `"NodePath:field"` resolved
+    against a root (the player's parent, or `root_path`) by node names (`..` and `.` allowed). Kinds:
+    `Property` (sampled each tick), `Method` (`Node:method()`, no arguments, fires when a key is
+    crossed) and `Event` (emits `AnimationPlayer.event(text)`). A key is `AnimKey { time, value:
+    vec4, text, interp, ease_kind, curve }`; `interp` (`Step`, `Linear`, `EaseIn`, `EaseOut`,
+    `EaseInOut`, `Curve`) shapes the segment to the *next* key, so easing is per key. Values travel
+    packed in a vec4 (float in `x`, a `Color` in `rgba`, ...), which keeps one struct for every type.
+    Before the first key and after the last the track holds that key.
+  - *Player.* `AnimationPlayer` (a `Node`; it advances in `update_tree` before its siblings, like
+    `Timer`) has `animations`, `autoplay`, `speed`, `root_path`, `active`, `play(name, speed)`,
+    `play_backwards`, `queue`, `stop`, `seek`, signals `animation_started`, `animation_finished(name)`
+    and `event(name)`. `play()` applies tick 0 at once; after `k` ticks the playhead is at `k * speed`.
+    Loop modes `None` (stops at the last tick, finished once), `Loop` (wraps, method/event keys on both
+    sides of the wrap fire) and `PingPong`. Bindings (resolved node, field kind) are cached per path and
+    re-resolved if a node is freed; a path that can't be driven is reported once and skipped.
+  - *Tween.* `Node.create_tween()` (one small addition to `scene.plm`) returns a `Tween` whose driving
+    coroutine is started by the node, so it is owned by it: it pauses with the node during
+    `Scene.paused` and is cancelled when the node leaves the tree (§5.9). Typed builders
+    (`tween_float/int/vec2/vec3/vec4/color/bool/name`, `tween_value`, `tween_method`, `tween_callback`,
+    `interval`) append to the current step; `parallel()` / `set_parallel` join steps; `with_ease`,
+    `with_curve`, `with_delay`, `with_from` adjust the last one; `set_loops`, `kill`, `pause`,
+    `resume`, `signal finished`. A step of `N` ticks written on tick `T` reaches its value on tick
+    `T + N`; the next step starts on the tick the previous one ends and ticks from the next, so a
+    sequence takes the sum of its ticks; callbacks take no time. Typed builders instead of one generic
+    `tween_property<T>` because natives can't be generic in this language.
+  - *State machine.* `AnimationTree` (a `Node`, evaluates once per tick before its siblings) has
+    `states` (`AnimStateDef { name, animation, speed }`), `transitions` (`AnimTransition { from_state
+    ("*" = any), to_state, conditions, duration, interp/ease, at_end }`), `start_state`, parameters
+    (`set_param`, `set_bool`, `trigger`), `goto(state, duration)`, `travel(state)` (BFS over the
+    transitions, conditions skipped, `at_end` honored), `is_fading()` and `fade_progress()`. A
+    condition is `param op value` with `IsTrue/IsFalse/Eq/Ne/Lt/Le/Gt/Ge/Trigger`; the first
+    transition out of the current state whose conditions hold fires (a transition with no conditions
+    fires at once). A trigger is consumed by the transition that uses it and cleared at the end of that
+    evaluation, so setting it before or after the tree in the same tick works. Cross-fade: both
+    sides keep playing and their poses are blended with weight `shape(t / duration)`; the transition
+    tick outputs the pure old pose and the fade ends after `duration` more ticks. A transition that
+    fires during a fade freezes the blended pose so far as the outgoing side (no jump). Numbers,
+    vectors and colors blend linearly; bools, enums and names switch at weight 0.5; a track one side
+    lacks keeps the other side's value, so animations of one rig should key the same tracks.
+  - *Scene files.* Animations are a resource **inside the scene**: `AnimationPlayer.animations` is an
+    exported `List<Animation>` (nested exportable structs and lists), `AnimationTree.states` and
+    `.transitions` likewise. No sibling `.anim` file and no format version bump; the text view,
+    migrations and the round trip work unchanged (docs/SCENES.md). The one-line-per-field text view
+    makes hand-editing awkward, so the example is generated (`make_scene.py`).
+  - *Replay hash.* The script-global hash cannot see node fields, so every `Anim.write` folds the
+    written bits into a digest kept by `ScriptHost` that joins `state_hash()` once it is non-zero
+    (games with no animation keep their hashes; the shmup hash is unchanged). Animation therefore
+    replays like any other state, and a changed key, speed or transition moves the hash.
+  - *Plugging in other animation.* Cutout, skeletal and morph animation are not implemented. The track
+    system is meant to carry them: a track is a path that samples to a vec4 per tick and a binder that
+    writes it. A skeletal or cutout track kind would add an `AnimTrackKind` and a path scheme that
+    `AnimBinder.lookup` resolves to a bone or slot (writing the bone's transform fields), and a morph
+    track would write a blend-shape weight field; interpolation, blending, the state machine and scene
+    saving would be reused as they are.
+  - *Cut.* Bezier-handle key curves, per-track wrap, root motion, additive/layered blending and
+    blend-space nodes (only two-sided cross-fades), method tracks with arguments, a sibling `.anim`
+    file and editor timeline UI (9.8).
 - **9.5 Tilemaps and navigation.** `TileMapLayer` with tilesets, autotiling and an editor
   paint tool; `NavigationRegion2D` and `NavigationAgent2D` (grid/mesh A* with
   deterministic tie-breaking).
@@ -1113,7 +1406,7 @@ it. Each piece keeps replay hashes identical.
   the model, §5.12), a Pluma FFI to call C libraries with explicit marshaling, and an
   embedding API for hosting the Pluma VM in other programs. Native code in the sim path
   must be deterministic, so the API flags modules as sim-safe or not, and AOT export
-  links plugins statically. **Decided:** the first bindings are C++, Rust and C#, all
+  links plugins statically. **Decision:** the first bindings are C++, Rust and C#, all
   over the one C ABI. C++ is a header-only wrapper (the engine's own language). Rust is a
   safe crate generated from the ABI's header. C# runs on .NET hosted in the player and
   editor on desktop; it is not available on the web or in AOT exports until a
@@ -1125,25 +1418,27 @@ it. Each piece keeps replay hashes identical.
     install|publish|verify` use. Verification checks the ABI version, the license
     declaration and, for sim-safe plugins, the replay hash on a conformance project.
     Plugins are built from source or shipped as per-platform binaries, with checksums.
-  - *Licenses:* **Decided:** the engine is source-available under the Fair-Code EULA in
-    `LICENSE.md` (draft, needs attorney review before release), not an OSI license. Free
-    under $30,000 Net Revenue per Product; $1,000 per Seat from $30,000; at $200,000 the
-    greater of 1.5% of Net Revenue or the Seat Fees; quarterly reports and payment within
-    45 days; one audit a year; modifications and forks stay under the license; the
-    Product Code is the user's; contributions come with a built-in CLA; non-commercial
-    forks are free. The export must not force the game's code under it. The license also
-    needs engine support: a `cuervo-tools license report` that totals Net Revenue inputs and
-    Seats into the quarterly report. Generated third-party notices
-    (SDL3, Vulkan headers, volk, VMA, SPIRV-Cross, libtess2, msdfgen, Dear ImGui,
-    miniaudio, FreeType, doctest, and the brand fonts under SIL OFL) bundled into editor
-    and game exports, and a license check in CI that fails on a dependency without a
-    compatible license. Plugins and packages declare their license in their manifest, and
-    the tier check (§4.4) reports any with an incompatible one.
+  - *Licenses:* **Decision:** the engine is source-available under the Fair-Code EULA in
+    [`LICENSE.md`](../LICENSE.md), not an OSI license. Everything below is what that file says.
+    During Beta (before Version 1.0) the engine is free for everyone, commercial games
+    included: no royalties, Seat Fees or financial reports (EULA 2.2, 3.1, 4.2, 5.1). Commercial
+    licensing terms will be published with or before Version 1.0 (3.2); a Product developed or
+    released with a Beta Version is grandfathered at $0 and never owes retroactive fees (3.3),
+    and the new terms apply only to a Product upgraded to, or started on, Version 1.0 or later.
+    Modifications and forks stay under the license (7); Product Code stays the developer's (8);
+    contributions come with a built-in contributor license (10); Non-Commercial Forks are free
+    (9). The export must not force the game's code under it. What exists: the first-launch
+    agreement gate (8.3), generated third-party notices bundled into every export
+    (`THIRD_PARTY_NOTICES.md`, `third_party/licenses/`, checked by the `third_party_notices`
+    ctest). Planned: a `cuervo-tools license report` for the reporting that Version 1.0
+    terms will define, a license check in CI that fails on a dependency without a
+    compatible license, and plugin/package license declarations in their manifest, which the
+    tier check (§4.4) would report when incompatible.
   - *Contribution:* `CONTRIBUTING.md` (build, test, the zero-warning and determinism
     rules, code style, how to add a prelude node or native), a code of conduct, a
     security policy for reports, issue and pull request templates, a contributor license
     or sign-off policy, a design-change process (proposals recorded in DESIGN.md as
-    "Decided/Clarified" notes), and a public roadmap generated from the milestones table.
+    "Decision/Clarified" notes), and a public roadmap generated from the milestones table.
 
 ### 4.19 Production features (11.1-11.4)
 Phase 11 holds what real shipped games need beyond the engine core, found by comparing
@@ -1194,8 +1489,8 @@ Phase 12 makes the editor and runtime good for narrative, AI-heavy and accessibl
 
 ### 5.1 Overview
 Statically typed with inference, brace syntax, embedded in the engine. Compiles to bytecode
-for development (fast iteration, hot reload) and to C for release builds (native speed,
-no JIT, which also works on the web).
+for development (fast iteration, hot reload) and to C for native release builds (native speed,
+no JIT). AOT export targets the host platform; web exports ship the scripts as source for the VM.
 
 ### 5.2 A taste
 ```
@@ -1390,7 +1685,7 @@ Members starting with `_` are private to the class.
 
 ### 5.12 Execution
 - **Development:** source → lexer → parser → type checker → typed IR → bytecode → register VM
-  (decided, 7.1). The typed IR (`pluma/tir.hpp`) is the input the AOT-to-C path will share.
+  (7.1). The typed IR (`pluma/tir.hpp`) is also the input of the AOT-to-C path.
 - **Release:** the same typed IR is emitted as C, compiled with the engine and linked in.
   Panics, refcounting and checks behave identically.
 - Both paths share one test suite to keep their semantics identical.
@@ -1435,7 +1730,7 @@ Restarted coroutines get their original (migrated) arguments; `ready()` is not c
 again. A compile error keeps the running game and shows the diagnostics. The runner
 watches `scripts/**/*.plm`; F5 forces a reload and F6 restarts the game from scratch.
 
-### 5.14 Tooling (later phases)
+### 5.14 Tooling
 Formatter (enforces the style guide), language server (completion, go-to-definition,
 diagnostics) for the editor and VS Code, a debugger over DAP, and a profiler view.
 
@@ -1537,34 +1832,37 @@ diagnostics) for the editor and VS Code, a debugger over DAP, and a profiler vie
 
 ## 6. Milestones
 
+A row whose "Done when" ends in "(done ...)" is finished; every other row is planned. The
+support status of what exists is in [STATUS.md](STATUS.md).
+
 | # | Phase | Done when |
 |---|---|---|
-| 0 | **Skeleton:** CMake, SDL3 window, fixed-timestep loop, input actions, logging, `Vec<T,N>`, RHI interface + GL and Vulkan backends (Vulkan pulled forward from Phase 5) | A window clears to a color and responds to actions, on Linux and Windows |
-| 1 | **Language core** (in parallel): lexer, parser, type checker, bytecode, VM, refcounting, REPL | Closures, structs, classes and enums run in the REPL; language test suite passes |
-| 2 | **Vector rendering:** SDF batcher, SVG import + tessellation, MSDF text, camera, scale modes | 50k SDF shapes at 60 fps; an SVG character drawn sharp at any zoom |
+| 0 | **Skeleton:** CMake, SDL3 window, fixed-timestep loop, input actions, logging, `Vec<T,N>`, RHI interface + GL and Vulkan backends (Vulkan pulled forward from Phase 5) | A window clears to a color and responds to actions, on Linux and Windows (done on Linux; the Windows check is part of 10.5a) |
+| 1 | **Language core** (in parallel): lexer, parser, type checker, bytecode, VM, refcounting, REPL | Closures, structs, classes and enums run in the REPL; language test suite passes (done: `pluma_tests`) |
+| 2 | **Vector rendering:** SDF batcher, SVG import + tessellation, MSDF text, camera, scale modes | 50k SDF shapes at 60 fps; an SVG character drawn sharp at any zoom (done: `examples/bench`, `cuervo --demo vector`) |
 | 3 | **Integration:** bindings, scripts on nodes, coroutines, hot reload | **A shmup stage written entirely in the language** (done: `cuervo --game examples/shmup`) |
-| 4 | **Gameplay systems:** particle system (gameplay + visual), collision, audio, UI nodes, binary scenes + dump | A playable boss fight with menus |
-| 5 | **Web + tiers:** WebGL2 export, Vulkan feature parity, tiers + migration report | The same project runs on Linux, Windows and the web (Linux + web done and verified, docs/WEB.md; Windows validation is in progress on Intel Arc integrated graphics and an RTX 4070 on the Core Ultra 9 185H laptop, docs/WINDOWS.md) |
+| 4 | **Gameplay systems:** particle system (gameplay + visual), collision, audio, UI nodes, binary scenes + dump | A playable boss fight with menus (done: `examples/shmup`) |
+| 5 | **Web + tiers:** WebGL2 export, Vulkan feature parity, tiers + migration report | The same project runs on Linux, Windows and the web (Linux + web done and verified, docs/WEB.md; Windows validation is in progress on Intel Arc integrated graphics and an RTX 4070 on the Core Ultra 9 185H laptop: the Clang debug build passes `ctest` and reaches the Linux hashes, docs/WINDOWS.md) |
 | 5.5 | **Performance core** (§4.15): activate the job system, explicit SIMD (AVX2 / WASM SIMD128), sub-seeded RNG streams, secondary spatial hash for large shapes | The particle demo's sim time scales with worker count, SIMD and scalar paths are bit-identical, and the replay hash is unchanged at 1 and N threads (done: §4.15 "Verified") |
 | 6 | **Editor:** scene view, inspector, assets, play-in-editor, replay viewer | A level can be built without code (done: 6A, the editor shell, §4.13 "Clarified (Phase 6A)" -- `examples/editor_level` was built from editor operations only and runs with `cuervo --game`; 6B, the asset browser, input-map editor, play-in-editor with hot reload, replays and the debugger, and the tier report, §4.13 "Clarified (Phase 6B)") |
 | 7 | **Release path:** AOT-to-C, cycle collector, manual memory, packing, export | A shipped build runs measurably faster than the VM (done: 7A cycle collector + manual memory, §5.10 "Clarified (Phase 7A)"; 7B AOT-to-C compilation, §5.12 "Clarified (Phase 7B)"; 7C packing + export, §4.11 "Clarified (Phase 7C)", docs/EXPORT.md. Both source and AOT native exports of `examples/shmup` reach the dev state hash `a3e57e79964421d3`, and AOT runs measurably faster than the bytecode VM) |
 | 7.5 | **Modular footprint:** Feature-stripping build system, dead-code elimination, unreferenced module pruning | An exported project strips unused engine subsystems (e.g., audio, unused RHI features, UI) resulting in measurably smaller release binaries and web payloads (done: §4.11 "Clarified (Milestone 7.5)", docs/EXPORT.md "Stripped players". Per-export Release players of `examples/tictak`, `examples/bench` and `examples/shmup` are 40%, 37% and 20% smaller than the full Release player on Linux, and their web `index.wasm` 18%, 15% and 4% smaller than the full web runtime; each runs its exported pack to its dev run's state hash, the web ones in headless Chrome. Windows players remain part of the active 10.5a validation) |
-| 8 | **Tooling:** formatter, LSP, debugger, animation (cutout, skeletal, morph), docs (expanded as 8.4) | Someone else makes a game with it (tooling done, animation deferred to 9.4: formatter and LSP, debugger over DAP, and profiler, §5.14 "Clarified (Phase 8 — ...)"; the VS Code extension `tools/vscode-pluma`; docs/GUIDE.md with the `examples/tutorial` game and the generated docs/API.md, expanded further by 8.4. The done-when needs an outside user to confirm) |
+| 8 | **Tooling:** formatter, LSP, debugger, animation (cutout, skeletal, morph), docs (expanded as 8.4) | Someone else makes a game with it (tooling done, animation deferred to 9.4: formatter and LSP, debugger over DAP, and profiler, §5.14 "Clarified (Phase 8 — ...)"; the VS Code extension `tools/vscode-pluma`; docs/GUIDE.md with the `examples/tutorial` game and the generated docs/API.md, expanded further by 8.4. All of 8.1-8.9 are done; the done-when needs an outside user to confirm) |
 | 8.1 | **Brand integration** (§4.16): Cuervo Mark, wordmark, palette and type from the design kit, synced into `assets/brand/`, plus generated color tokens | The editor and runtime show the mark as window icon and splash in light and dark themes, and a sync script regenerates the brand assets from the kit (done: §4.16 "Clarified (Milestone 8.1)". `tools/sync_brand.py` syncs `assets/brand/` and records the kit commit; `cuervo` and `cuervo-editor` set the embedded app icon as their window icon; the editor's splash draws the imported mark and wordmark in the Bone and Raven themes on Vulkan and GL, and its UI switches between the two token-generated themes) |
 | 8.2 | **Node library** (§4.16): Shape, Path, Sprite, Text, Camera2D, Timer, Area, Emitter2D, AudioPlayer as prelude nodes | A level using every new node is built in the editor without code and round-trips through scene files with the same state hash (done: §4.16 "Clarified (Milestone 8.2)"; `examples/node_level` from `level.cmds`, the `node_level` test: editor-built, dump/build round trip and editor-played runs all reach `115a6d76bb125635` at tick 240) |
 | 8.3 | **Editor UI overhaul** (§4.16): themed with the brand tokens, gizmos, toolbar, command palette, multi-select, undo history, welcome screen, EULA agreement check box | The `examples/editor_level` workflow is redone with gizmos and the palette, with no raw ImGui-default styling left, and a fresh user account must check the EULA box before the editor or tools run (exported games never ask) (done: §4.16 "Clarified (Milestone 8.3)". The editor moved to ImGui's docking branch with a DockBuilder default layout and saved dock layouts; `editor_ui_tests` fails on any ImGui-default color; `examples/editor_level/level.cmds` uses the palette and gizmo verbs and still produces the same scene; the editor, `cuervo`, `cuervo-tools` and `plm` refuse to start until the EULA is accepted, and packs never ask) |
-| 8.4 | **Documentation** (§4.16): manual, Pluma guide, generated API/node reference, first-game tutorial, branded static site | Every public prelude symbol is documented (enforced by a test) and the tutorial game builds in CI |
-| 8.5 | **Documentation reconciliation** (§4.16): align design, user and API documentation with the actual EULA, current milestone state, implemented systems, and support status; separate shipped, experimental, planned and unsupported behavior | A fresh reader can determine what is implemented and supported without relying on historical milestone notes; no active document claims that the license is undecided or that completed systems are still only planned |
-| 8.6 | **Performance baselines** (§4.15): publish repeatable simulation, render, memory and export-size measurements for representative particle/shape loads, native backends, WebGL2, debug and release builds | Benchmark commands record versioned baselines and flag regressions when agreed thresholds are exceeded; the 1k/10k/50k/100k workload results are reproducible on the reference machine |
-| 8.7 | **Stabilization pass** (§4.12, §4.13, §5): prioritize Pluma semantics, scene serialization and migrations, editor workflows, replay behavior and export reliability before another major subsystem | A clean checkout can build the reference examples, round-trip scenes, hot-reload scripts, verify replays and launch source, AOT and stripped exports without known correctness regressions |
-| 8.8 | **Supported-features contract** (§4.4, §4.16): classify features as stable, experimental, desktop-only, Web-compatible or unsupported; document the guarantees and limits of `compatible` and `full` render tiers | The README and generated/user documentation expose the same support matrix, and tier checks reject configurations that claim support the selected target does not provide |
-| 8.9 | **End-to-end user workflow** (§4.11, §4.13): automate the fresh-checkout path from project creation through scene editing, running, exporting and launching the exported game | A workflow smoke test creates or opens a project, edits and saves a scene, runs it, exports it, launches the shipped artifact outside the project directory and verifies its exit status and deterministic state hash |
+| 8.4 | **Documentation** (§4.16): manual, Pluma guide, generated API/node reference, first-game tutorial, branded static site | Every public prelude symbol is documented (enforced by a test) and the tutorial game builds in CI (done: §4.16 "Clarified (Milestone 8.4)". `tools/build_site.py` builds the branded static site and `docs_site` checks its links; `cuervo-tools docs --check-coverage` (`api_docs_coverage`) enforces a doc comment on every public prelude symbol; the tutorial runs, exports and matches GUIDE.md in CI) |
+| 8.5 | **Documentation reconciliation** (§4.16): align design, user and API documentation with the actual EULA, current milestone state, implemented systems, and support status; separate shipped, experimental, planned and unsupported behavior | A fresh reader can determine what is implemented and supported without relying on historical milestone notes; no active document claims that the license is undecided or that completed systems are still only planned(done: §4.16 "Clarified (Milestone 8.5)". [STATUS.md](STATUS.md) is the support matrix (shipped, experimental, planned, unsupported; desktop and web; Vulkan and GL), linked from the README, the guide and the docs site; the license summaries in the README, the guide, §2 and §4.18 match `LICENSE.md` (free during Beta, commercial terms at Version 1.0, grandfathering); stale "planned"/"later"/"not yet" notes for finished systems, wrong commands and counts, phase labels in user-facing pages and dates in status lines were fixed) |
+| 8.6 | **Performance baselines** (§4.15): publish repeatable simulation, render, memory and export-size measurements for representative particle/shape loads, native backends, WebGL2, debug and release builds | Benchmark commands record versioned baselines and flag regressions when agreed thresholds are exceeded; the 1k/10k/50k/100k workload results are reproducible on the reference machine (done: §4.15 "Clarified (Milestone 8.6)". `tools/bench.py record|capacity|compare` and `docs/perf/baseline-5800x3d-rtx3060ti-linux.json`; three runs agree within a few percent on the reference machine and every workload reaches one state hash on both backends, both builds and 1 or 8 jobs; `docs/PERFORMANCE.md` has the thresholds, the capacity table and what was measured. Known limit: the web baseline is recorded by hand) |
+| 8.7 | **Stabilization pass** (§4.12, §4.13, §5): prioritize Pluma semantics, scene serialization and migrations, editor workflows, replay behavior and export reliability before another major subsystem | A clean checkout can build the reference examples, round-trip scenes, hot-reload scripts, verify replays and launch source, AOT and stripped exports without known correctness regressions (done: §4.12 and §4.13 "Clarified (Milestone 8.7)", LANGUAGE.md 9.25. `examples_sweep_<name>` takes every example through runs, scene round-trips, replays, hot reload and exports; Pluma has a VM/AOT differential corpus and an integer reference model. Known limit: hot reload is not bit-exact for projects holding emitters or coroutines) |
+| 8.8 | **Supported-features contract** (§4.4, §4.16): classify features as stable, experimental, desktop-only, Web-compatible or unsupported; document the guarantees and limits of `compatible` and `full` render tiers | The README and generated/user documentation expose the same support matrix, and tier checks reject configurations that claim support the selected target does not provide(done: §4.4 "Clarified (Milestone 8.8)". [STATUS.md](STATUS.md) and the README summary are generated from `docs/support.json`, which the tier check and the exporter also read; `tier check --platform` and `export` refuse a Full project for the web and AOT when the export host is not the target) |
+| 8.9 | **End-to-end user workflow** (§4.11, §4.13): automate the fresh-checkout path from project creation through scene editing, running, exporting and launching the exported game | A workflow smoke test creates or opens a project, edits and saves a scene, runs it, exports it, launches the shipped artifact outside the project directory and verifies its exit status and deterministic state hash(done: §4.11 and §4.13 "Clarified (Milestone 8.9)". `workflow_smoke` starts from an empty directory with the shipped binaries: `cuervo-editor --new-project`, an editor command script that edits, saves and plays a scene, a hand-added script with a hot reload, bytecode and AOT (and stripped with `CUERVO_SLOW_TESTS`) exports launched from another directory with no EULA acceptance, and the same state hash in the editor, `cuervo --game` and the shipped game; the EULA refusal and the one-run `CUERVO_ACCEPT_EULA` acceptance are checked in the same test) |
 | 9 | **Advanced Local Systems** (§4.17): transform hierarchy and more nodes, Pluma library, UI widgets, animation, tilemaps and navigation, Box2D v3 physics, 2D SDF lighting/raymarching | A physics-based platformer with 2D lighting is playable |
 | 9.1 | **Transform hierarchy and node gaps** (§4.17): parent-relative transforms (toggleable), `Line2D`, `Polygon2D`, `Marker2D`, `VisibleOnScreenNotifier2D` | Moving a parent moves its children when the hierarchy is on, and world-space scenes behave exactly as before with it off (done: §4.17 "Clarified (Milestone 9.1)"; `hierarchy_tests` move a parent and check the child with the hierarchy on and off, and the shmup, tictak and editor_level hashes are unchanged with it off) |
 | 9.2a | **Pluma collections, strings and language** (§4.17): `Map`/`Set`/fixed arrays/`StrBuilder`, `List` and `str` methods, conversions, property accessors, `Result` and `?`, method values | A script uses each feature and the language test suite passes under the VM and AOT (done: §4.17 "Clarified (Milestone 9.2a)"; `tests/pluma/library_tests.cpp` runs the same program in the VM and AOT) |
 | 9.2b | **Pluma math, geometry and random** (§4.17): scalar/integer/vector math, `Rect2`, `Transform2D`, geometry helpers, noise, seeded `Random` streams | Every function is bit-identical across SIMD, scalar, VM and AOT, and the replay hash is unchanged (done: §4.17 "Clarified (Milestone 9.2b)") |
-| 9.3 | **UI widgets** (§4.17): `GridContainer`, `ScrollContainer`, Flow/Split/AspectRatio, `Image`/`TextureRect`, `ProgressBar`, `LineEdit`, `OptionButton`, tabs, popups | A settings and inventory menu built from them is driven by keyboard, gamepad and pointer, and replays |
-| 9.4 | **Animation** (§4.17): `AnimationPlayer` (property tracks), `Tween`, `AnimationTree` state machine | An animated character blends between states and the replay hash is unchanged at 1 and N threads |
+| 9.3 | **UI widgets** (§4.17): `GridContainer`, `ScrollContainer`, Flow/Split/AspectRatio, `Image`/`TextureRect`, `ProgressBar`, `LineEdit`, `OptionButton`, tabs, popups | A settings and inventory menu built from them is driven by keyboard, gamepad and pointer, and replays (done: §4.17 "Clarified (Milestone 9.3)" -- `examples/ui_menus` is driven by keyboard, gamepad and pointer in `tests/ui_menus.cmake`; each run is recorded and replays with identical state hashes on 1 and 8 threads, and the shmup hash `a3e57e79964421d3` is unchanged) |
+| 9.4 | **Animation** (§4.17): `AnimationPlayer` (property tracks), `Tween`, `AnimationTree` state machine | An animated character blends between states and the replay hash is unchanged at 1 and N threads (done: §4.17 "Clarified (Milestone 9.4)"; the `anim_character` ctest runs `examples/anim_character` with scripted input to tick 240 on `--jobs 1` and `--jobs 4` with one state hash, verifies its recorded replay on 1 and 4 threads and round-trips its scene) |
 | 9.5 | **Tilemaps and navigation** (§4.17): `TileMapLayer`, tilesets, autotiling, `NavigationRegion2D`, `NavigationAgent2D` | A top-down level is painted in the editor and an agent paths around obstacles |
 | 9.6 | **Physics** (§4.17): Box2D v3 behind the physics interface; `StaticBody2D`, `CharacterBody2D`, `RigidBody2D`, `Area2D`, `CollisionShape2D`, raycasts, joints | A platformer character runs, jumps and pushes bodies deterministically |
 | 9.7 | **2D lighting** (§4.17): SDF lighting/raymarching, `PointLight2D`, occluders | Lights and shadows render identically on Vulkan and GL |
@@ -1612,23 +1910,24 @@ interface can't drift toward either API.
 | Script lifecycle | `ready()` once; `update(dt: float)` every fixed tick (`dt` is constant); `draw(g: Canvas)` every rendered frame (render only, may not change state); `exit()` on removal |
 | Integer math | `/` truncates toward zero; `%` takes the dividend's sign; division by zero panics; `float as int` truncates and saturates |
 | Color | Colors are authored in sRGB and blended in sRGB space, matching browsers and vector tools, so SVGs look as they do in Inkscape. Swapchain/framebuffer stays UNORM |
-| Text | UTF-8; FreeType + HarfBuzz for shaping, then MSDF atlases; right-to-left and CJK shaping supported; bidi layout later |
-| Localization | String tables (CSV) keyed by `#name`, with `tr(#key)` in scripts; switchable at runtime |
-| General physics | Box2D v3 behind the physics interface, as an optional module (Phase 4+) |
+| Text | UTF-8; FreeType + HarfBuzz for shaping, then MSDF atlases; right-to-left and CJK shaping and bidi layout are planned (11.3); today text is MSDF without shaping |
+| Localization | Planned (11.3): string tables (CSV) keyed by `#name`, with `tr(#key)` in scripts; switchable at runtime |
+| General physics | Box2D v3 behind the physics interface, as an optional module (planned, 9.6) |
 | Audio formats | WAV, OGG Vorbis, FLAC, MP3 (miniaudio's decoders) |
 | Fonts | TTF/OTF imported into MSDF atlases |
 | Project layout | `project.toml`, `assets/`, `scenes/`, `scripts/`, `.import/` (generated, gitignored) |
-| Save data | Per-user directory from `SDL_GetPrefPath`; a `Save` API with versioned data |
+| Save data | Per-user directory from `SDL_GetPrefPath`; `Scene.save` today, a general `Save` API with versioned data is planned (11.4) |
 | Window | VSync on; fullscreen/windowed/borderless toggle; 60 Hz tick (configurable) |
 | Profiling | Tracy integration, compiled out of release builds |
 | AOT export | Uses the system C compiler (Clang/GCC/MSVC); web export uses Emscripten |
-| Editor layout | Godot-like: scene tree left, viewport center, inspector right, assets + console bottom |
-| Accessibility | Rebindable input, UI scale setting, a reduced-flashing toggle exposed to games |
-| Platforms | Linux, Windows, Web only: no macOS, mobile or consoles planned |
+| Editor layout | Godot-like dock layout: scene tree left, viewport center, inspector right, console bottom; panels are dockable (4.16) |
+| Accessibility | Rebindable input today; a UI scale setting and a reduced-flashing toggle exposed to games are planned (12.3) |
+| Platforms | Linux, Windows, Web only. macOS, mobile and consoles are unsupported; they appear only as the long-term Phase 14 |
 | Engine versioning | SemVer; scene/project migrations keyed by format version |
 
-### 7.3 Still open (not blocking)
-- License (all dependencies are permissive, so any choice is open).
+### 7.3 Open decisions (not blocking)
+- Whether the ECS is exposed to scripts (milestone 12.4).
+- Version 1.0 commercial terms (EULA 3.2); until they are published, the Beta terms apply.
 
 ### 7.4 Validation environments
 - **Primary Arch development machine:** AMD Ryzen 7 5800X3D with an NVIDIA RTX 3060 Ti.

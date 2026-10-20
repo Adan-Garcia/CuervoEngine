@@ -70,6 +70,8 @@ int run_game_cli(int argc, char** argv) {
     }
     o.presses = std::string(arg_value(argc, argv, "--press"));
     if (auto env = platform::env("CUERVO_PRESS"); o.presses.empty() && env) o.presses = *env;
+    o.pointers = std::string(arg_value(argc, argv, "--pointer"));
+    o.typed = std::string(arg_value(argc, argv, "--type"));
     o.gl_es = has_flag(argc, argv, "--gl-es") || platform::env_is("CUERVO_GL_ES", "1");
     if (arg_value(argc, argv, "--simd") == "off") simd::set_enabled(false); // scalar loops, same results
     if (const std::string_view jobs = arg_value(argc, argv, "--jobs"); !jobs.empty()) {

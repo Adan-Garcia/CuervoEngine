@@ -945,7 +945,7 @@ struct AotRuntime {
             for (std::uint32_t c = 0; c < d.const_count; ++c) {
                 const AotConstDesc& cd = d.consts[c];
                 if (cd.tag == static_cast<std::uint8_t>(Tag::Obj)) {
-                    Value sv = str_value(cd.str != nullptr ? cd.str : "");
+                    Value sv = str_value(cd.str != nullptr ? std::string(cd.str, static_cast<std::size_t>(cd.bits)) : std::string());
                     retain(sv);
                     p->consts.push_back(sv);
                 } else {
@@ -1119,6 +1119,8 @@ std::string c_escape(std::string_view s) {
             case '\n': out += "\\n"; break;
             case '\r': out += "\\r"; break;
             case '\t': out += "\\t"; break;
+            // -std=c11 enables trigraphs: "??/" would silently become a backslash.
+            case '?': out += "\\?"; break;
             default:
                 if (c >= 32 && c < 127) {
                     out.push_back(static_cast<char>(c));
@@ -2287,7 +2289,7 @@ static inline void pluma_assign_owned(PlumaValue* dst, PlumaValue src) {
             out << "static const PlumaAotConstDesc PROTO_K_" << i << "[] = {\n";
             for (const Value& v : p.consts) {
                 if (v.tag == Tag::Obj && v.o->kind == ObjKind::Str) {
-                    out << "    {" << unsigned(static_cast<std::uint8_t>(v.tag)) << ", 0, 0, "
+                    out << "    {" << unsigned(static_cast<std::uint8_t>(v.tag)) << ", 0, " << static_cast<const StrObj*>(v.o)->s.size() << "LL, "
                         << c_escape(static_cast<const StrObj*>(v.o)->s) << "},\n";
                 } else {
                     out << "    {" << unsigned(static_cast<std::uint8_t>(v.tag)) << ", " << v.aux << ", "
@@ -2416,8 +2418,19 @@ std::string shell_quote_str(std::string_view s) {
 std::string shell_quote(const std::filesystem::path& p) { return shell_quote_str(p.string()); }
 
 std::string default_c_compiler() {
+#if defined(_MSC_VER)
+    // std::getenv is deprecated on the MSVC runtime (also under clang).
+    char* cc_env = nullptr;
+    std::size_t cc_size = 0;
+    if (_dupenv_s(&cc_env, &cc_size, "CC") == 0 && cc_env != nullptr) {
+        std::string cc(cc_env);
+        std::free(cc_env);
+        if (!cc.empty()) return cc;
+    }
+#else
     const char* cc_env = std::getenv("CC"); // NOLINT(concurrency-mt-unsafe)
     if (cc_env != nullptr && cc_env[0] != '\0') return cc_env;
+#endif
 #if defined(PLUMA_DEFAULT_CC)
     if (PLUMA_DEFAULT_CC[0] != '\0') return PLUMA_DEFAULT_CC;
 #endif

@@ -1,0 +1,3 @@
+true
+test.plm:6:9: panic: cannot cast 'C' to 'B'
+    at <top level> (test.plm:6:9)

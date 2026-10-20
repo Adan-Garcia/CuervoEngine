@@ -88,7 +88,7 @@ moving more than its own size plus the target's per tick can pass through
 |---|---|---|
 | RNG | the emitter's own child stream | the emitter's own child stream |
 | Collision | opt-in (`CollisionConfig`) | never (forced off) |
-| Runs on | CPU | CPU; GPU compute on the Full tier is a TODO |
+| Runs on | CPU | CPU; GPU compute on the Full tier is planned |
 
 Visual emitters never feed back into the simulation, but their state is part
 of `state_hash()` (it's still deterministic, only isolated).
@@ -154,7 +154,7 @@ every `interval` ticks after `delay` ticks, `shots` times (< 0 = forever).
   `ParticleSystem::particle_user(emitter, index)` (bit 63 set); game shapes
   must leave bit 63 clear.
 
-## Script binding notes (Phase 3)
+## Script binding notes
 The API is meant to be bound as-is:
 - `EmitterConfig`, `Module` alternatives, `Pattern` alternatives,
   `ParticleTemplate`, `Spawner`, `CollisionConfig`, `RenderConfig` are plain
@@ -176,7 +176,7 @@ The API is meant to be bound as-is:
 ## Collision world (`cuervo/collision`)
 - Shapes: `Circle`, `Capsule` (segment + radius). Overlap tests are plain f32
   `+ - * /` (no sqrt); touching counts as overlapping. AABB/OBB hitboxes
-  (DESIGN.md 4.7) are not implemented yet.
+  (DESIGN.md 4.7) are planned.
 - `CollisionWorld(cell_size)`: `clear()`, `add_circle/add_capsule(shape,
   layer 0..31, user)` (ids in call order; or `add_uninitialized(n)` then
   `set_circle/set_capsule` from parallel jobs), `build()`, then queries:
@@ -201,7 +201,7 @@ The API is meant to be bound as-is:
 | ~28.7k | 1.31 | 0.36 | 0.78 | 0.18 |
 | ~51.7k | 2.34 | 0.63 | 1.39 | 0.33 |
 
-All single-threaded, scalar (before milestone 5.5).
+All single-threaded, scalar (the baseline before the job system and SIMD).
 
 ### Jobs + SIMD (release, Ryzen 7 5800X3D)
 `cuervo --demo particles --intensity 4.5 --bench 10 --jobs N [--simd off]`,

@@ -18,7 +18,7 @@
 namespace cuervo {
 
 struct Replay {
-    static constexpr std::uint32_t format_version = 1;
+    static constexpr std::uint32_t format_version = 2; // 2: frames carry typed text; version 1 files still load
 
     std::string project;   // the project's name (informational)
     std::uint64_t seed = 1;

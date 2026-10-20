@@ -3,6 +3,7 @@
 #include <SDL3/SDL_timer.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -157,6 +158,7 @@ private:
     struct Bench {
         double measure_start = -1.0; // < 0: still warming up
         std::vector<double> frame_ms;
+        std::vector<double> sim_tick_ms; // per frame: its simulation time / its ticks (frames with no tick skipped)
         double particle_sum = 0.0;
         double sim_seconds = 0.0;
         double render_seconds = 0.0;
@@ -218,6 +220,8 @@ bool GameLoop::init() {
     timestep_.emplace(project.tick_rate);
     capture_mode_ = !options_.screenshot.empty();
     session_.set_presses(options_.presses);
+    session_.set_pointer_script(options_.pointers);
+    session_.set_typed(options_.typed);
     if (!options_.record.empty()) session_.start_recording();
     // Escape quits unless the game binds it to an action (e.g. a pause menu,
     // which then quits through Scene.quit()). A browser tab has no "quit".
@@ -267,14 +271,21 @@ bool GameLoop::frame() {
     // The pointer in virtual coordinates, recorded in the input frame.
     const Project& project = session_.project();
     const render::ViewportFit pointer_fit = render::fit_viewport(options_.scale, project.virtual_size, window_.pixel_size());
-    const vec2 pointer = render::framebuffer_to_virtual(pointer_fit, devices_.mouse_position);
+    vec2 pointer = render::framebuffer_to_virtual(pointer_fit, devices_.mouse_position);
+    // A capture reads only the scripted input (--press, --pointer, --type), never
+    // the devices: on a desktop without an offscreen driver (Windows) the window
+    // is real, and a cursor over it would move UI hover and change the state hash.
+    DeviceState no_devices;
+    DeviceState& source = capture_mode_ ? no_devices : devices_;
+    if (capture_mode_) pointer = {0.0f, 0.0f};
     const double sim_start = now_seconds();
     {
         CUERVO_PROFILE_ZONE("simulation");
-        for (int i = 0; i < step.ticks; ++i) session_.tick(session_.sample(devices_, pointer));
+        for (int i = 0; i < step.ticks; ++i) session_.tick(session_.sample(source, pointer));
     }
     const double sim_seconds = now_seconds() - sim_start;
     if (host.quit_requested()) running = false;
+    window_.set_text_input(host.wants_text_input());
 
     render();
     const bool capture = capture_mode_ && host.tick_count() >= options_.screenshot_tick;
@@ -337,7 +348,27 @@ void GameLoop::render() {
     meshes_.clear();
     {
         CUERVO_PROFILE_ZONE("draw");
-        host.draw(make_draw_targets(shapes_, text_, font_, &vectors_, world_to_ndc, pixels, true));
+        DrawTargets targets = make_draw_targets(shapes_, text_, font_, &vectors_, world_to_ndc, pixels, true);
+        // Canvas.set_clip: virtual pixels to a scissor in the letterboxed viewport (DESIGN.md 4.17, 9.3).
+        rhi::Device* const dev = device_.get();
+        targets.clip = [dev, fit](bool on, vec2 pos, vec2 size) {
+            if (!on) {
+                dev->set_scissor(fit.viewport);
+                return;
+            }
+            const auto px = [&](float v, float scale, std::int32_t origin) {
+                return origin + static_cast<std::int32_t>(std::lround(v * scale));
+            };
+            const std::int32_t x0 = std::max(px(pos.x(), fit.scale.x(), fit.viewport.x), fit.viewport.x);
+            const std::int32_t y0 = std::max(px(pos.y(), fit.scale.y(), fit.viewport.y), fit.viewport.y);
+            const std::int32_t x1 = std::min(px(pos.x() + size.x(), fit.scale.x(), fit.viewport.x),
+                                             fit.viewport.x + fit.viewport.width);
+            const std::int32_t y1 = std::min(px(pos.y() + size.y(), fit.scale.y(), fit.viewport.y),
+                                             fit.viewport.y + fit.viewport.height);
+            dev->set_scissor({x0, y0, std::max(x1 - x0, 0), std::max(y1 - y0, 0)});
+        };
+        host.draw(targets);
+        dev->set_scissor(fit.viewport);
     }
     // Errors (compile errors after a reload, panics) as an overlay.
     const std::string& err = host.error();
@@ -367,6 +398,7 @@ void GameLoop::bench_frame(double now, double frame_ms, double sim_seconds, int 
     }
     bench_.frame_ms.push_back(frame_ms);
     bench_.sim_seconds += sim_seconds;
+    if (ticks > 0) bench_.sim_tick_ms.push_back(sim_seconds * 1000.0 / ticks);
     bench_.render_seconds += render_cpu_;
     bench_.ticks += static_cast<std::uint64_t>(ticks);
 #if CUERVO_FEATURE_PARTICLES
@@ -386,19 +418,27 @@ void GameLoop::bench_report() const {
         const auto index = static_cast<std::size_t>(p * static_cast<double>(sorted.size() - 1) + 0.5);
         return sorted[std::min(index, sorted.size() - 1)];
     };
+    std::vector<double> sim_sorted = bench_.sim_tick_ms;
+    std::sort(sim_sorted.begin(), sim_sorted.end());
+    const auto sim_percentile = [&](double p) {
+        if (sim_sorted.empty()) return 0.0;
+        const auto index = static_cast<std::size_t>(p * static_cast<double>(sim_sorted.size() - 1) + 0.5);
+        return sim_sorted[std::min(index, sim_sorted.size() - 1)];
+    };
     double total = 0.0;
     for (double ms : sorted) total += ms;
     const double frames = static_cast<double>(sorted.size());
     const rhi::DeviceInfo& info = device_->info();
     const ivec2 fb = device_->framebuffer_size();
     LOG_INFO("bench | {} | {} | {}x{} {}x MSAA | {:.0f} avg particles | {} frames in {:.2f} s | {:.1f} FPS | "
-             "frame ms avg {:.3f} p50 {:.3f} p95 {:.3f} p99 {:.3f} max {:.3f} | sim {:.3f} ms/tick | "
+             "frame ms avg {:.3f} p50 {:.3f} p95 {:.3f} p99 {:.3f} max {:.3f} | sim {:.3f} ms/tick (p95 {:.3f} max {:.3f}, {} ticks) | "
              "render CPU {:.3f} ms/frame",
              session_.project().name, rhi::backend_name(info.backend), fb.x(), fb.y(), info.msaa_samples,
              frames > 0 ? bench_.particle_sum / frames : 0.0, sorted.size(), total / 1000.0,
              total > 0.0 ? frames * 1000.0 / total : 0.0, frames > 0 ? total / frames : 0.0, percentile(0.50),
              percentile(0.95), percentile(0.99), sorted.empty() ? 0.0 : sorted.back(),
              bench_.ticks ? bench_.sim_seconds * 1000.0 / static_cast<double>(bench_.ticks) : 0.0,
+             sim_percentile(0.95), sim_sorted.empty() ? 0.0 : sim_sorted.back(), bench_.ticks,
              frames > 0 ? bench_.render_seconds * 1000.0 / frames : 0.0);
 }
 

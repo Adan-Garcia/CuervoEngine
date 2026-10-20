@@ -1,0 +1,84 @@
+rex! barks on 4 legs
+tweety makes a sound on 2 legs
+2
+true false
+rex!
+rex! barks
+tweety makes a sound
+generic makes a sound
+true
+false
+100
+0
+50
+0.5
+B
+1
+2
+2 3
+11
+[Counter { n = 11 }]
+1
+a
+Box { v = 3 }
+1
+3
+2
+b
+1.5
+3
+ab
+4.0
+square 4.0
+shape 3.0
+M16
+M-10
+M39
+M-3
+true false true false
+[M3, M13]
+0
+5
+6
+Color.Blue
+Color.Red
+252
+Level.Hi
+Form.Rect(w = 2.0, h = 3.0)
+Form.Circle(r = 1.5)
+true
+false
+[Form.Empty, Form.Circle(r = 1.0)]
+big circle
+circle
+flat
+rect 1.0x2.0
+empty
+zero small digit big big
+Child
+false
+true
+calc done
+Ok(7)
+calc done
+Err("div by zero")
+3
+-1
+true
+div by zero
+1
+true
+err div by zero
+null
+4
+none
+4
+4
+-1
+5
+true false false false true true
+false false true false
+true false false true
+true 1 false
+true true true false false true
+0 0.0 false [] # null

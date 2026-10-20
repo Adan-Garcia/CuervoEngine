@@ -83,7 +83,7 @@ CSS `<style>` sheets (presentation attributes and `style=""` work), `<text>`,
 `<image>`, filters, masks, patterns, markers, `<foreignObject>`, SMIL
 animation, `vector-effect`, `stroke-linejoin="arcs"`, `fr`, clip paths on
 `<clipPath>` or its children, external references. DESIGN.md 4.5 plans a
-rasterized fallback for some of these; it isn't built yet. The importer was
+rasterized fallback for some of these; it is planned, and today they are skipped with a warning. The importer was
 run over the 42,246 SVGs in `/usr/share` (ASan + UBSan, import + tessellate +
 binary round trip) with no failures. The most common skipped feature there is
 CSS stylesheets (KDE's Breeze icons use them for color schemes).

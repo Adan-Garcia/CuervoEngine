@@ -44,6 +44,10 @@ struct ProceduralShape {
     friend bool operator==(const ProceduralShape&, const ProceduralShape&) = default;
 };
 
+// The document size of a vector file without loading it into a cache (0, 0
+// when it can't be read). UI layout uses it, in the simulation.
+vec2 vector_file_size(const assets::Vfs& vfs, std::string_view path);
+
 class VectorCache {
 public:
     explicit VectorCache(render::MeshBatcher& batcher) : batcher_(batcher) {}

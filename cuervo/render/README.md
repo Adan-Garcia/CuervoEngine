@@ -74,7 +74,7 @@ DESIGN.md 4.4 "Text" and 7.2 "Fonts": TTF/OTF fonts become MSDF atlases.
   `?`, `\n` / `\r\n` line breaks, greedy word wrap at spaces (`max_width`),
   tabs, per-line Left/Center/Right alignment, vertical anchor
   Top/Middle/Alphabetic/Bottom, line spacing. Returns positioned quads plus
-  line and box metrics (for panels and hit tests). Not yet: HarfBuzz shaping
+  line and box metrics (for panels and hit tests). Not supported (planned, 11.3): HarfBuzz shaping
   (GPOS kerning, ligatures, complex scripts) and bidi, listed in DESIGN.md 7.2.
 - **TextRenderer**: one RGBA8 linear-filtered texture per font; glyphs are
   48-byte instances (origin, two axis vectors, uv rectangle, color, distance

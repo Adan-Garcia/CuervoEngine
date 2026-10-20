@@ -25,12 +25,18 @@ synchronization2); machines without it fall back to the GL backend.
   version the GPU may still read (in flight, or used by a draw recorded earlier
   this frame) switches to a version whose last-use serial has completed, or
   allocates one. Steady state is `frames_in_flight + 1` versions. Dynamic keeps
-  a CPU shadow so the new version starts with the full contents. Stream keeps
-  one too, but copies forward only the bytes written earlier in the same frame,
-  and only when a partial update follows a draw (a batcher flushed once per
-  canvas layer). It copies from the shadow, never from mapped memory: reading
-  host-visible (write-combined) memory back made one extra flush of a 50k-shape
-  batch cost ~100 ms.
+  a CPU shadow so the new version starts with the full contents. Stream keeps none (the
+  extra pass cost 4 to 7 ms a frame at 2M instances). A Stream update that lands beside
+  the bytes this frame already wrote (a batcher flushed once per canvas layer) writes in
+  place: no draw recorded so far reads those bytes, and renaming instead meant a
+  full-size second allocation per frame, four 77 MB versions at 1.8M instances, past the
+  256 MB BAR window of a GPU without Resizable BAR, where writes then ran ~15x slower:
+  the 1.9M-particle cliff. Only an update that overlaps and does not replace the frame's
+  earlier writes renames and copies those bytes forward, reading the old version's mapped
+  memory (write-combined, slow, but nothing in the engine does it).
+- Memory placement: a Stream buffer whose versions would take more than half of the
+  CPU-writable device-local heap (the BAR window; all of VRAM with Resizable BAR) is placed
+  in system memory (`VMA_MEMORY_USAGE_AUTO_PREFER_HOST`), which the GPU reads over PCIe.
   This gives GL semantics: draws see the data as of when they were recorded.
 - Destroyed buffers and pipelines are freed only after the last submission that
   could use them completes (submission serials).
@@ -61,13 +67,13 @@ synchronization2); machines without it fall back to the GL backend.
   old texels, so update before drawing. Images, views and staging buffers are
   freed through the submission-serial deferred delete (uploads count as uses).
 
-TODO: staging uploads into device-local memory for Static buffers, depth
+Not implemented: staging uploads into device-local memory for Static buffers, depth
 attachment, mipmaps, pipeline cache.
 
 Headless note: the `offscreen` SDL driver needs `VK_EXT_headless_surface`,
 which NVIDIA's driver lacks, so headless Vulkan smoke tests fall back to GL.
 
-Phase 5 (tiers, parity; see `../README.md`):
+Tiers and parity (see `../README.md`):
 - `max_tier` is Full. Capabilities: every RHI feature is core 1.3; MSAA from
   `framebufferColorSampleCounts`, frame capture if the surface offers
   `TRANSFER_SRC`. Limits from `maxImageDimension2D`, `maxUniformBufferRange`,

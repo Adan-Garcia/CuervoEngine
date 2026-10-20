@@ -4,6 +4,7 @@
 #include <bitset>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 #include "cuervo/math/vec.hpp"
 
@@ -72,6 +73,11 @@ struct DeviceState {
     std::bitset<key_count> keys_tapped;          // went down since the last sample
     std::bitset<pad_button_count> buttons_tapped;
     std::bitset<mouse_button_count> mouse_tapped;
+
+    // Characters typed (Unicode code points) and not yet sampled: the platform
+    // appends, `InputMap::sample` hands one to each tick. Not a transient: a
+    // burst (paste, IME commit) is spread over the next ticks.
+    std::u32string typed;
 
     bool key(Key k) const {
         const auto i = static_cast<std::size_t>(k);

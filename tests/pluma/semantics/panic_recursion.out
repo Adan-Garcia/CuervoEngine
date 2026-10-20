@@ -1,0 +1,50 @@
+4000
+test.plm:3:12: panic: stack overflow (recursion too deep)
+    at depth (test.plm:3:12)
+        n: int = 906
+    at depth (test.plm:3:12)
+        n: int = 907
+    at depth (test.plm:3:12)
+        n: int = 908
+    at depth (test.plm:3:12)
+        n: int = 909
+    at depth (test.plm:3:12)
+        n: int = 910
+    at depth (test.plm:3:12)
+        n: int = 911
+    at depth (test.plm:3:12)
+        n: int = 912
+    at depth (test.plm:3:12)
+        n: int = 913
+    at depth (test.plm:3:12)
+        n: int = 914
+    at depth (test.plm:3:12)
+        n: int = 915
+    at depth (test.plm:3:12)
+        n: int = 916
+    at depth (test.plm:3:12)
+        n: int = 917
+    at depth (test.plm:3:12)
+        n: int = 918
+    at depth (test.plm:3:12)
+        n: int = 919
+    at depth (test.plm:3:12)
+        n: int = 920
+    at depth (test.plm:3:12)
+        n: int = 921
+    ... 4072 more frames ...
+    at depth (test.plm:3:12)
+        n: int = 4994
+    at depth (test.plm:3:12)
+        n: int = 4995
+    at depth (test.plm:3:12)
+        n: int = 4996
+    at depth (test.plm:3:12)
+        n: int = 4997
+    at depth (test.plm:3:12)
+        n: int = 4998
+    at depth (test.plm:3:12)
+        n: int = 4999
+    at depth (test.plm:3:12)
+        n: int = 5000
+    at <top level> (test.plm:6:7)

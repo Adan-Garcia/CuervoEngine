@@ -35,24 +35,41 @@ bool decode(std::span<const std::byte> data, std::string_view path, vector::Impo
 
 } // namespace
 
+namespace {
+
+// The file at `path` as an ImportedVector (an export imports SVG to .evec
+// under the same name, docs/EXPORT.md).
+bool load_imported(const assets::Vfs& vfs, std::string_view path, vector::ImportedVector& out, std::string& error) {
+    std::string rel;
+    if (!assets::Vfs::normalize(path, rel, error)) return false;
+    auto file = vfs.open(rel, error);
+    if (!file && ends_with(rel, ".svg")) {
+        std::string evec_error;
+        file = vfs.open(rel.substr(0, rel.size() - 4) + ".evec", evec_error);
+    }
+    return file && decode(file->bytes(), rel, out, error);
+}
+
+} // namespace
+
+vec2 vector_file_size(const assets::Vfs& vfs, std::string_view path) {
+    vector::ImportedVector imported;
+    std::string error;
+    if (!load_imported(vfs, path, imported, error)) return {0.0f, 0.0f};
+    vector::VectorAsset asset;
+    asset.assign(std::move(imported));
+    return asset.document().size;
+}
+
 VectorCache::Entry& VectorCache::entry(const assets::Vfs& vfs, std::string_view path) {
     auto it = entries_.find(path);
     if (it != entries_.end()) return *it->second;
     auto e = std::make_unique<Entry>();
     std::string error;
-    std::string rel;
-    if (assets::Vfs::normalize(path, rel, error)) {
-        auto file = vfs.open(rel, error);
-        // An export imports SVG to .evec under the same name (docs/EXPORT.md).
-        if (!file && ends_with(rel, ".svg")) {
-            std::string evec_error;
-            file = vfs.open(rel.substr(0, rel.size() - 4) + ".evec", evec_error);
-        }
-        vector::ImportedVector imported;
-        if (file && decode(file->bytes(), rel, imported, error)) {
-            e->asset.assign(std::move(imported));
-            e->ok = true;
-        }
+    vector::ImportedVector imported;
+    if (load_imported(vfs, path, imported, error)) {
+        e->asset.assign(std::move(imported));
+        e->ok = true;
     }
     if (!e->ok) LOG_WARN("Canvas.vector: can't load '{}': {}", path, error);
     Entry& ref = *e;

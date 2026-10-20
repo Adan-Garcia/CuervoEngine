@@ -62,6 +62,11 @@ struct InputFrame {
     // viewport mapping; recorded like everything else so replays click the
     // same buttons.
     std::array<std::int16_t, 2> pointer{};
+    // The text typed this tick as one Unicode code point (0: none), for text
+    // fields (UI LineEdit, DESIGN.md 4.17, milestone 9.3). The devices queue
+    // typed characters and one is delivered per tick, so none is lost and a
+    // replay types exactly what was typed. Replay format version 2.
+    std::uint32_t text = 0;
 
     friend bool operator==(const InputFrame&, const InputFrame&) = default;
 };

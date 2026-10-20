@@ -1,0 +1,365 @@
+// A settings menu and an inventory built from the UI widgets of milestone 9.3
+// (DESIGN.md 4.17): tabs, sliders, toggles, an OptionButton, a LineEdit, a
+// confirm dialog, a GridContainer of item slots in a ScrollContainer, a
+// SplitContainer, an AspectRatioContainer with an Image, a FlowContainer, a
+// ProgressBar, item tooltips and an item popup menu. Everything is reached by
+// keyboard, gamepad and pointer, and the numbers in `S` (which the state hash
+// covers) change with every interaction, so a replay checks them.
+//
+// Every control has an explicit `min_size`, so the layout, and with it what a
+// recorded click hits, doesn't depend on the font (a headless replay check has
+// none).
+
+// The menu's state, as numbers (strings aren't part of the state hash).
+class S {
+    static var music = 80
+    static var sfx = 80
+    static var fullscreen = 0
+    static var show_fps = 0
+    static var difficulty = 1
+    static var tab = 0
+    static var name_len = 0
+    static var name_sum = 0
+    static var submitted = 0
+    static var applied = 0
+    static var declined = 0
+    static var focus = -1
+    static var selected_item = -1
+    static var menu_item = -1
+    static var uses = 0
+    static var inspects = 0
+    static var durability = 100
+    static var scroll_y = 0
+    static var split = 50
+    static var dialog_open = 0
+    static var player_name = ""
+}
+
+class Item {
+    var name = ""
+    var code = ""
+    var text = ""
+    var durability = 100
+    var hue = 0.0
+}
+
+class Slot extends Button {
+    var index = 0
+}
+
+class Main extends Node {
+    var focusables = List<Control>()
+    var items = List<Item>()
+    var tabs: TabContainer
+    var name_edit: LineEdit
+    var dialog: ConfirmDialog
+    var item_menu: PopupMenu
+    var status: Label
+    var detail_name: Label
+    var detail_text: Label
+    var detail_bar: ProgressBar
+    var detail_image: Image
+    var shown = -1
+    var slot_menu_for = -1
+
+    // Registers a control for S.focus (its index in creation order).
+    fn reg(c: Control) {
+        focusables.push(c)
+    }
+
+    fn label(text: str, w = 240.0, style = #normal) -> Label {
+        var l = Label()
+        l.text = text
+        l.style = style
+        l.min_size = vec2(w, 48.0)
+        return l
+    }
+
+    fn ready() {
+        make_items()
+        var layer = CanvasLayer()
+        add_child(layer)
+        var panel = Panel()
+        panel.name = "panel"
+        panel.set_anchors(#center)
+        panel.min_size = vec2(1120.0, 640.0)
+        layer.add_child(panel)
+        var col = VBox()
+        panel.add_child(col)
+
+        var title = label("SETTINGS AND INVENTORY", 600.0, #title)
+        title.min_size = vec2(600.0, 70.0)
+        col.add_child(title)
+
+        tabs = TabContainer()
+        tabs.name = "tabs"
+        tabs.expand = true
+        tabs.min_size = vec2(1000.0, 380.0)
+        tabs.tab_min_width = 150.0
+        tabs.tab_changed.connect(fn(i: int) {
+            S.tab = i
+        })
+        col.add_child(tabs)
+        tabs.add_child(audio_page())
+        tabs.add_child(game_page())
+        tabs.add_child(inventory_page())
+
+        var row = HBox()
+        row.separation = 16.0
+        var apply = Button()
+        apply.name = "apply"
+        apply.text = "Apply"
+        apply.min_size = vec2(160.0, 48.0)
+        apply.pressed.connect(fn() {
+            dialog.popup_centered()
+            S.dialog_open = 1
+        })
+        reg(apply)
+        row.add_child(apply)
+        status = label("Nothing applied yet", 520.0, #dim)
+        row.add_child(status)
+        col.add_child(row)
+
+        dialog = ConfirmDialog()
+        dialog.name = "confirm"
+        dialog.title = "Apply settings?"
+        dialog.message = "The new volume, difficulty and name take effect now."
+        dialog.ok_text = "Apply"
+        dialog.cancel_text = "Back"
+        dialog.min_size = vec2(700.0, 220.0)
+        dialog.confirmed.connect(fn() {
+            S.applied += 1
+            S.dialog_open = 0
+            status.text = "Applied {S.applied} time(s), name {S.player_name}"
+        })
+        dialog.cancelled.connect(fn() {
+            S.declined += 1
+            S.dialog_open = 0
+        })
+        layer.add_child(dialog)
+
+        item_menu = PopupMenu()
+        item_menu.name = "item_menu"
+        item_menu.items = ["Use", "Inspect", "Close"]
+        item_menu.item_min_size = vec2(180.0, 44.0)
+        item_menu.item_chosen.connect(fn(i: int) {
+            S.menu_item = i
+            if i == 0 {
+                use_item(slot_menu_for)
+            } else if i == 1 {
+                S.inspects += 1
+            }
+        })
+        layer.add_child(item_menu)
+    }
+
+    fn audio_page() -> Control {
+        var page = VBox()
+        page.name = "Audio"
+        var music = Slider()
+        music.name = "music"
+        music.text = "Music"
+        music.value = 0.8
+        music.min_size = vec2(640.0, 52.0)
+        music.tooltip = "Music volume"
+        music.changed.connect(fn(v: float) {
+            S.music = round(v * 100.0) as int
+        })
+        reg(music)
+        page.add_child(music)
+        var sfx = Slider()
+        sfx.name = "sfx"
+        sfx.text = "Effects"
+        sfx.value = 0.8
+        sfx.min_size = vec2(640.0, 52.0)
+        sfx.changed.connect(fn(v: float) {
+            S.sfx = round(v * 100.0) as int
+        })
+        reg(sfx)
+        page.add_child(sfx)
+        var progress = ProgressBar()
+        progress.name = "loudness"
+        progress.text = "Loudness"
+        progress.value = 0.8
+        progress.min_size = vec2(640.0, 40.0)
+        page.add_child(progress)
+        music.changed.connect(fn(v: float) {
+            progress.set_value(v)
+        })
+        return page
+    }
+
+    fn game_page() -> Control {
+        var grid = GridContainer()
+        grid.name = "Game"
+        grid.columns = 2
+        grid.h_separation = 20.0
+        grid.add_child(label("Player name"))
+        name_edit = LineEdit()
+        name_edit.name = "player_name"
+        name_edit.placeholder = "type a name"
+        name_edit.max_length = 12
+        name_edit.min_size = vec2(420.0, 48.0)
+        name_edit.text_changed.connect(fn(t: str) {
+            S.player_name = t
+            S.name_len = t.char_count()
+            var sum = 0
+            for i in 0..t.len() {
+                sum += t.byte_at(i) * (i + 1)
+            }
+            S.name_sum = sum
+        })
+        name_edit.text_submitted.connect(fn(t: str) {
+            S.submitted += 1
+        })
+        reg(name_edit)
+        grid.add_child(name_edit)
+        grid.add_child(label("Difficulty"))
+        var diff = OptionButton()
+        diff.name = "difficulty"
+        diff.items = ["Easy", "Normal", "Hard", "Insane"]
+        diff.selected = 1
+        diff.min_size = vec2(420.0, 48.0)
+        diff.item_height = 44.0
+        diff.item_selected.connect(fn(i: int) {
+            S.difficulty = i
+        })
+        reg(diff)
+        grid.add_child(diff)
+        grid.add_child(label("Fullscreen"))
+        var fs = Toggle()
+        fs.name = "fullscreen"
+        fs.text = "Fullscreen"
+        fs.min_size = vec2(420.0, 48.0)
+        fs.toggled.connect(fn(on: bool) {
+            S.fullscreen = on ? 1 : 0
+        })
+        reg(fs)
+        grid.add_child(fs)
+        grid.add_child(label("Frame rate"))
+        var fps = Toggle()
+        fps.name = "show_fps"
+        fps.text = "Show FPS"
+        fps.min_size = vec2(420.0, 48.0)
+        fps.toggled.connect(fn(on: bool) {
+            S.show_fps = on ? 1 : 0
+        })
+        reg(fps)
+        grid.add_child(fps)
+        return grid
+    }
+
+    fn make_items() {
+        var names = ["Iron Sword", "Oak Shield", "Health Potion", "Mana Potion", "Old Key", "Lantern", "Silver Ring",
+                     "Leather Boots", "Rope", "Torch", "Bread", "Map", "Compass", "Dagger", "Bow", "Arrow Bundle",
+                     "Gold Coin", "Ruby", "Emerald", "Spell Book", "Iron Helmet", "Cloak", "Antidote", "Whetstone",
+                     "Flint", "Bandage", "Herbs", "Crystal", "Amulet", "Pickaxe"]
+        for i in 0..names.len() {
+            var it = Item()
+            it.name = names[i]
+            it.code = names[i].substr(0, 2)
+            it.text = "{names[i]}: item {i + 1} of {names.len()}"
+            it.durability = 100 - (i * 7) % 60
+            it.hue = (i as float) / (names.len() as float)
+            items.push(it)
+        }
+    }
+
+    fn inventory_page() -> Control {
+        var split = SplitContainer()
+        split.name = "Inventory"
+        split.split = 0.5
+        split.split_changed.connect(fn(v: float) {
+            S.split = round(v * 100.0) as int
+        })
+        var scroll = ScrollContainer()
+        scroll.name = "scroll"
+        scroll.min_size = vec2(540.0, 300.0)
+        scroll.scrolled.connect(fn(o: vec2) {
+            S.scroll_y = o.y as int
+        })
+        var grid = GridContainer()
+        grid.columns = 5
+        grid.h_separation = 10.0
+        grid.v_separation = 10.0
+        for i in 0..items.len() {
+            var s = Slot()
+            s.index = i
+            s.name = "slot{i}"
+            s.text = items[i].code
+            s.min_size = vec2(88.0, 72.0)
+            s.tooltip = items[i].text
+            s.pressed.connect(fn() {
+                slot_menu_for = s.index
+                S.selected_item = s.index
+                item_menu.popup_menu(vec2(s.position.x + s.size.x * 0.5, s.position.y + s.size.y * 0.5), 180.0)
+            })
+            reg(s)
+            grid.add_child(s)
+        }
+        scroll.add_child(grid)
+        split.add_child(scroll)
+
+        var side = VBox()
+        side.min_size = vec2(380.0, 300.0)
+        var frame = AspectRatioContainer()
+        frame.ratio = 1.0
+        frame.min_size = vec2(120.0, 120.0)
+        detail_image = Image()
+        detail_image.asset = "assets/gem.svg"
+        detail_image.ignore_natural_size = true
+        frame.add_child(detail_image)
+        side.add_child(frame)
+        detail_name = label("Select an item", 300.0, #accent)
+        side.add_child(detail_name)
+        detail_text = label("", 300.0, #dim)
+        detail_text.min_size = vec2(300.0, 40.0)
+        side.add_child(detail_text)
+        var tags = FlowContainer()
+        tags.min_size = vec2(300.0, 40.0)
+        for t in ["common", "tradeable", "stackable", "craftable"] {
+            var l = label(t, 120.0, #small)
+            l.min_size = vec2(120.0, 32.0)
+            tags.add_child(l)
+        }
+        side.add_child(tags)
+        detail_bar = ProgressBar()
+        detail_bar.name = "durability"
+        detail_bar.text = "Durability"
+        detail_bar.min_size = vec2(300.0, 40.0)
+        detail_bar.min_value = 0.0
+        detail_bar.max_value = 100.0
+        detail_bar.value = 0.0
+        side.add_child(detail_bar)
+        var pad = Margin()
+        pad.margins = vec4(20.0, 0.0, 0.0, 0.0)
+        pad.add_child(side)
+        split.add_child(pad)
+        return split
+    }
+
+    fn use_item(i: int) {
+        if i >= 0 && i < items.len() {
+            items[i].durability = max(items[i].durability - 10, 0)
+            S.uses += 1
+            show_item(i)
+        }
+    }
+
+    fn show_item(i: int) {
+        shown = i
+        var it = items[i]
+        detail_name.text = it.name
+        detail_text.text = "Uses left: {it.durability / 10}"
+        detail_bar.value = it.durability as float
+        detail_image.tint = Color { r = 0.5 + 0.5 * it.hue, g = 1.0 - 0.5 * it.hue, b = 1.0, a = 1.0 }
+        S.durability = it.durability
+    }
+
+    fn update(dt: float) {
+        S.focus = UI.focused == null ? -1 : focusables.index_of(UI.focused)
+        if UI.focused is Slot s && s.index != shown {
+            show_item(s.index)
+        }
+    }
+}

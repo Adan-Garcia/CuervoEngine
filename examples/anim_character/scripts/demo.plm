@@ -1,0 +1,125 @@
+// An animated character (DESIGN.md 4.17, milestone 9.4). The body is a Node2D
+// hierarchy built in scenes/character.scene (torso, head, arms and legs are
+// child Shapes), whose AnimationPlayer holds the idle / walk / jump
+// animations and whose AnimationTree blends between them. This script only
+// moves the character and tells the tree what is happening:
+//
+//   left / right   walk   (parameter "moving")
+//   jump           jump   (trigger "jump")
+//
+// Every blend (idle <-> walk, anything -> jump -> back) is a cross-fade of the
+// animated properties over a few ticks, driven by the transitions saved in the
+// scene file.
+
+var GROUND = Color.hex("2a3150")
+var INK = Color.hex("e8ecff")
+var DIM = Color.hex("8890b0")
+
+class Character extends Node2D {
+    // Pixels per tick while a direction is held.
+    @export var speed = 3.0
+    // Pixels per tick per tick, and the jump's launch speed.
+    @export var gravity = 0.5
+    @export var jump_speed = 10.0
+    // Display size factor.
+    @export var zoom = 1.8
+    // Where the character can walk.
+    @export var min_x = 160.0
+    @export var max_x = 1120.0
+
+    var vy = 0.0
+    var floor_y = 0.0
+    var airborne = false
+    var tree: AnimationTree
+    // Footstep and landing dust: gameplay particles, so the replay hash covers them
+    // (and checks them at every job count).
+    var dust = Emitter(tag = #dust)
+
+    fn ready() {
+        floor_y = position.y
+        scale = vec2(zoom, zoom)
+        dust.add(Module.Drag(k = 3.0))
+        dust.add(Module.SizeOverLife(from = 1.0, to = 0.0))
+        for c in children {
+            if c is AnimationTree t {
+                tree = t
+            }
+            if c is AnimationPlayer p {
+                // The jump animation has an event key at its launch tick.
+                p.event.connect(fn(name: str) {
+                    if name == "launch" {
+                        puff(14)
+                    }
+                })
+            }
+        }
+    }
+
+    // A burst of dust at the character's feet.
+    fn puff(count: int) {
+        dust.fire(Pattern.Burst(count = count, direction = 0.0, spread = TAU), position + vec2(0.0, 6.0),
+                  Shot { speed = 90.0, speed_jitter = 50.0, life = 0.5, life_jitter = 0.2, size = 4.0,
+                         color = Color.hex("8890b0") })
+    }
+
+    fn update(dt: float) {
+        var dir = 0.0
+        if Input.held(#right) {
+            dir += 1.0
+        }
+        if Input.held(#left) {
+            dir -= 1.0
+        }
+        position.x = clamp(position.x + dir * speed, min_x, max_x)
+        tree.set_bool("moving", dir != 0.0)
+        if Input.pressed(#jump) && !airborne {
+            airborne = true
+            vy = -jump_speed
+            tree.trigger("jump")
+        }
+        if dir != 0.0 && !airborne && Time.tick % 10 == 0 {
+            puff(2)
+        }
+        if airborne {
+            position.y += vy
+            vy += gravity
+            if position.y >= floor_y {
+                position.y = floor_y
+                vy = 0.0
+                airborne = false
+                puff(10)
+            }
+        }
+    }
+
+    fn draw(g: Canvas) {
+        dust.draw(g)
+    }
+}
+
+class Demo extends Node {
+    var character: Character
+
+    fn ready() {
+        var node = Scene.load("scenes/character.scene")
+        if node is Character c {
+            character = c
+            c.position = vec2(640.0, 574.0)
+            add_child(c)
+        }
+    }
+
+    fn draw(g: Canvas) {
+        g.rect(vec2(0.0, 574.0), vec2(1280.0, 146.0), fill = GROUND)
+        g.text(vec2(24.0, 20.0), "Animation: AnimationPlayer + AnimationTree", size = 22.0, color = INK)
+        g.text(vec2(24.0, 52.0), "left / right: walk    space: jump", size = 16.0, color = DIM)
+        if character != null && character.tree != null {
+            var t = character.tree
+            var line = "state: {t.current}"
+            if t.is_fading() {
+                line = "{line}   cross-fade {round(t.fade_progress() * 100.0) as int}%"
+            }
+            g.text(vec2(24.0, 80.0), line, size = 16.0, color = INK)
+        }
+    }
+}

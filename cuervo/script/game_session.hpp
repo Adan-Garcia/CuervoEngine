@@ -98,7 +98,14 @@ public:
 
     // Scripted input for automated runs (`--press`): "tick:action,..." holds
     // each action during that tick. Unknown actions are ignored with a warning.
+    // A tick may be a range ("10-20:ui_click" holds it for ticks 10 to 20).
     void set_presses(std::string_view presses);
+    // `--pointer`: "tick:x:y,..." puts the pointer at (x, y) virtual pixels
+    // from that tick on (until the next entry), over the mouse.
+    void set_pointer_script(std::string_view script);
+    // `--type`: "tick:text,..." types the text, one character per tick from
+    // that tick (a text field must have the focus). Text can't contain commas.
+    void set_typed(std::string_view script);
     // The input of the next tick: the devices through the input map, the
     // pointer (virtual pixels, clamped to i16) and any scripted presses.
     InputFrame sample(DeviceState& devices, vec2 pointer);
@@ -140,7 +147,11 @@ private:
     HostOptions host_options_;
     std::unique_ptr<ScriptHost> host_;
     platform::FileWatcher watcher_;
-    std::vector<std::pair<std::uint64_t, std::size_t>> presses_;
+    struct Press { std::uint64_t first, last; std::size_t action; };
+    std::vector<Press> presses_;
+    struct PointerStep { std::uint64_t tick; vec2 at; };
+    std::vector<PointerStep> pointer_script_;       // ascending by tick
+    std::vector<std::pair<std::uint64_t, std::uint32_t>> typed_; // tick -> code point
     bool recording_ = false;
     Replay replay_;
 };

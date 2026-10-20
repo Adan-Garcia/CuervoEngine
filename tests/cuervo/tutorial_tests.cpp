@@ -4,12 +4,68 @@
 #include <doctest.h>
 
 #include <filesystem>
+#include <fstream>
+#include <set>
+#include <sstream>
 
 #include "cuervo/script/project.hpp"
 #include "cuervo/script/script_host.hpp"
 
 using namespace cuervo;
 namespace fs = std::filesystem;
+
+namespace {
+
+std::string read_text(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+std::string trim_line(const std::string& s) {
+    const auto b = s.find_first_not_of(" \t\r");
+    if (b == std::string::npos) return {};
+    return s.substr(b, s.find_last_not_of(" \t\r") - b + 1);
+}
+
+} // namespace
+
+// The guide teaches Starfall step by step and says "every file below is the final version in
+// examples/tutorial/" (DESIGN.md 4.16 "Clarified (Milestone 8.4)"): so every line of the game's files
+// must appear in one of the guide's code blocks.
+TEST_CASE("tutorial: docs/GUIDE.md shows every line of examples/tutorial") {
+    const fs::path examples = CUERVO_EXAMPLES_DIR;
+    const fs::path root = examples / "tutorial";
+    const std::string guide = read_text(examples.parent_path() / "docs" / "GUIDE.md");
+    REQUIRE_FALSE(guide.empty());
+
+    std::set<std::string> guide_lines; // lines of the guide's pluma and toml code blocks
+    std::istringstream in(guide);
+    std::string line, lang;
+    bool fenced = false;
+    while (std::getline(in, line)) {
+        if (line.rfind("```", 0) == 0) {
+            fenced = !fenced;
+            lang = fenced ? line.substr(3) : "";
+            continue;
+        }
+        if (fenced && (lang == "pluma" || lang == "toml")) guide_lines.insert(trim_line(line));
+    }
+    REQUIRE_FALSE(guide_lines.empty());
+
+    std::vector<fs::path> files = {root / "project.toml"};
+    for (const auto& e : fs::directory_iterator(root / "scripts")) files.push_back(e.path());
+    for (const fs::path& f : files) {
+        std::istringstream src(read_text(f));
+        std::string l;
+        while (std::getline(src, l)) {
+            const std::string t = trim_line(l);
+            if (t.empty()) continue;
+            CHECK_MESSAGE(guide_lines.count(t) == 1, f.filename().string() << " has a line the guide doesn't show: " << t);
+        }
+    }
+}
 
 #if CUERVO_FEATURE_AUDIO && CUERVO_FEATURE_UI && CUERVO_FEATURE_PARTICLES && CUERVO_FEATURE_COLLISION
 namespace {

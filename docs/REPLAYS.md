@@ -8,7 +8,8 @@ reproduces the run bit for bit and finds the first tick where it doesn't.
 ## Making and checking replays
 
 ```sh
-# Record with the runtime (--press holds actions on given ticks; any device input counts too)
+# Record with the runtime (--press holds actions on given ticks, "10-20:action" for a range; --pointer "tick:x:y" moves
+# the pointer and --type "tick:text" types text; any device input counts too)
 cuervo --game examples/shmup --press "30:ui_accept,90:shoot" --record run.replay --screenshot shot.ppm
 
 # Verify headless: exit 0 when every tick's state hash matches, 1 at the first mismatch
@@ -31,7 +32,7 @@ playback, it shows up as a hash mismatch (that is what verification is for). A
 hot reload during a recording is not recorded; the replay plays the later ticks
 with the scripts as they are then.
 
-## File format (version 1)
+## File format (version 2)
 
 Little-endian (`cuervo/core/binary_io.hpp`), defined in `cuervo/input/replay.hpp`.
 `str` is a `u32` byte length then UTF-8 bytes.
@@ -39,7 +40,7 @@ Little-endian (`cuervo/core/binary_io.hpp`), defined in `cuervo/input/replay.hpp
 | Field | Type | |
 |---|---|---|
 | magic | 4 bytes | `CRPL` |
-| version | u32 | 1 |
+| version | u32 | 2 (version 1 files still load) |
 | project | str | the project's name (informational) |
 | seed | u64 | the simulation seed the run used |
 | tick_rate | f32 | ticks per second; playback refuses another rate |
@@ -47,9 +48,14 @@ Little-endian (`cuervo/core/binary_io.hpp`), defined in `cuervo/input/replay.hpp
 | axes | u32 n, then n × str | axis names in index order (`move.x`, `move.y`...) |
 | start_scene | str | empty: the project's main (`main_scene` or the `main` class), as `cuervo --game` starts; else the played scene's path/label |
 | scene | u32 n, then n bytes | the played scene's file bytes (current scene format) when `start_scene` is set, so unsaved editor edits replay too |
-| frames | u32 n, then n × 32 bytes | per tick: `held` u64 (bit i = action i), 8 × i16 axes, 2 × i16 pointer (virtual pixels) |
+| frames | u32 n, then n × 32 bytes (version 1: n × 28) | per tick: `held` u64 (bit i = action i), 8 × i16 axes, 2 × i16 pointer (virtual pixels), and from version 2 `text` u32 (the code point typed that tick, 0 for none; UI text fields) |
 | hashes | u32 n, then n × u64 | `ScriptHost::state_hash()` after each tick (n ≤ frames) |
 
 `frames[i]` is the input of tick `i + 1`; `hashes[i]` is the state after it. The
 state hash fingerprints the particle system (pools and RNG streams), the tick and
-the script globals' numbers; it doesn't depend on the job thread count or SIMD.
+the script globals' numbers and, once a game uses animation (DESIGN.md 4.17, 9.4), a digest of
+every value its tracks and tweens wrote into nodes; it doesn't depend on the job thread count or SIMD.
+
+Version 2 added the typed-text code point to every frame so text
+fields (`LineEdit`) replay; a version 1 file loads with `text` 0 everywhere, and
+files are always written as version 2.

@@ -234,3 +234,40 @@ TEST_CASE("SdfBatcher: make_sector and arc fill option") {
     CHECK(batch.instances()[1].color == pack_rgba8(cyan));
 }
 
+
+TEST_CASE("SdfBatcher grows its instance buffer by a quarter, not double") {
+    // The stream buffer exists in several versions per backend; doubling past
+    // 2^21 instances put 168 MB x 3 of mostly unused memory on the GPU and
+    // pushed Vulkan out of the 256 MB BAR (the 1.9M-particle cliff).
+    RecordingDevice device;
+    SdfBatcher batch;
+    REQUIRE(batch.init(device, 256));
+    std::size_t last = batch.capacity();
+    std::size_t growths = 0;
+    for (std::size_t count = 1000; count <= 3'000'000; count += 1000) {
+        batch.append(1000);
+        batch.flush(Affine2{}, 1.0f);
+        if (batch.capacity() != last) {
+            CHECK(batch.capacity() <= last + last / 4 + 1000); // a quarter, or just enough for the count
+            CHECK(batch.capacity() >= count);
+            last = batch.capacity();
+            ++growths;
+        }
+    }
+    CHECK(growths > 10);
+    CHECK(batch.capacity() < 3'000'000 + 3'000'000 / 4 + 1000);
+    batch.shutdown();
+}
+
+TEST_CASE("SdfBatcher append hands out writable instances after earlier ones") {
+    SdfBatcher batch;
+    batch.add(make_circle({1.0f, 2.0f}, 3.0f, {1.0f, 1.0f, 1.0f, 1.0f}));
+    const std::span<SdfInstance> fresh = batch.append(4);
+    REQUIRE(fresh.size() == 4);
+    for (std::size_t i = 0; i < fresh.size(); ++i) {
+        fresh[i] = make_circle({static_cast<float>(i), 0.0f}, 1.0f, {0.0f, 0.0f, 0.0f, 1.0f});
+    }
+    REQUIRE(batch.size() == 5);
+    CHECK(batch.instances()[0].half_size.x() == 3.0f);
+    CHECK(batch.instances()[3].center.x() == 2.0f);
+}

@@ -42,7 +42,8 @@ bool is_closer(K k) { return k == K::RightParen || k == K::RightBracket || k == 
 std::string describe(const Token& t) {
     switch (t.kind) {
         case K::Newline: return "newline";
-        case K::Eof: return "end of file";
+        // The end of an interpolation is its closing '}' (kept as the token text).
+        case K::Eof: return t.text.empty() ? std::string("end of file") : std::format("'{}'", t.text);
         case K::String: return "string literal";
         case K::Error: return "invalid token";
         default: return std::format("'{}'", t.text);

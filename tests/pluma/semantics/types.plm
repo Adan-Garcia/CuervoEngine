@@ -1,0 +1,294 @@
+// Classes, structs, traits, generics, enums, match and Result
+// (LANGUAGE.md 9.5 - 9.7, 9.18, 9.19).
+class Animal {
+    var name: str
+    var legs = 4
+    static var count = 0
+    fn init(n: str) {
+        name = n
+        count += 1
+    }
+    fn speak() -> str { return "{name} makes a sound" }
+    fn describe() -> str { return "{speak()} on {legs} legs" }
+    static fn total() -> int { return count }
+}
+class Dog extends Animal {
+    fn init(n: str) { super.init(n + "!") }
+    fn speak() -> str { return "{name} barks" }
+}
+class Bird extends Animal {
+    var wings = 2
+    fn init(n: str) {
+        super.init(n)
+        legs = 2
+    }
+}
+
+class Health {
+    var hp: int = 10 {
+        get { return hp }
+        set(v) { hp = clamp(v, 0, 100) }
+    }
+    var ratio: float {
+        get { return hp as float / 100.0 }
+    }
+}
+
+class Who { fn who() -> str { return "A" } }
+class Who2 extends Who { fn who() -> str { return "B" } }
+
+struct Counter {
+    var n: int
+    fn bump() { n += 1 }
+    fn value() -> int { return n }
+}
+
+struct Box<T> { var v: T }
+
+class Stack<T> {
+    var items: List<T> = []
+    fn push(x: T) { items.push(x) }
+    fn pop() -> T { return items.pop() }
+}
+
+fn first<T>(xs: List<T>) -> T { return xs[0] }
+fn max_of<T: Ord>(a: T, b: T) -> T {
+    if a < b { return b }
+    return a
+}
+fn add_all<T: Add>(a: T, b: T) -> T { return a + b }
+
+trait Shape {
+    fn area() -> float
+    fn name() -> str { return "shape" }
+    fn describe() -> str { return "{name()} {area()}" }
+}
+struct Square: Shape {
+    var s: float
+    fn area() -> float { return s * s }
+    fn name() -> str { return "square" }
+}
+class Circle: Shape {
+    var r = 1.0
+    fn area() -> float { return 3.0 * r * r }
+}
+
+struct Money: Add, Sub, Mul, Neg, Eq, Ord, Display {
+    var x: int
+    fn add(o: Money) -> Money { return Money { x = x + o.x } }
+    fn sub(o: Money) -> Money { return Money { x = x - o.x } }
+    fn mul(o: Money) -> Money { return Money { x = x * o.x } }
+    fn neg() -> Money { return Money { x = -x } }
+    fn eq(o: Money) -> bool { return x % 10 == o.x % 10 }
+    fn cmp(o: Money) -> int { return x - o.x }
+    fn to_str() -> str { return "M{x}" }
+}
+
+enum Color { Red, Green = 5, Blue }
+enum Level: u8 { Lo = 250, Mid, Hi }
+enum Form { Circle(r: float), Rect(w: float, h: float), Empty }
+
+fn form_name(s: Form) -> str {
+    match s {
+        Form.Circle(r) if r > 1.0 => { return "big circle" }
+        Form.Circle => { return "circle" }
+        Form.Rect(w, 0.0) => { return "flat" }
+        Form.Rect(w, h) => { return "rect {w}x{h}" }
+        Form.Empty => { return "empty" }
+    }
+}
+
+fn bucket(n: int) -> str {
+    match n {
+        0 => { return "zero" }
+        1 | 2 => { return "small" }
+        3..=9 => { return "digit" }
+        _ => { return "big" }
+    }
+}
+
+fn div(a: int, b: int) -> Result<int, str> {
+    if b == 0 { return Err("div by zero") }
+    return Ok(a / b)
+}
+fn calc(a: int, b: int) -> Result<int, str> {
+    defer print("calc done")
+    var x = div(a, b)?
+    var y = div(x, 2)?
+    return Ok(x + y)
+}
+fn plus_one(x: int?) -> int? {
+    var y = x?
+    return y + 1
+}
+
+class Parent {}
+class Child extends Parent { var q = 2 }
+
+class Key: Eq {
+    var id: int
+    fn init(i: int) { id = i }
+    fn eq(o: Key) -> bool { return id == o.id }
+}
+
+fn same_key<T: Eq>(a: T, b: T) -> bool { return a == b }
+
+struct Mod10: Eq {
+    var x: int
+    fn eq(o: Mod10) -> bool { return x % 10 == o.x % 10 }
+}
+
+var a: Animal = Dog("rex")
+var b: Animal = Bird("tweety")
+print(a.describe())
+print(b.describe())
+print(Animal.total())
+print("{a is Dog} {a is Bird}")
+var d = a as Dog
+print(d.name)
+var zoo: List<Animal> = [a, b, Animal("generic")]
+for x in zoo { print(x.speak()) }
+print(zoo[0] == a)
+print(Dog("rex") == a)
+
+var h = Health()
+h.hp = 500
+print(h.hp)
+h.hp -= 600
+print(h.hp)
+h.hp += 50
+print(h.hp)
+print(h.ratio)
+
+var w: Who = Who2()
+var wf = w.who
+print(wf())
+var ctr = Counter { n = 1 }
+var vf = ctr.value
+ctr.n = 2
+print(vf())
+print(ctr.value())
+
+// A struct method works in place; copies are independent.
+var c = Counter { n = 0 }
+c.bump()
+c.bump()
+var c2 = c
+c2.bump()
+print("{c.n} {c2.n}")
+var cs = [Counter { n = 10 }]
+cs[0].bump()
+print(cs[0].n)
+var moved = cs[0]
+moved.n = 0
+print(cs)
+
+print(first([1, 2]))
+print(first(["a"]))
+print(Box { v = 3 })
+print(Box { v = "s" }.v.len())
+var st = Stack<int>()
+st.push(1)
+st.push(2)
+print(st.pop() + st.pop())
+print(max_of(1, 2))
+print(max_of("a", "b"))
+print(max_of(1.5, -2.0))
+print(add_all(1, 2))
+print(add_all("a", "b"))
+print(add_all(1.5, 2.5))
+
+var shapes: List<Shape> = [Square { s = 2.0 }, Circle()]
+for s in shapes { print(s.describe()) }
+
+var m1 = Money { x = 3 }
+var m2 = Money { x = 13 }
+print(m1 + m2)
+print(m1 - m2)
+print(m1 * m2)
+print(-m1)
+print("{m1 == m2} {m1 != m2} {m1 < m2} {m1 >= m2}")
+print([m1, m2])
+
+print(Color.Red as int)
+print(Color.Green as int)
+print(Color.Blue as int)
+print(Color.Blue)
+var color: Color
+print(color)
+print(Level.Hi as int)
+print(Level.Hi)
+var shape = Form.Rect(2.0, 3.0)
+print(shape)
+print(Form.Circle(r = 1.5))
+print(shape == Form.Rect(2.0, 3.0))
+print(shape == Form.Empty)
+print([Form.Empty, Form.Circle(1.0)])
+print(form_name(Form.Circle(2.0)))
+print(form_name(Form.Circle(0.5)))
+print(form_name(Form.Rect(1.0, 0.0)))
+print(form_name(Form.Rect(1.0, 2.0)))
+print(form_name(Form.Empty))
+print("{bucket(0)} {bucket(2)} {bucket(9)} {bucket(10)} {bucket(-1)}")
+
+var parent: Parent = Child()
+match parent {
+    Child => { print("Child") }
+    _ => { print("other") }
+}
+var none: Parent = null
+print(none is Parent)
+print((none as Child) == null)
+
+print(calc(10, 2))
+print(calc(1, 0))
+print(div(7, 2).unwrap())
+print(div(7, 0).unwrap_or(-1))
+print(div(7, 0).is_err())
+print(div(1, 0).err())
+print(div(1, 1).ok())
+print(div(4, 2) == Ok(2))
+match div(5, 0) {
+    Ok(v) => { print("ok {v}") }
+    Err(e) => { print("err {e}") }
+}
+print(plus_one(null))
+print(plus_one(3))
+
+var opt: int? = null
+match opt {
+    null => { print("none") }
+    v => { print(v) }
+}
+opt = 4
+match opt {
+    null => { print("none") }
+    v => { print(v) }
+}
+print(opt ?? 0)
+print(parse_int("12x") ?? -1)
+if opt? v { print(v + 1) }
+
+// `==` on a class with `eq` calls it only when both sides are non-null.
+var k1 = Key(1)
+var k2 = Key(1)
+var no_key: Key = null
+print("{k1 == k2} {k1 != k2} {k1 == no_key} {no_key == k1} {no_key == no_key} {no_key != k1}")
+print("{k1 == null} {null == k1} {no_key == null} {no_key != null}")
+print("{same_key(k1, k2)} {same_key(no_key, k1)} {same_key(k1, no_key)} {same_key(no_key, no_key)}")
+var keys: List<Key> = [Key(1), null]
+print("{keys.contains(k1)} {keys.index_of(null)} {keys.contains(Key(5))}")
+
+// A value and an optional compare in either order; an empty optional is never equal.
+var mo: Mod10? = Mod10 { x = 11 }
+var me: Mod10? = null
+print("{mo == Mod10 { x = 1 }} {Mod10 { x = 1 } == mo} {Mod10 { x = 2 } != mo} {me == Mod10 { x = 1 }} {Mod10 { x = 1 } == me} {Mod10 { x = 1 } != me}")
+
+// Zero values of uninitialized variables.
+var zi: int
+var zf: float
+var zb: bool
+var zs: str
+var zn: name
+var zl: List<int>
+print("{zi} {zf} {zb} [{zs}] {zn} {zl}")

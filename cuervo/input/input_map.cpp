@@ -127,6 +127,10 @@ InputFrame InputMap::sample(DeviceState& devices) const {
         }
         frame.axes[i] = static_cast<std::int16_t>(std::lround(std::clamp(best, -1.0f, 1.0f) * 32767.0f));
     }
+    if (!devices.typed.empty()) {
+        frame.text = static_cast<std::uint32_t>(devices.typed.front());
+        devices.typed.erase(0, 1);
+    }
     devices.clear_transients();
     return frame;
 }

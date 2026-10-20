@@ -1,0 +1,6 @@
+fn depth(n: int) -> int {
+    if n == 0 { return 0 }
+    return depth(n - 1) + 1
+}
+print(depth(4000))
+print(depth(5000))

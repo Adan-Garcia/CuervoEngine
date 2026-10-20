@@ -25,4 +25,16 @@ namespace cuervo::tools {
 std::optional<std::string> generate_api_docs(const std::vector<pluma::SourceFile::Part>& preludes,
                                              std::string& error);
 
+struct ApiCoverage {
+    std::size_t total = 0;
+    std::size_t documented = 0;
+    std::vector<std::string> missing; // "path:line: Type.member", in source order
+};
+
+// Which public prelude items (the ones the reference lists: top-level
+// declarations, enum variants, signals, fields, methods) have no doc comment.
+// Returns nullopt and sets `error` when a part doesn't parse.
+std::optional<ApiCoverage> check_api_coverage(const std::vector<pluma::SourceFile::Part>& preludes,
+                                              std::string& error);
+
 } // namespace cuervo::tools

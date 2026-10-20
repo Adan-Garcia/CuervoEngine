@@ -1,0 +1,102 @@
+node Character "Character" {
+    position: vec2 = (0.0, 0.0)
+    node Node2D "LegL" {
+        position: vec2 = (-12.0, -62.0)
+        node Shape "Limb" {
+            position: vec2 = (0.0, 24.0)
+            rotation: float = 1.5707963267948966
+            kind: ShapeKind = ShapeKind.Capsule
+            radius: float = 8.0
+            size: vec2 = (44.0, 1.0)
+            corner_radius: float = 0.0
+            fill: Color = Color { r = 0.20392156862745098, g = 0.25098039215686274, b = 0.43137254901960786, a = 1.0 }
+        }
+    }
+    node Node2D "LegR" {
+        position: vec2 = (12.0, -62.0)
+        node Shape "Limb" {
+            position: vec2 = (0.0, 24.0)
+            rotation: float = 1.5707963267948966
+            kind: ShapeKind = ShapeKind.Capsule
+            radius: float = 8.0
+            size: vec2 = (44.0, 1.0)
+            corner_radius: float = 0.0
+            fill: Color = Color { r = 0.20392156862745098, g = 0.25098039215686274, b = 0.43137254901960786, a = 1.0 }
+        }
+    }
+    node Node2D "Torso" {
+        position: vec2 = (0.0, -70.0)
+        node Node2D "ArmL" {
+            position: vec2 = (-27.0, -48.0)
+            node Shape "Limb" {
+                position: vec2 = (0.0, 14.0)
+                rotation: float = 1.5707963267948966
+                kind: ShapeKind = ShapeKind.Capsule
+                radius: float = 7.0
+                size: vec2 = (24.0, 1.0)
+                corner_radius: float = 0.0
+                fill: Color = Color { r = 0.9490196078431372, g = 0.788235294117647, b = 0.6274509803921569, a = 1.0 }
+            }
+        }
+        node Shape "TorsoShape" {
+            position: vec2 = (0.0, -26.0)
+            rotation: float = 0.0
+            kind: ShapeKind = ShapeKind.Rect
+            radius: float = 16.0
+            size: vec2 = (46.0, 60.0)
+            corner_radius: float = 12.0
+            fill: Color = Color { r = 0.30980392156862746, g = 0.48627450980392156, b = 1.0, a = 1.0 }
+        }
+        node Node2D "Head" {
+            position: vec2 = (0.0, -58.0)
+            node Shape "HeadShape" {
+                position: vec2 = (0.0, -18.0)
+                rotation: float = 0.0
+                kind: ShapeKind = ShapeKind.Circle
+                radius: float = 20.0
+                size: vec2 = (32.0, 32.0)
+                corner_radius: float = 0.0
+                fill: Color = Color { r = 0.9490196078431372, g = 0.788235294117647, b = 0.6274509803921569, a = 1.0 }
+            }
+            node Shape "EyeL" {
+                position: vec2 = (-8.0, -20.0)
+                rotation: float = 0.0
+                kind: ShapeKind = ShapeKind.Circle
+                radius: float = 3.5
+                size: vec2 = (32.0, 32.0)
+                corner_radius: float = 0.0
+                fill: Color = Color { r = 0.10196078431372549, g = 0.11372549019607843, b = 0.1803921568627451, a = 1.0 }
+            }
+            node Shape "EyeR" {
+                position: vec2 = (8.0, -20.0)
+                rotation: float = 0.0
+                kind: ShapeKind = ShapeKind.Circle
+                radius: float = 3.5
+                size: vec2 = (32.0, 32.0)
+                corner_radius: float = 0.0
+                fill: Color = Color { r = 0.10196078431372549, g = 0.11372549019607843, b = 0.1803921568627451, a = 1.0 }
+            }
+        }
+        node Node2D "ArmR" {
+            position: vec2 = (27.0, -48.0)
+            node Shape "Limb" {
+                position: vec2 = (0.0, 14.0)
+                rotation: float = 1.5707963267948966
+                kind: ShapeKind = ShapeKind.Capsule
+                radius: float = 7.0
+                size: vec2 = (24.0, 1.0)
+                corner_radius: float = 0.0
+                fill: Color = Color { r = 0.9490196078431372, g = 0.788235294117647, b = 0.6274509803921569, a = 1.0 }
+            }
+        }
+    }
+    node AnimationPlayer "Anim" {
+        animations: List<Animation> = [Animation { name = "idle", length = 120, mode = AnimLoop.Loop, tracks = [AnimTrack { path = "Torso:position", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (0.0, -70.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 60, value = (0.0, -67.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 120, value = (0.0, -70.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "Torso:rotation", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (0.0, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.Step, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "Torso:scale", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (1.0, 1.0, 0.0, 0.0), text = "", interp = AnimInterp.Step, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "Torso/Head:rotation", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (0.0, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 60, value = (0.08, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 120, value = (0.0, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "Torso/ArmL:rotation", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (0.08, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 60, value = (0.0, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 120, value = (0.08, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "Torso/ArmR:rotation", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (-0.08, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 60, value = (0.0, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 120, value = (-0.08, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "LegL:rotation", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (0.0, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.Step, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "LegR:rotation", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (0.0, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.Step, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "Torso/TorsoShape:fill", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (0.31, 0.49, 1.0, 1.0), text = "", interp = AnimInterp.Step, ease_kind = Ease.Sine, curve = 1.0 }] }] }, Animation { name = "walk", length = 40, mode = AnimLoop.Loop, tracks = [AnimTrack { path = "Torso:position", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (0.0, -67.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 10, value = (0.0, -71.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 20, value = (0.0, -67.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 30, value = (0.0, -71.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 40, value = (0.0, -67.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "Torso:rotation", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (0.12, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.Step, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "Torso:scale", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (1.0, 1.0, 0.0, 0.0), text = "", interp = AnimInterp.Step, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "Torso/Head:rotation", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (-0.1, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 20, value = (-0.16, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 40, value = (-0.1, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "Torso/ArmL:rotation", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (0.75, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 20, value = (-0.75, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 40, value = (0.75, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "Torso/ArmR:rotation", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (-0.75, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 20, value = (0.75, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 40, value = (-0.75, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "LegL:rotation", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (-0.65, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 20, value = (0.65, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 40, value = (-0.65, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "LegR:rotation", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (0.65, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 20, value = (-0.65, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 40, value = (0.65, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "Torso/TorsoShape:fill", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (0.24, 0.81, 0.81, 1.0), text = "", interp = AnimInterp.Step, ease_kind = Ease.Sine, curve = 1.0 }] }] }, Animation { name = "jump", length = 40, mode = AnimLoop.None, tracks = [AnimTrack { path = "Torso:position", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (0.0, -70.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 5, value = (0.0, -60.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 8, value = (0.0, -74.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 32, value = (0.0, -72.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 38, value = (0.0, -61.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 40, value = (0.0, -70.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "Torso:rotation", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (0.0, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 8, value = (-0.1, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 32, value = (0.1, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 40, value = (0.0, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "Torso:scale", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (1.0, 1.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 5, value = (1.14, 0.84, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 8, value = (0.9, 1.12, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 20, value = (1.0, 1.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 32, value = (1.0, 1.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 38, value = (1.16, 0.82, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 40, value = (1.0, 1.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "Torso/Head:rotation", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (0.0, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 8, value = (-0.15, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 32, value = (0.1, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 40, value = (0.0, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "Torso/ArmL:rotation", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (0.1, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 5, value = (0.6, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 10, value = (2.6, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 30, value = (2.0, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 38, value = (0.5, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 40, value = (0.1, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "Torso/ArmR:rotation", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (-0.1, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 5, value = (-0.6, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 10, value = (-2.6, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 30, value = (-2.0, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 38, value = (-0.5, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 40, value = (-0.1, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "LegL:rotation", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (0.0, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 5, value = (0.5, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 8, value = (-0.2, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 20, value = (-0.4, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 32, value = (0.3, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 38, value = (0.5, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 40, value = (0.0, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "LegR:rotation", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (0.0, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 5, value = (-0.5, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 8, value = (0.2, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 20, value = (0.5, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 32, value = (-0.3, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 38, value = (-0.5, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }, AnimKey { time = 40, value = (0.0, 0.0, 0.0, 0.0), text = "", interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "Torso/TorsoShape:fill", kind = AnimTrackKind.Property, keys = [AnimKey { time = 0, value = (1.0, 0.6, 0.24, 1.0), text = "", interp = AnimInterp.Step, ease_kind = Ease.Sine, curve = 1.0 }] }, AnimTrack { path = "", kind = AnimTrackKind.Event, keys = [AnimKey { time = 8, value = (0.0, 0.0, 0.0, 0.0), text = "launch", interp = AnimInterp.Linear, ease_kind = Ease.Sine, curve = 1.0 }] }] }]
+        autoplay: str = ""
+    }
+    node AnimationTree "Tree" {
+        states: List<AnimStateDef> = [AnimStateDef { name = "idle", animation = "idle", speed = 1.0 }, AnimStateDef { name = "walk", animation = "walk", speed = 1.0 }, AnimStateDef { name = "jump", animation = "jump", speed = 1.0 }]
+        transitions: List<AnimTransition> = [AnimTransition { from_state = "*", to_state = "jump", conditions = [AnimCondition { param = "jump", op = AnimCondOp.Trigger, value = 0.0 }], duration = 4, interp = AnimInterp.EaseOut, ease_kind = Ease.Quad, curve = 1.0, at_end = false }, AnimTransition { from_state = "jump", to_state = "walk", conditions = [AnimCondition { param = "moving", op = AnimCondOp.IsTrue, value = 0.0 }], duration = 6, interp = AnimInterp.Linear, ease_kind = Ease.Sine, curve = 1.0, at_end = true }, AnimTransition { from_state = "jump", to_state = "idle", conditions = [], duration = 6, interp = AnimInterp.Linear, ease_kind = Ease.Sine, curve = 1.0, at_end = true }, AnimTransition { from_state = "idle", to_state = "walk", conditions = [AnimCondition { param = "moving", op = AnimCondOp.IsTrue, value = 0.0 }], duration = 8, interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0, at_end = false }, AnimTransition { from_state = "walk", to_state = "idle", conditions = [AnimCondition { param = "moving", op = AnimCondOp.IsFalse, value = 0.0 }], duration = 8, interp = AnimInterp.EaseInOut, ease_kind = Ease.Sine, curve = 1.0, at_end = false }]
+        start_state: str = "idle"
+    }
+}

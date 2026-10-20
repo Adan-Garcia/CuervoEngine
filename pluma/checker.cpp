@@ -512,6 +512,40 @@ private:
         return out;
     }
 
+    // A struct is a value: one that holds itself, directly or through other
+    // structs and fixed arrays, would need infinite space (references, lists
+    // and optionals break the chain). Without this check `S {}` recursed
+    // until the stack overflowed at run time.
+    bool holds_by_value(const Type* t, const StructInfo* target, std::vector<const StructInfo*>& seen) {
+        if (t->tag == TypeTag::Array) return holds_by_value(t->args[0], target, seen);
+        if (t->tag != TypeTag::Struct) return false;
+        const StructInfo* st = t->st();
+        if (st == target) return true;
+        if (std::find(seen.begin(), seen.end(), st) != seen.end()) return false;
+        seen.push_back(st);
+        Subst subst;
+        for (std::size_t i = 0; i < st->generics.size() && i < t->args.size(); ++i) subst[st->generics[i]] = t->args[i];
+        for (const FieldInfo* f : st->fields) {
+            if (f->type != nullptr && holds_by_value(substitute(T, f->type, subst), target, seen)) return true;
+        }
+        return false;
+    }
+
+    void check_struct_size(RecordInfo* r) {
+        if (r->is_class) return;
+        auto* s = static_cast<StructInfo*>(r);
+        for (const FieldInfo* f : s->fields) {
+            if (f->type == nullptr) continue;
+            std::vector<const StructInfo*> seen;
+            if (holds_by_value(f->type, s, seen)) {
+                error(f->span, std::format("struct '{}' contains itself through field '{}' and would have infinite size; "
+                                           "use an optional ('{}?'), a class or a List",
+                                           s->name, f->name, s->name));
+                return;
+            }
+        }
+    }
+
     void begin_unit(const std::vector<Decl*>& decls) {
         chunk_ = new_function("<top level>", FnKind::Chunk, Span{});
         chunk_->ret = T.void_();
@@ -523,6 +557,7 @@ private:
         for (EnumInfo* e : new_enums_) ensure_enum(e);
         for (RecordInfo* r : new_records_) ensure_header(r);
         for (RecordInfo* r : new_records_) ensure_members(r);
+        for (RecordInfo* r : new_records_) check_struct_size(r);
         for (Function* f : new_free_fns_) ensure_signature(f);
         for (GlobalVar* g : new_globals_) ensure_global(g);
         for (RecordInfo* r : new_records_) build_record_inits(r);
@@ -901,6 +936,11 @@ private:
                 } else {
                     next = c->i;
                 }
+            }
+            if (v.value == nullptr && bit_width(e->backing) < 64 &&
+                !num::fits(e->backing, next < 0, next < 0 ? 0 - static_cast<std::uint64_t>(next) : static_cast<std::uint64_t>(next))) {
+                error(v.name.span, std::format("the discriminant {} of variant '{}' does not fit in '{}'; use a wider backing type",
+                                               next, v.name.name, to_string(e->backing)));
             }
             vi.discriminant = next;
             next += 1;

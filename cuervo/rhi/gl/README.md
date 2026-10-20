@@ -16,10 +16,22 @@ in `gl_loader.hpp` (no `glMapBuffer*`, no base-vertex/base-instance draws, no
 - `first_instance` is emulated by offsetting per-instance stream pointers,
   because GLES 3.0 has no base-instance draws. Indexed draws have no base vertex.
 - Buffers: a buffer is only ever bound to the target of its `BufferKind`
-  (WebGL2 forbids rebinding to another target). Stream buffers are orphaned
-  (`glBufferData(nullptr)`) on their first update each frame, so uploads don't
-  stall on draws still reading the previous frame; later updates in the same
-  frame keep the frame's other bytes, matching the Vulkan backend's renaming.
+  (WebGL2 forbids rebinding to another target). A Stream buffer is
+  three GL buffers used in turn, one per frame it is updated in, so the first update of a
+  frame writes storage the GPU finished with and never waits on, or reallocates, what
+  earlier frames still read (the web build, which has no fences, orphans with
+  `glBufferData(nullptr)` instead). Later updates in the same frame hit the same version,
+  keeping the frame's other bytes, matching the Vulkan backend's renaming. Uploads go in 1 MB
+  `glBufferSubData` slices: one 76 MB call made the NVIDIA driver stage the whole range
+  and cost 3 to 4 times as much beyond ~1.9M instances.
+- Frames in flight: `end_frame` inserts a fence (`glFenceSync`) after the swap and, once more
+  than two are outstanding, blocks (`glClientWaitSync`, in bounded slices) on the oldest. Without
+  the bound the CPU outran the GPU by hundreds of frames at small loads and every queued frame
+  kept its stream buffers alive (1.5 GB peak at 1M particles); it also made GL frame times
+  measure CPU queueing, not GPU completion. WebGL2 forbids blocking waits on the main thread
+  (and the browser paces frames), so the web build keeps no fences.
+  `FenceRing` (`cuervo/rhi/frame_fence_ring.hpp`) is the backend-independent bookkeeping and is
+  unit tested; `gl::peak_frames_in_flight` reports the most that queued.
 - Viewport/scissor take top-left-origin rectangles and are flipped to GL's
   bottom-left origin. The scissor test stays enabled so `clear()` honors the
   scissor like Vulkan's.
@@ -41,7 +53,7 @@ in `gl_loader.hpp` (no `glMapBuffer*`, no base-vertex/base-instance draws, no
   `max_texture_bindings` so they never disturb bound textures. Updates are
   ordered like buffer updates (draws before see old texels).
 
-Phase 5 (tiers, parity, web; see `../README.md`):
+Tiers, parity and web (see `../README.md`):
 - Capabilities: every `Tier::Compatible` feature; MSAA if `GL_MAX_SAMPLES` >= 2.
   Limits from `GL_MAX_TEXTURE_SIZE`, `GL_MAX_UNIFORM_BLOCK_SIZE`,
   `GL_MAX_VERTEX_ATTRIBS`, `GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT`, `GL_MAX_SAMPLES`.

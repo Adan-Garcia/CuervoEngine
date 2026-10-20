@@ -1,0 +1,121 @@
+// Randomized operations on Map, Set, Deque, PriorityQueue and List against
+// naive reference implementations built from plain lists. A mismatch panics
+// with the round number, so VM and AOT must both finish and print the checksum.
+var state: i64 = 12345
+
+fn next_rand(bound: int) -> int {
+    state = (state * 1103515245 + 12345) % 2147483648
+    return ((state >> 8) as int) % bound
+}
+
+fn same(a: List<int>, b: List<int>) -> bool {
+    if a.len() != b.len() { return false }
+    for i in 0..a.len() {
+        if a[i] != b[i] { return false }
+    }
+    return true
+}
+
+fn index_of_key(keys: List<int>, k: int) -> int {
+    for i in 0..keys.len() {
+        if keys[i] == k { return i }
+    }
+    return -1
+}
+
+var map = Map<int, int>()
+var rkeys: List<int> = []
+var rvals: List<int> = []
+
+var uniq = Set<int>()
+var rset: List<int> = []
+
+var dq = Deque<int>()
+var rdq: List<int> = []
+
+var pq = PriorityQueue<int>()
+var rpq: List<int> = []
+
+var checksum = 0
+
+for round in 0..6000 {
+    var op = next_rand(10)
+    var key = next_rand(40)
+    if op < 3 {
+        // map insert or replace
+        var v = next_rand(1000)
+        map[key] = v
+        var i = index_of_key(rkeys, key)
+        if i < 0 {
+            rkeys.push(key)
+            rvals.push(v)
+        } else {
+            rvals[i] = v
+        }
+    } else if op < 5 {
+        var removed = map.remove(key)
+        var i = index_of_key(rkeys, key)
+        assert(removed == (i >= 0), "map.remove at round {round}")
+        if i >= 0 {
+            rkeys.remove(i)
+            rvals.remove(i)
+        }
+    } else if op == 5 {
+        var added = uniq.add(key)
+        var present = rset.contains(key)
+        assert(added == !present, "uniq.add at round {round}")
+        if !present { rset.push(key) }
+    } else if op == 6 {
+        var removed = uniq.remove(key)
+        var i = rset.index_of(key)
+        assert(removed == (i >= 0), "uniq.remove at round {round}")
+        if i >= 0 { rset.remove(i) }
+    } else if op == 7 {
+        if key % 2 == 0 {
+            dq.push_back(key)
+            rdq.push(key)
+        } else {
+            dq.push_front(key)
+            rdq.insert(0, key)
+        }
+        if rdq.len() > 20 {
+            assert(dq.pop_front() == rdq.remove(0), "deque pop_front at round {round}")
+        }
+    } else if op == 8 {
+        pq.push(key)
+        rpq.push(key)
+    } else if pq.len() > 0 {
+        var smallest = rpq[0]
+        var at = 0
+        for i in 0..rpq.len() {
+            if rpq[i] < smallest {
+                smallest = rpq[i]
+                at = i
+            }
+        }
+        rpq.remove(at)
+        assert(pq.pop() == smallest, "pq.pop at round {round}")
+    }
+
+    assert(map.len() == rkeys.len(), "map length at round {round}")
+    assert(uniq.len() == rset.len(), "uniq length at round {round}")
+    assert(dq.len() == rdq.len(), "deque length at round {round}")
+    assert(pq.len() == rpq.len(), "pq length at round {round}")
+    if round % 97 == 0 {
+        // Insertion order is part of the contract.
+        assert(same(map.keys(), rkeys), "map key order at round {round}")
+        assert(same(map.values(), rvals), "map value order at round {round}")
+        assert(same(uniq.to_list(), rset), "uniq order at round {round}")
+        assert(same(dq.to_list(), rdq), "deque order at round {round}")
+        for k in rkeys {
+            assert(map.has(k), "map.has at round {round}")
+        }
+        checksum = (checksum * 31 + map.len() * 7 + uniq.len() * 3 + dq.len()) % 1000003
+    }
+}
+print(map.len())
+print(uniq.len())
+print(dq.len())
+print(pq.len())
+print(checksum)
+print(rkeys)

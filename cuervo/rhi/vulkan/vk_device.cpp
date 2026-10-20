@@ -217,10 +217,10 @@ struct Buffer {
     std::size_t size = 0;
     std::vector<Allocation> versions;
     std::uint32_t current = 0;
-    // CPU copy of the contents (Dynamic and Stream). Dynamic: copied forward
-    // whole on rename. Stream: the source of the same-frame copy below, so it
-    // never reads back mapped memory (uncached/write-combined: reading 2 MB
-    // of it cost ~100 ms a frame).
+    // CPU copy of the contents (Dynamic only): copied forward whole on rename,
+    // so it never reads back mapped memory (uncached/write-combined: reading
+    // 2 MB of it cost ~100 ms a frame). Stream buffers keep none: at 76 MB a
+    // frame the extra copy cost 4-7 ms.
     std::vector<std::byte> shadow;
     // Stream only: serial of the frame that last wrote `current`, and the byte
     // range written in that frame. Renaming a version written earlier in the
@@ -586,7 +586,7 @@ public:
             return {};
         }
         buffer.versions.push_back(first);
-        if (desc.usage != rhi::BufferUsage::Static) {
+        if (desc.usage == rhi::BufferUsage::Dynamic) {
             buffer.shadow.resize(desc.size);
         }
         if (desc.initial_data && desc.size > 0) {
@@ -618,22 +618,34 @@ public:
             return;
         }
         const std::uint64_t recording = submitted_serial_ + 1;
-        if (buffer.usage != rhi::BufferUsage::Static &&
+        // A Stream update that lands beside what this frame already wrote (a
+        // batcher's next flush range) cannot touch bytes a recorded draw reads,
+        // and the version is already this frame's: write in place instead of
+        // renaming, which would cost another full-size allocation and copy
+        // (DESIGN.md 4.4: Stream contract).
+        const bool beside_written = buffer.usage == rhi::BufferUsage::Stream && buffer.written == recording &&
+                                    (offset >= buffer.written_end || offset + data.size() <= buffer.written_begin);
+        if (buffer.usage != rhi::BufferUsage::Static && !beside_written &&
             buffer.versions[buffer.current].last_used > completed_serial_) {
             // The GPU may still read the current version (in flight, or bound by
             // a draw already recorded this frame): rename.
+            const std::uint32_t previous = buffer.current;
             if (!rename(buffer)) {
                 return;
             }
-            const bool covers_all = offset == 0 && data.size() == buffer.size;
-            if (buffer.usage == rhi::BufferUsage::Stream && buffer.written == recording && !covers_all &&
+            const bool covers_written = offset <= buffer.written_begin && offset + data.size() >= buffer.written_end;
+            if (buffer.usage == rhi::BufferUsage::Stream && buffer.written == recording && !covers_written &&
                 buffer.written_end > buffer.written_begin) {
-                // A second update in one frame (e.g. a batcher flushed once per
-                // canvas layer): keep this frame's earlier writes, from the CPU copy.
+                // A second update in one frame that overlaps what this frame
+                // already wrote (and does not replace all of it): keep the earlier
+                // writes. Rare (batchers write beside, or over, their own range),
+                // so it reads the old version's mapped memory instead of every
+                // update paying for a CPU shadow copy of the whole buffer.
                 Allocation& fresh = buffer.versions[buffer.current];
                 const std::size_t begin = buffer.written_begin;
                 const std::size_t count = buffer.written_end - begin;
-                std::memcpy(static_cast<std::byte*>(fresh.mapped) + begin, buffer.shadow.data() + begin, count);
+                std::memcpy(static_cast<std::byte*>(fresh.mapped) + begin,
+                            static_cast<const std::byte*>(buffer.versions[previous].mapped) + begin, count);
                 vmaFlushAllocation(allocator_, fresh.allocation, begin, count);
             }
         }
@@ -1033,6 +1045,14 @@ private:
 
         VmaAllocationCreateInfo alloc_info{};
         alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
+        if (buffer.usage == rhi::BufferUsage::Stream &&
+            buffer.size * (frames_in_flight + 1) > bar_budget_ / 2) {
+            // Without Resizable BAR the CPU-writable VRAM window is 256 MB. A
+            // stream this large (all its versions) would crowd it out, and once
+            // the window is full each write into it ran ~15x slower (45 ms for
+            // 72 MB): system memory, which the GPU reads over PCIe, is steady.
+            alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+        }
         alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
         VmaAllocationInfo allocated{};
@@ -1693,6 +1713,18 @@ private:
         create.device = device_;
         create.pVulkanFunctions = &functions;
         VK_TRY(vmaCreateAllocator(&create, &allocator_));
+
+        // The largest memory heap the CPU can write that also lives on the GPU:
+        // VRAM itself with Resizable BAR (or on integrated GPUs), else the small BAR window.
+        const VkPhysicalDeviceMemoryProperties* memory = nullptr;
+        vmaGetMemoryProperties(allocator_, &memory);
+        constexpr VkMemoryPropertyFlags both = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+        bar_budget_ = 0;
+        for (std::uint32_t t = 0; t < memory->memoryTypeCount; ++t) {
+            if ((memory->memoryTypes[t].propertyFlags & both) == both) {
+                bar_budget_ = std::max<std::size_t>(bar_budget_, memory->memoryHeaps[memory->memoryTypes[t].heapIndex].size);
+            }
+        }
         return true;
     }
 
@@ -1910,6 +1942,7 @@ private:
     Swapchain swapchain_;
     bool swapchain_dirty_ = false;
     std::array<Frame, frames_in_flight> frames_{};
+    std::size_t bar_budget_ = 0; // bytes of CPU-writable device-local memory (see allocate)
     std::uint32_t frame_index_ = 0;
     std::uint32_t image_index_ = 0;
     bool frame_active_ = false;

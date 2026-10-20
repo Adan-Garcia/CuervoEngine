@@ -66,6 +66,13 @@ std::string_view method_for(Op op) {
 
 template <class F>
 void format_float(std::string& out, F x) {
+    // A NaN's sign bit is whatever the hardware produced (0.0/0.0 is negative on
+    // x86, positive on ARM), so the text never shows it: output stays identical
+    // on every platform (DESIGN.md 4.1).
+    if (x != x) {
+        out += "nan";
+        return;
+    }
     char buf[64];
     auto res = std::to_chars(buf, buf + sizeof(buf), x);
     std::string_view s(buf, static_cast<std::size_t>(res.ptr - buf));
@@ -155,15 +162,43 @@ using AK = tir::AwaitKind;
 
 } // namespace
 
+// A runaway recursion has thousands of identical frames, which would bury the
+// message. The text keeps the innermost and outermost frames and says how many
+// were left out; `trace` and `frames` keep every frame for tools.
+namespace {
+constexpr std::size_t trace_head = 16;
+constexpr std::size_t trace_tail = 8;
+
+// If frame `i` starts the elided stretch, appends the marker and returns the
+// index of its last frame; otherwise returns `i`.
+std::size_t elide_frames(std::string& out, std::size_t count, std::size_t i) {
+    if (count <= trace_head + trace_tail + 1 || i != trace_head) return i;
+    out += std::format("    ... {} more frames ...\n", count - trace_head - trace_tail);
+    return count - trace_tail - 1;
+}
+} // namespace
+
 std::string PanicInfo::render() const {
     std::string out = std::format("{}:{}:{}: panic: {}\n", file, line, column, message);
-    for (const std::string& t : trace) out += "    at " + t + "\n";
+    for (std::size_t i = 0; i < trace.size(); ++i) {
+        std::size_t skipped_to = elide_frames(out, trace.size(), i);
+        if (skipped_to != i) {
+            i = skipped_to;
+            continue;
+        }
+        out += "    at " + trace[i] + "\n";
+    }
     return out;
 }
 
 std::string PanicInfo::render_with_locals() const {
     std::string out = std::format("{}:{}:{}: panic: {}\n", file, line, column, message);
     for (std::size_t i = 0; i < trace.size(); ++i) {
+        std::size_t skipped_to = elide_frames(out, trace.size(), i);
+        if (skipped_to != i) {
+            i = skipped_to;
+            continue;
+        }
         out += "    at " + trace[i] + "\n";
         if (i >= frames.size()) continue;
         for (const PanicLocal& l : frames[i].locals) out += std::format("        {}: {} = {}\n", l.name, l.type, l.value);

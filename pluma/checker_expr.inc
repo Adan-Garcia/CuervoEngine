@@ -218,6 +218,10 @@
         } else if (n->suffix != NumSuffix::F32) {
             error(span, "a float literal cannot have an integer suffix");
         }
+        // A literal that rounds to infinity is a typo, not a way to write INF.
+        if (std::isinf(round_to(k, n->value))) {
+            error(span, std::format("float literal is out of range for '{}'", to_string(k)));
+        }
         return float_const(span, k, negate ? -n->value : n->value);
     }
 
@@ -358,8 +362,32 @@
         error(span, std::format("'{}' is private to '{}'", member, owner->name));
     }
 
+    // `_private` methods and statics are visible only in the declaring type,
+    // also when reached by an implicit name or `super` from a subclass
+    // (LANGUAGE.md 9.3).
+    void check_private_fn(const Function* f, Span span) {
+        if (f->decl == nullptr) return;
+        std::string_view name = f->decl->name.name;
+        if (name.empty() || name[0] != '_') return;
+        const RecordInfo* owner = f->owner_class() != nullptr ? static_cast<const RecordInfo*>(f->owner_class())
+                                                              : static_cast<const RecordInfo*>(f->owner_struct());
+        if (owner != nullptr) check_private(name, owner, span);
+    }
+
+    void check_private_static(const GlobalVar* g, std::string_view name, Span span) {
+        auto so = static_owner_.find(g);
+        if (so != static_owner_.end()) check_private(name, so->second, span);
+    }
+
     ir::Expr* global_ref(GlobalVar* g, Span span) {
         ensure_global(g);
+        // Top-level code and global initializers run in declaration order, so a
+        // global read before its declaration would see no value yet. Functions
+        // and lambdas run later and may refer to any global.
+        if (!g->is_const && cx_ != nullptr && cx_->fn == chunk_ && g->source == &src_ && g->span.begin > span.begin &&
+            static_owner_.count(g) == 0) {
+            error(span, std::format("'{}' is used before its declaration", g->name));
+        }
         if (g->is_const) {
             if (g->value.kind == ConstValue::Kind::None) return error_node(span);
             return const_node(span, g->type, g->value);
@@ -490,10 +518,15 @@
                 error(span, std::format("instance field '{}' cannot be used here (no 'self')", name));
                 return error_node(span);
             }
+            check_private(name, static_cast<RecordInfo*>(f->owner), span);
             return field_read(self_expr(span), f, span);
         }
-        if (GlobalVar* g = find_static(r, name)) return global_ref(g, span);
+        if (GlobalVar* g = find_static(r, name)) {
+            check_private_static(g, name, span);
+            return global_ref(g, span);
+        }
         if (Function* m = find_method(r, name)) {
+            check_private_fn(m, span);
             if (m->kind == FnKind::Static) return fn_ref(m, span);
             if (cx_->is_static) {
                 error(span, std::format("instance method '{}' cannot be used here (no 'self')", name));
@@ -677,17 +710,49 @@
             return error_node(span);
         };
         // Operator overloading through the built-in traits (LANGUAGE.md 2.8).
+        // `x == null` compares references, never calling a class's `eq`.
+        bool eq_op = op == BinaryOp::Eq || op == BinaryOp::Ne;
         if (RecordInfo* rec = record_of(lt); rec != nullptr && op_trait(op) != BuiltinTrait::None &&
+                                             !(eq_op && rt->tag == TypeTag::Null) &&
                                              satisfies(lt, P.builtin_trait(op_trait(op))) &&
                                              explicitly_implements(rec, op_trait(op))) {
             TraitInfo* tr = P.builtin_trait(op_trait(op));
             Function* f = find_method(rec, tr->op_method);
             if (f != nullptr) {
                 ensure_signature(f);
+                if (eq_op && !rec->is_class && rt->tag == TypeTag::Nullable && lt->tag != TypeTag::Nullable &&
+                    T.non_null(rt) == lt) {
+                    // `value == optional`: false when the optional is empty, as in
+                    // `optional == value`.
+                    ir::Expr* eq = safe_nav(r, span, [&](ir::Expr* tmp) { return method_call_args(l, f, {tmp}, span); });
+                    auto* result = mk<ir::Coalesce>(span, T.bool_());
+                    result->lhs = eq;
+                    result->rhs = bool_const(span, false);
+                    return op == BinaryOp::Ne ? not_expr(result, span) : static_cast<ir::Expr*>(result);
+                }
                 std::vector<ir::Expr*> args{coerce(r, f->params.empty() ? nullptr
                                                                          : substitute(T, f->params[0].type,
                                                                                       record_subst(lt, f->owner)),
                                                    span, "operand")};
+                if (eq_op && rec->is_class) {
+                    // Class references can be null: `eq` runs only when both are
+                    // non-null; otherwise the references are compared (null == null
+                    // is true). The right operand is evaluated once on either path.
+                    ir::Expr* rarg = args[0];
+                    ir::Expr* outer = safe_nav(l, span, [&](ir::Expr* self_tmp) {
+                        ir::Expr* inner = safe_nav(rarg, span, [&](ir::Expr* arg_tmp) {
+                            return method_call_args(self_tmp, f, {arg_tmp}, span);
+                        });
+                        auto* both = mk<ir::Coalesce>(span, T.bool_());
+                        both->lhs = inner;
+                        both->rhs = bool_const(span, false);
+                        return static_cast<ir::Expr*>(both);
+                    });
+                    auto* result = mk<ir::Coalesce>(span, T.bool_());
+                    result->lhs = outer;
+                    result->rhs = make_binary(BinaryOp::Eq, rarg, null_of(T.null(), span), rarg->type, T.bool_(), span);
+                    return op == BinaryOp::Ne ? not_expr(result, span) : static_cast<ir::Expr*>(result);
+                }
                 ir::Expr* call = method_call_args(l, f, args, span);
                 if (op == BinaryOp::Ne) return not_expr(call, span);
                 if (is_ordering(op)) {
@@ -1475,6 +1540,7 @@
             if (ir::Expr* v = lookup_var(cx_, name, id->span)) return closure_call(v, c);
             if (RecordInfo* r = cx_->record) {
                 if (Function* m = find_method(r, name)) {
+                    check_private_fn(m, id->span);
                     if (m->kind == FnKind::Static) return direct_call(m, c, id->type_args, expected);
                     if (cx_->is_static) {
                         error(id->span, std::format("instance method '{}' cannot be called here (no 'self')", name));
@@ -1711,6 +1777,7 @@
             check_args_loosely(c->args);
             return error_node(c->span);
         }
+        check_private_fn(f, m->member.span);
         ir::Expr* self = self_expr(m->object->span);
         // `self` viewed as the base type, for generic substitution.
         const Type* base_view = upcast(self->type, cls->base);

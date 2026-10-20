@@ -1,0 +1,35 @@
+// Range loops at the edges of every integer width (LANGUAGE.md 9.8).
+{
+    var m: i64 = 9223372036854775807
+    for i in m - 1..=m { print(i) }
+    var n: i64 = -9223372036854775807 - 1
+    for i in n + 1..=n step -1 { print(i) }
+    for i in n + 1..n - 0 step -1 { print(i) }
+    var u: u64 = 18446744073709551615
+    for i in u - 1..=u { print(i) }
+    for i in 1..=0 step -1 { print(i) }
+    var z: u8 = 0
+    for i in z..z { print(i) }
+    for i in 250u8..=255u8 step 3 { print(i) }
+    for i in -3..=-1 { print(i) }
+    for i in 10..=0 step -5 { print(i) }
+    for i in 0..=10 step 100 { print(i) }
+    for i in 5..=5 step -1 { print(i) }
+}
+{
+    var m: i64 = 9223372036854775807
+    for i in m - 10..m step 4 { print(i) }
+    for i in m - 10..=m step 4 { print(i) }
+}
+{
+    var n: i64 = -9223372036854775807 - 1
+    for i in n + 10..=n step -4 { print(i) }
+}
+{
+    var big: i32 = 2147483647
+    for i in big - 4..=big step 3 { print(i) }
+    var small: i32 = -2147483647 - 1
+    for i in small + 4..=small step -3 { print(i) }
+    for i in 0..big step big { print(i) }
+    
+}

@@ -1,0 +1,148 @@
+// Collections and List methods (LANGUAGE.md 9.16, 9.17).
+{
+    // map basics
+    var m = {"a": 1, "b": 2}
+    m["c"] = 3
+    m["a"] += 10
+    print(m)
+    print(m.len())
+    print(m.keys())
+    print(m.values())
+    print(m.remove("a"))
+    print(m.remove("zz"))
+    m["a"] = 5
+    print(m)
+    m["b"] = 20
+    print(m)
+    print(m.get("q"))
+    print(m.get_or("q", 9))
+    print(m.has("b"))
+    for k, v in m { print("{k}={v}") }
+    for k in m { print(k) }
+}
+{
+    // map set existing ok during iter
+    var m = {"a": 1, "b": 2}
+    for k in m { m[k] = 7 }
+    print(m)
+}
+{
+    // set
+    var s: Set<str> = ["a", "b", "a"]
+    print(s)
+    print(s.add("a"))
+    print(s.add("c"))
+    print(s.remove("a"))
+    print(s.add("a"))
+    print(s)
+    var t: Set<str> = ["c", "z"]
+    print(s.union(t))
+    print(s.intersection(t))
+    print(s.difference(t))
+    print(s.to_list())
+}
+{
+    // strbuilder
+    var sb = StrBuilder()
+    sb.append("a").append(1).append(2.5).append(true).append([1, 2])
+    print(sb.to_str())
+    print(sb.len())
+    print(sb)
+}
+{
+    // deque
+    var d = Deque<int>()
+    d.push_back(1)
+    d.push_back(2)
+    d.push_front(0)
+    print(d)
+    print(d.pop_front())
+    print(d.pop_back())
+    print(d.front())
+    print(d[0])
+    d[0] = 9
+    print(d)
+    d.pop_back()
+    print(d.is_empty())
+}
+{
+    // pq
+    var pq = PriorityQueue<int>()
+    pq.push(3)
+    pq.push(1)
+    pq.push(2)
+    print(pq.peek())
+    print(pq.to_list())
+    print(pq.len())
+    var q2 = PriorityQueue<str>((a, b) => a.len() < b.len())
+    q2.push("ccc")
+    q2.push("a")
+    q2.push("b")
+    q2.push("dd")
+    print(q2.pop())
+    print(q2.pop())
+    print(q2.pop())
+    print(q2.pop())
+}
+{
+    // list methods2
+    var xs = [5, 3, 8, 1, 9, 3]
+    xs.sort()
+    print(xs)
+    xs.reverse()
+    print(xs)
+    print(xs.index_of(3))
+    print(xs.index_of(77))
+    print(xs.slice(1, 3))
+    print(xs.slice(-2, 100))
+    print(xs.slice(4, 2))
+    print(xs.first())
+    print(xs.last())
+    var e: List<int> = []
+    print(e.first())
+    print(e.min())
+    print(e.sum())
+    print(xs.min())
+    print(xs.max())
+    print(xs.map(x => x * 2))
+    print(xs.filter(x => x > 4))
+    print(xs.reduce(0, (a, b) => a + b))
+    print(xs.any(x => x > 8))
+    print(xs.all(x => x > 8))
+    print(xs.count(x => x == 3))
+    print(xs.unique())
+    xs.extend([100, 200])
+    print(xs)
+    xs.swap(0, 7)
+    print(xs)
+    xs.fill(1)
+    print(xs)
+    print([1, 2, 3].zip([10, 20], (a, b) => a + b))
+    print(xs.contains(1))
+}
+{
+    // sort nan
+    var xs = [3.0, 0.0 / 0.0, 1.0, -0.0, 0.0, 2.0]
+    xs.sort()
+    print(xs)
+    print(xs.min())
+    print(xs.max())
+}
+{
+    // sort by
+    var xs = ["ccc", "a", "bb", "dd"]
+    xs.sort_by(s => s.len())
+    print(xs)
+    xs.sort((a, b) => a > b)
+    print(xs)
+}
+{
+    // list of lists identity
+    var a = [1, 2]
+    var b = [a, a]
+    b[0].push(3)
+    print(b)
+    var c = b
+    c.push([])
+    print(b.len())
+}

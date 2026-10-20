@@ -9,6 +9,7 @@
 #include "cuervo/jobs/job_system.hpp"
 #include "cuervo/platform/platform.hpp"
 #include "cuervo/render/font_import.hpp"
+#include "cuervo/render/text_layout.hpp"
 
 namespace cuervo::script {
 
@@ -174,14 +175,67 @@ void GameSession::set_presses(std::string_view presses) {
             LOG_WARN("--press: ignoring '{}' (expected tick:action with a project action)", item);
             continue;
         }
-        presses_.emplace_back(std::strtoull(item.c_str(), nullptr, 10), *action);
+        const std::uint64_t first = std::strtoull(item.c_str(), nullptr, 10);
+        std::uint64_t last = first;
+        if (const std::size_t dash = item.find('-'); dash != std::string::npos && dash < colon) {
+            last = std::strtoull(item.c_str() + dash + 1, nullptr, 10);
+        }
+        presses_.push_back({first, std::max(first, last), *action});
+    }
+}
+
+void GameSession::set_pointer_script(std::string_view script) {
+    pointer_script_.clear();
+    for (std::size_t pos = 0; pos < script.size();) {
+        std::size_t end = script.find(',', pos);
+        if (end == std::string_view::npos) end = script.size();
+        const std::string item(script.substr(pos, end - pos));
+        pos = end + 1;
+        const std::size_t c1 = item.find(':');
+        const std::size_t c2 = c1 == std::string::npos ? c1 : item.find(':', c1 + 1);
+        if (c2 == std::string::npos) {
+            LOG_WARN("--pointer: ignoring '{}' (expected tick:x:y)", item);
+            continue;
+        }
+        pointer_script_.push_back({std::strtoull(item.c_str(), nullptr, 10),
+                                   vec2{std::strtof(item.c_str() + c1 + 1, nullptr), std::strtof(item.c_str() + c2 + 1, nullptr)}});
+    }
+    std::stable_sort(pointer_script_.begin(), pointer_script_.end(),
+                     [](const PointerStep& a, const PointerStep& b) { return a.tick < b.tick; });
+}
+
+void GameSession::set_typed(std::string_view script) {
+    typed_.clear();
+    for (std::size_t pos = 0; pos < script.size();) {
+        std::size_t end = script.find(',', pos);
+        if (end == std::string_view::npos) end = script.size();
+        const std::string_view item = script.substr(pos, end - pos);
+        pos = end + 1;
+        const std::size_t colon = item.find(':');
+        if (colon == std::string_view::npos) {
+            LOG_WARN("--type: ignoring '{}' (expected tick:text)", item);
+            continue;
+        }
+        std::uint64_t tick = std::strtoull(std::string(item.substr(0, colon)).c_str(), nullptr, 10);
+        const std::string_view text = item.substr(colon + 1);
+        for (std::size_t i = 0; i < text.size();) {
+            std::uint32_t cp = render::decode_utf8(text, i);
+            typed_.emplace_back(tick++, cp);
+        }
     }
 }
 
 InputFrame GameSession::sample(DeviceState& devices, vec2 pointer) {
     InputFrame input = input_map_.sample(devices);
-    for (const auto& [tick, action] : presses_) {
-        if (tick == host_->tick_count() + 1) input.held |= std::uint64_t{1} << action;
+    const std::uint64_t tick = host_->tick_count() + 1;
+    for (const Press& p : presses_) {
+        if (tick >= p.first && tick <= p.last) input.held |= std::uint64_t{1} << p.action;
+    }
+    for (const PointerStep& s : pointer_script_) {
+        if (s.tick <= tick) pointer = s.at;
+    }
+    for (const auto& [t, cp] : typed_) {
+        if (t == tick) input.text = cp;
     }
     input.pointer = {static_cast<std::int16_t>(std::clamp(pointer.x(), -32768.0f, 32767.0f)),
                      static_cast<std::int16_t>(std::clamp(pointer.y(), -32768.0f, 32767.0f))};

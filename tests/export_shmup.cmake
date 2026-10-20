@@ -7,29 +7,36 @@
 #   3. run both exported launchers from an unrelated working directory, headless
 #      (GL, offscreen), with a private user directory: both must find game.pak
 #      next to themselves and reach the dev state hash at tick 240
-# Invoked by ctest with -DTOOLS=... -DPROJECT=... -DOUT=... -DEXPECT=<hash>
+# Invoked by ctest with -DTOOLS=... -DPROJECT=... -DOUT=... -DEXPECT=<hash> [-DNAME=<dir name>]
+# (export_tutorial reuses it for examples/tutorial, milestone 8.4)
 
+if(NOT DEFINED NAME)
+    set(NAME shmup) # the project directory's name
+endif()
+if(NOT DEFINED LAUNCHER)
+    set(LAUNCHER ${NAME}) # the exported launcher is named after the project (its name in project.toml, lowercase)
+endif()
 file(REMOVE_RECURSE "${OUT}")
 file(MAKE_DIRECTORY "${OUT}/src" "${OUT}/cwd" "${OUT}/user")
-file(COPY "${PROJECT}/" DESTINATION "${OUT}/src/shmup")
+file(COPY "${PROJECT}/" DESTINATION "${OUT}/src/${NAME}")
 
 if(CMAKE_HOST_WIN32)
     set(PLATFORM windows)
-    set(LAUNCHER_EXE "shmup.exe")
+    set(LAUNCHER_EXE "${LAUNCHER}.exe")
 else()
     set(PLATFORM linux)
-    set(LAUNCHER_EXE "shmup")
+    set(LAUNCHER_EXE "${LAUNCHER}")
 endif()
 
 foreach(n 1 2)
     execute_process(
-        COMMAND "${TOOLS}" export "${OUT}/src/shmup" --platform ${PLATFORM} --engine full --strip -o "${OUT}/dist${n}"
+        COMMAND "${TOOLS}" export "${OUT}/src/${NAME}" --platform ${PLATFORM} --engine full --strip -o "${OUT}/dist${n}"
         RESULT_VARIABLE code OUTPUT_VARIABLE out ERROR_VARIABLE err)
     if(NOT code EQUAL 0)
         message(FATAL_ERROR "cuervo-tools export failed (${code}):\n${out}\n${err}")
     endif()
     execute_process(
-        COMMAND "${TOOLS}" export "${OUT}/src/shmup" --platform ${PLATFORM} --engine full --aot --strip -o "${OUT}/dist_aot${n}"
+        COMMAND "${TOOLS}" export "${OUT}/src/${NAME}" --platform ${PLATFORM} --engine full --aot --strip -o "${OUT}/dist_aot${n}"
         RESULT_VARIABLE code_aot OUTPUT_VARIABLE out_aot ERROR_VARIABLE err_aot)
     if(NOT code_aot EQUAL 0)
         message(FATAL_ERROR "cuervo-tools export --aot failed (${code_aot}):\n${out_aot}\n${err_aot}")
@@ -87,4 +94,4 @@ foreach(variant shipped shipped_aot)
         message(FATAL_ERROR "errors (or project paths) while running the exported game (${variant}):\n${log}")
     endif()
 endforeach()
-message(STATUS "exported shmup (source + AOT native) ran: state hash ${EXPECT}")
+message(STATUS "exported ${NAME} (source + AOT native) ran: state hash ${EXPECT}")

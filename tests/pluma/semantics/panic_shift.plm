@@ -1,0 +1,5 @@
+var s = 31
+var a: i32 = 1
+print(a << s)
+s += 1
+print(a << s)
