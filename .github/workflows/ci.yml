@@ -18,7 +18,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build glslang-tools libvulkan-dev libasound2-dev \
-            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev \
+            libegl1-mesa-dev libgl1-mesa-dri libgl1-mesa-dev libgles2-mesa-dev mesa-vulkan-drivers xvfb
 
       - name: Configure CMake
         run: cmake --preset debug
@@ -29,4 +30,6 @@ jobs:
       - name: Run Test Suite (Headless)
         env:
           SDL_VIDEO_DRIVER: offscreen
-        run: ctest --preset debug --output-on-failure --timeout 180
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          GALLIUM_DRIVER: "llvmpipe"
+        run: xvfb-run -a ctest --preset debug --output-on-failure --timeout 180

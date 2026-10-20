@@ -1,3 +1,5 @@
+cmake_policy(SET CMP0007 NEW)
+
 # Milestone 9.3's "done when" (DESIGN.md 4.17, 6): the settings menu and
 # inventory of examples/ui_menus, built from the UI widgets, are driven by
 # keyboard, gamepad and pointer, and replay. End to end through the shipped
