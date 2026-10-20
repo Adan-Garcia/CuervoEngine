@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-linux:
+    name: Linux (GCC / Debug)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build glslang-tools libsdl3-dev libvulkan-dev
+
+      - name: Configure CMake
+        run: cmake --preset debug
+
+      - name: Build All Targets
+        run: cmake --build --preset debug
+
+      - name: Run Test Suite (Headless)
+        env:
+          SDL_VIDEO_DRIVER: offscreen
+        run: ctest --preset debug --output-on-failure --timeout 180

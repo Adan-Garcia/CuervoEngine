@@ -1,0 +1,26 @@
+name: Feature Request / Proposal
+description: Suggest an idea or architectural improvement for Cuervo Engine or Pluma
+title: "[Proposal]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea for a new node, UI widget, language feature, or optimization? Let's discuss it!
+  - type: textarea
+    id: problem
+    attributes:
+      label: Is your feature request related to a problem?
+      description: A clear description of what the limitation or pain point is.
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution / API Design
+      description: How should this work? If proposing a Pluma language or prelude feature, include example script syntax.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative designs or workarounds you've thought about.

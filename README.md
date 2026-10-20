@@ -7,6 +7,10 @@
 
 # Cuervo Engine
 
+[![CI](https://github.com/Adan-Garcia/CuervoEngine/actions/workflows/ci.yml/badge.svg)](https://github.com/Adan-Garcia/CuervoEngine/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Fair--Code-blue.svg)](LICENSE.md)
+[![Documentation](https://img.shields.io/badge/docs-website-orange.svg)](https://adan-garcia.github.io/CuervoEngine/)
+
 A 2D, vector-first, deterministic game engine in C++20 with its own statically typed
 scripting language, **Pluma** (`.plm` files). See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design.
 
@@ -61,6 +65,7 @@ API reference, search, light and dark): `cmake --build build/debug --target docs
 - [docs/WINDOWS.md](docs/WINDOWS.md): Windows status and remaining verification
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md): performance baselines, the capacity test and regression thresholds
 - [editor/README.md](editor/README.md): the editor
+- [CONTRIBUTING.md](CONTRIBUTING.md): building from source, testing, and contribution guide
 - [tools/vscode-pluma](tools/vscode-pluma/README.md): the VS Code extension (highlighting,
   language server, debugger)
 - [docs/DESIGN.md](docs/DESIGN.md): architecture, design decisions and the milestone list

@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build Release Packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build glslang-tools libsdl3-dev libvulkan-dev nodejs npm
+
+      - name: Configure CMake (Release)
+        run: cmake --preset release
+
+      - name: Build Release Binaries
+        run: cmake --build --preset release --target cuervo cuervo-editor cuervo_tools plm
+
+      - name: Package Linux Archive
+        run: |
+          mkdir -p package/bin package/licenses
+          cp build/release/runtime/cuervo package/bin/
+          cp build/release/editor/cuervo-editor package/bin/
+          cp build/release/tools/cuervo_tools/cuervo-tools package/bin/
+          cp build/release/pluma/plm package/bin/
+          cp -r third_party/licenses package/licenses/
+          cp LICENSE.md README.md THIRD_PARTY_NOTICES.md package/
+          tar -czvf cuervo-linux-x86_64.tar.gz -C package .
+
+      - name: Package VS Code Extension (.vsix)
+        run: |
+          cd tools/vscode-pluma
+          npm install
+          npm run package
+          mv pluma-*.vsix ../../cuervo-vscode-pluma.vsix
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            cuervo-linux-x86_64.tar.gz
+            cuervo-vscode-pluma.vsix
+          draft: false
+          prerelease: true
+          generate_release_notes: true

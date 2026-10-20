@@ -7,3 +7,5 @@ CMakeUserPresets.json
 *.swp
 .vscode/
 .idea/
+__pycache__/
+*.pyc
