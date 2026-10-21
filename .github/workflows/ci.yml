@@ -33,3 +33,30 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: "1"
           GALLIUM_DRIVER: "llvmpipe"
         run: xvfb-run -a ctest --preset debug --output-on-failure --timeout 180
+
+  test-windows:
+    name: Windows (MSVC / Debug)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up MSVC Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install glslangValidator
+        shell: pwsh
+        run: |
+          $url = "https://github.com/KhronosGroup/glslang/releases/download/16.6.0/glslang-16.6.0-windows-x86_64-release.zip"
+          Invoke-WebRequest -Uri $url -OutFile "glslang.zip"
+          Expand-Archive -Path "glslang.zip" -DestinationPath "C:\tools\glslang"
+          echo "C:\tools\glslang\bin" >> $env:GITHUB_PATH
+
+      - name: Configure CMake
+        run: cmake --preset debug
+
+      - name: Build All Targets
+        run: cmake --build --preset debug
+
+      - name: Run Test Suite
+        run: ctest --preset debug --output-on-failure --timeout 180

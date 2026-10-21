@@ -10,8 +10,8 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    name: Build Release Packages
+  build-linux:
+    name: Build Linux Packages
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -48,19 +48,82 @@ jobs:
           npm run package
           mv pluma-*.vsix ../../cuervo-vscode-pluma.vsix
 
-      - name: Create GitHub Release
-        if: ${{ !env.ACT }}
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            cuervo-linux-x86_64.tar.gz
-            cuervo-vscode-pluma.vsix
-          draft: false
-          prerelease: true
-          generate_release_notes: true
-
       - name: Verify Release Artifacts (act test)
         if: ${{ env.ACT }}
         run: |
           echo "Running inside act: release package and vsix verified successfully!"
           ls -lh cuervo-linux-x86_64.tar.gz cuervo-vscode-pluma.vsix
+
+      - name: Upload Linux Artifacts
+        if: ${{ !env.ACT }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: |
+            cuervo-linux-x86_64.tar.gz
+            cuervo-vscode-pluma.vsix
+
+  build-windows:
+    name: Build Windows Packages
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up MSVC Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install glslangValidator
+        shell: pwsh
+        run: |
+          $url = "https://github.com/KhronosGroup/glslang/releases/download/16.6.0/glslang-16.6.0-windows-x86_64-release.zip"
+          Invoke-WebRequest -Uri $url -OutFile "glslang.zip"
+          Expand-Archive -Path "glslang.zip" -DestinationPath "C:\tools\glslang"
+          echo "C:\tools\glslang\bin" >> $env:GITHUB_PATH
+
+      - name: Configure CMake (Release)
+        run: cmake --preset release
+
+      - name: Build Release Binaries
+        run: cmake --build --preset release --target runtime editor cuervo_tools plm
+
+      - name: Package Windows Archive
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package\bin
+          Copy-Item build\release\runtime\cuervo.exe package\bin\
+          Copy-Item build\release\editor\cuervo-editor.exe package\bin\
+          Copy-Item build\release\tools\cuervo_tools\cuervo-tools.exe package\bin\
+          Copy-Item build\release\pluma\plm.exe package\bin\
+          Copy-Item -Recurse third_party\licenses package\
+          Copy-Item LICENSE.md, README.md, THIRD_PARTY_NOTICES.md package\
+          Compress-Archive -Path package\* -DestinationPath cuervo-windows-x86_64.zip
+
+      - name: Upload Windows Artifact
+        if: ${{ !env.ACT }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: cuervo-windows-x86_64.zip
+
+  publish-release:
+    name: Publish GitHub Release
+    if: ${{ github.actor != 'nektos/act' }}
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            cuervo-linux-x86_64.tar.gz
+            cuervo-windows-x86_64.zip
+            cuervo-vscode-pluma.vsix
+          draft: false
+          prerelease: true
+          generate_release_notes: true
