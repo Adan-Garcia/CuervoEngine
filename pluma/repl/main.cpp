@@ -27,7 +27,6 @@
 #include <string_view>
 #include <vector>
 
-#include "eula_gate.hpp"
 #include "pluma/arena.hpp"
 #include "pluma/ast_dump.hpp"
 #include "pluma/bindings.hpp"
@@ -178,7 +177,6 @@ int run_file(int argc, char** argv) {
         else if (arg == "--tokens") mode = Mode::Tokens;
         else if (arg == "--script") script = true;
         else if (arg == "--lsp" || (i == 1 && arg == "lsp")) lsp_mode = true;
-        else if (arg == "--accept-eula") continue;
         else if (arg == "--check-style" || arg == "--lint") check_style = true;
         else paths.emplace_back(arg);
     }
@@ -247,8 +245,6 @@ int run_file(int argc, char** argv) {
 } // namespace
 
 int main(int argc, char** argv) {
-    // Using the compiler needs the EULA accepted once per user (DESIGN.md 4.16); plm's own copy of the gate.
-    if (!plm_eula::require_acceptance(argc, argv)) return 1;
     if (argc > 1) {
         return run_file(argc, argv);
     }

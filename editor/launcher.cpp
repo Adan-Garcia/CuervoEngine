@@ -14,11 +14,9 @@
 #include <mutex>
 
 #include "cuervo/core/log.hpp"
-#include "cuervo/platform/eula.hpp"
 #include "cuervo/platform/platform.hpp"
 #include "cuervo/platform/window.hpp"
 #include "cuervo/render/text_renderer.hpp"
-#include "editor/eula_view.hpp"
 #include "editor/imgui_rhi.hpp"
 #include "editor/messages.hpp"
 #include "editor/projects.hpp"
@@ -31,8 +29,6 @@ namespace cuervo::editor {
 namespace fs = std::filesystem;
 
 namespace {
-
-enum class Screen { Eula, Welcome };
 
 // SDL_ShowOpenFolderDialog answers from another thread (or later in the event loop).
 struct FolderPick {
@@ -64,7 +60,6 @@ private:
     bool open(std::string& error);
     void close();
     void frame(double now);
-    void draw_eula_screen();
     void draw_welcome_screen();
     void begin_page(float max_width);
     void end_page();
@@ -78,7 +73,6 @@ private:
     ImGuiRenderer renderer_;
     bool imgui_ready_ = false;
 
-    Screen screen_ = Screen::Welcome;
     LauncherResult result_;
     bool running_ = true;
     std::uint64_t frames_ = 0;
@@ -87,7 +81,6 @@ private:
     float lockup_center_x_ = 0.0f;
     float lockup_width_ = 220.0f;
 
-    EulaView eula_view_;
     MessageCenter messages_;
     double clock_ = 0.0;
     RecentProjects recents_;
@@ -169,7 +162,6 @@ LauncherResult Launcher::run() {
         result_.outcome = LauncherOutcome::Failed;
         return result_;
     }
-    screen_ = options_.show_eula ? Screen::Eula : Screen::Welcome;
     recents_.load(RecentProjects::user_file());
     new_parent_ = platform::utf8(default_projects_dir());
     while (running_) {
@@ -202,35 +194,6 @@ void Launcher::end_page() {
     ImGui::EndChild();
     ImGui::End();
     ImGui::PopStyleColor();
-}
-
-void Launcher::draw_eula_screen() {
-    begin_page(920.0f);
-    const EulaChoice choice = draw_eula(eula_view_, true);
-    end_page();
-    if (choice == EulaChoice::Accepted) {
-        if (options_.store_acceptance) {
-            std::string error;
-            if (!eula::record_acceptance(error)) {
-                UserMessage m;
-                m.severity = Severity::Warning;
-                m.what = "Your acceptance could not be saved, so the agreement will be asked again next time.";
-                m.safety = "You can continue for now.";
-                m.action = "Check that your user data folder is writable.";
-                m.details = error;
-                messages_.push(std::move(m), clock_);
-            }
-        }
-        if (options_.show_welcome) {
-            screen_ = Screen::Welcome;
-        } else {
-            result_.outcome = LauncherOutcome::Continue;
-            running_ = false;
-        }
-    } else if (choice == EulaChoice::Declined) {
-        result_.outcome = LauncherOutcome::Declined;
-        running_ = false;
-    }
 }
 
 void Launcher::open_project(const std::string& path) {
@@ -374,8 +337,7 @@ void Launcher::draw_welcome_screen() {
     ImGui::PopStyleVar();
     ImGui::PopStyleColor();
 
-    ImGui::TextColored(im(t.text_muted), "Cuervo Engine  ·  License Agreement version %s",
-                       std::string(eula::version()).c_str());
+    ImGui::TextColored(im(t.text_muted), "Cuervo Engine  ·  MIT License");
     end_page();
 
     std::lock_guard lock(pick_.mutex);
@@ -401,8 +363,7 @@ void Launcher::frame(double now) {
     }
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
-    if (screen_ == Screen::Eula) draw_eula_screen();
-    else draw_welcome_screen();
+    draw_welcome_screen();
     ImGui::Render();
 
     int w = 0;

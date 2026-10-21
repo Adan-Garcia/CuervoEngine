@@ -1,17 +1,15 @@
+#include "cuervo/platform/license.hpp"
+
 #include <cstddef>
 
-#include "cuervo/platform/eula.hpp"
-
-// Kept apart from eula.cpp so programs that never show the agreement (the web
-// player, exported games) don't link ~45 KB of text.
-namespace cuervo::eula {
+namespace cuervo::license {
 
 namespace {
 constexpr unsigned char license_bytes[] = {
-#include "cuervo/platform/eula_license.inc"
+#include "cuervo/platform/license_text.inc"
 };
 constexpr unsigned char notices_bytes[] = {
-#include "cuervo/platform/eula_notices.inc"
+#include "cuervo/platform/notices_text.inc"
 };
 } // namespace
 
@@ -23,4 +21,4 @@ std::string_view notices_text() {
     return {reinterpret_cast<const char*>(notices_bytes), sizeof(notices_bytes) - 1};
 }
 
-} // namespace cuervo::eula
+} // namespace cuervo::license

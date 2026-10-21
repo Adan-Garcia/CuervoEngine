@@ -35,8 +35,5 @@ target_include_directories(pluma PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated"
 target_link_libraries(pluma PUBLIC project::flags ${CMAKE_DL_LIBS})
 target_compile_definitions(pluma PRIVATE PLUMA_DEFAULT_CC="${CMAKE_C_COMPILER}")
 
-# plm asks for the EULA's acceptance with its own copy of the gate (repl/eula_gate.*):
-# pluma/ never depends on cuervo/ (DESIGN.md 4.16 "EULA agreement").
-add_executable(plm repl/main.cpp repl/eula_gate.cpp)
+add_executable(plm repl/main.cpp)
 target_link_libraries(plm PRIVATE pluma)
-target_compile_definitions(plm PRIVATE CUERVO_EULA_VERSION="${CUERVO_EULA_VERSION}")

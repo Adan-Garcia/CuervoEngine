@@ -70,7 +70,7 @@ for users.
 | Modules | Global class names (no imports) |
 | Hot reload | Keep object state, migrate fields by name |
 | Colors | `Color.hex("ff4060")` |
-| License | Source-available Fair-Code EULA ([LICENSE.md](../LICENSE.md)): free during Beta, commercial terms introduced at Version 1.0 with grandfathering for Beta products (4.18) |
+| License | MIT License ([LICENSE.md](../LICENSE.md)) |
 | Names | Cuervo Engine, Pluma language, `.plm` files (7.1) |
 
 ## 3. Architecture
@@ -79,7 +79,7 @@ for users.
 cuervo/
   core/       fixed-timestep loop, logging, allocators, file system, events, RNG
   math/       Vec<T,N>, Mat, transforms, deterministic trig
-  platform/   SDL3 window + input devices, timing, file watching, EULA gate
+  platform/   SDL3 window + input devices, timing, file watching
   rhi/        render hardware interface
     vulkan/   desktop backend
     gl/       OpenGL 3.3 / GLES 3.0 / WebGL2 backend
@@ -564,7 +564,7 @@ themes. Rendered with SDF primitives and MSDF text.
   **Clarified (Milestone 8.9, `tests/workflow_smoke.cmake`):** the exporter's naming and
   launch contract is covered end to end by the workflow test: a project named `Workflow
   Game` ships as `workflow-game` (lowercased, spaces as `-`), the shipped directory alone
-  runs from any working directory with a private user directory and no EULA acceptance, exits
+  runs from any working directory with a private user directory, exits
   0 after `--quit-after` or at the screenshot tick, and reaches the editor-play state hash.
   The state hash covers the tick, particles and numeric script globals, not node fields, so
   a workflow check that must notice a scene or script change needs a script global that
@@ -725,8 +725,8 @@ reload, the replay viewer/debugger and the tier report as panels in the same reg
   **Clarified (Milestone 8.9, `editor/main.cpp`, `editor/command_script.cpp`):**
   - *Project creation without a window.* `cuervo-editor --new-project <dir> [--template
     empty|walker] [--name <name>]` runs `create_project()`, the code behind the welcome
-    screen's New project, then exits. It is headless, so it follows the command-line EULA
-    rules, and it refuses a folder that already has files.
+    screen's New project, then exits. It is headless,
+    and it refuses a folder that already has files.
   - *Hash from a script.* `print-hash` logs `at tick N (state hash H)`, the runtime's wording,
     so a test hands the editor-play hash to the exported game's run.
   - The fresh-checkout path (new project, edit and save a scene, play, add a script, hot
@@ -1022,20 +1022,12 @@ real documentation, as four milestones in that order (each later one uses the ea
   panels float, undock and redock inside the main window, the default layout is built
   with the DockBuilder API, and saved layouts keep ImGui's dock text. Multi-viewport (OS
   windows) is not needed.
-  - **EULA agreement.** Using the compiled engine requires accepting
-    the [EULA](../LICENSE.md) with an explicit check box. On first launch the editor's
-    welcome screen shows the agreement (scrollable, with the plain-English summary on top
-    and a link to THIRD_PARTY_NOTICES.md) and an unchecked "I have read and agree to the
-    Cuervo Engine License Agreement" box; nothing else opens until it is checked and
-    confirmed. The command-line programs (`cuervo`, `cuervo-tools`, `plm`) ask once on an
-    interactive terminal, and accept `--accept-eula` (or `CUERVO_ACCEPT_EULA=<version>`)
-    for scripts and CI. Acceptance is stored per user (under `SDL_GetPrefPath`, §7.2
-    "Save data") with the EULA version and date; a new EULA version asks again (EULA
-    §19.2). Exported games never ask: their players are run by the game's customers, who
-    aren't Engine licensees, so the gate is skipped when running a pack. Declining exits
-    without using the Engine. Tests and CI pass `CUERVO_ACCEPT_EULA=<version>` (or `--accept-eula`).
+  - **Welcome screen.** On first launch when no `--project` is given, the editor opens a
+    welcome screen (`editor/launcher.*`): recent projects, opening a folder, and new
+    project from templates. The license and third-party notices are viewable via *Help > License*
+    (`editor/license_view.*`).
 
-  **Clarified (Milestone 8.3, `editor/`, `cuervo/platform/eula.*`, `cmake/Eula.cmake`):**
+  **Clarified (Milestone 8.3, `editor/`):**
   - *Docking.* `cmake/Dependencies.cmake` pins
     `v1.92.9b-docking` with its SHA-256; `ImGuiConfigFlags_DockingEnable` is on and
     multi-viewport is off. Every panel is a window docked into one dock space under the
@@ -1061,22 +1053,6 @@ real documentation, as four milestones in that order (each later one uses the ea
     The command script has verbs for all of it, and `examples/editor_level/level.cmds` was
     redone with the palette and gizmo verbs; its scene is byte-identical to before, so the
     `editor_level` test's checked-in scene and state hash are unchanged.
-  - *EULA gate.* `cuervo/platform/eula.*` holds the version and text (generated from
-    LICENSE.md by `cmake/Eula.cmake`) and the decision logic (`run_gate`): stored
-    acceptance of this version, `--accept-eula` (stores it), `CUERVO_ACCEPT_EULA=<version>`
-    (accepts that one run without storing; a wrong value is refused with a message), a
-    prompt only when stdin and stderr are terminals (LSP and DAP are never interactive),
-    else refused. The file is `eula-accepted.txt` in `platform::user_data_dir("Cuervo
-    Engine")` (`CUERVO_USER_DIR` overrides), holding the version and date. `cuervo` and
-    `cuervo-tools` call it at start (`cuervo --pack` / a `game.pak` never does, so exported
-    games never ask); `plm` has its own copy in `pluma/repl/eula_gate.*` because `pluma/`
-    never depends on `cuervo/`, with a test that keeps the two in agreement. The editor
-    shows the agreement in its first-launch window (`editor/launcher.*`, `eula_view.*`):
-    the summary, the scrollable text, a tab for THIRD_PARTY_NOTICES.md, an unchecked box,
-    and Accept/Decline of equal weight; declining exits 1, and screenshots never store
-    acceptance. The welcome screen follows when no `--project` was given. Every test that
-    runs a program passes `CUERVO_ACCEPT_EULA=<version>` except `eula_gate`, which tests the
-    gate itself; the export test strips it for the shipped launchers.
 - **8.4 Documentation.** This makes Phase 8's "docs" concrete: a user manual (editor,
   projects, export), a Pluma guide and tutorial built from `docs/LANGUAGE.md`, a node and
   engine API reference generated from the prelude's doc comments (`cuervo-tools docs`,
@@ -1418,22 +1394,10 @@ it. Each piece keeps replay hashes identical.
     install|publish|verify` use. Verification checks the ABI version, the license
     declaration and, for sim-safe plugins, the replay hash on a conformance project.
     Plugins are built from source or shipped as per-platform binaries, with checksums.
-  - *Licenses:* **Decision:** the engine is source-available under the Fair-Code EULA in
-    [`LICENSE.md`](../LICENSE.md), not an OSI license. Everything below is what that file says.
-    During Beta (before Version 1.0) the engine is free for everyone, commercial games
-    included: no royalties, Seat Fees or financial reports (EULA 2.2, 3.1, 4.2, 5.1). Commercial
-    licensing terms will be published with or before Version 1.0 (3.2); a Product developed or
-    released with a Beta Version is grandfathered at $0 and never owes retroactive fees (3.3),
-    and the new terms apply only to a Product upgraded to, or started on, Version 1.0 or later.
-    Modifications and forks stay under the license (7); Product Code stays the developer's (8);
-    contributions come with a built-in contributor license (10); Non-Commercial Forks are free
-    (9). The export must not force the game's code under it. What exists: the first-launch
-    agreement gate (8.3), generated third-party notices bundled into every export
-    (`THIRD_PARTY_NOTICES.md`, `third_party/licenses/`, checked by the `third_party_notices`
-    ctest). Planned: a `cuervo-tools license report` for the reporting that Version 1.0
-    terms will define, a license check in CI that fails on a dependency without a
-    compatible license, and plugin/package license declarations in their manifest, which the
-    tier check (§4.4) would report when incompatible.
+  - *Licenses:* **Decision:** the engine is licensed under the permissive MIT License in
+    [`LICENSE.md`](../LICENSE.md). Third-party components keep their own licenses,
+    with full texts in `third_party/licenses/` and summarized in `THIRD_PARTY_NOTICES.md`
+    (checked by the `third_party_notices` ctest and bundled into every export).
   - *Contribution:* `CONTRIBUTING.md` (build, test, the zero-warning and determinism
     rules, code style, how to add a prelude node or native), a code of conduct, a
     security policy for reports, issue and pull request templates, a contributor license
@@ -1850,13 +1814,13 @@ support status of what exists is in [STATUS.md](STATUS.md).
 | 8 | **Tooling:** formatter, LSP, debugger, animation (cutout, skeletal, morph), docs (expanded as 8.4) | Someone else makes a game with it (tooling done, animation deferred to 9.4: formatter and LSP, debugger over DAP, and profiler, §5.14 "Clarified (Phase 8 — ...)"; the VS Code extension `tools/vscode-pluma`; docs/GUIDE.md with the `examples/tutorial` game and the generated docs/API.md, expanded further by 8.4. All of 8.1-8.9 are done; the done-when needs an outside user to confirm) |
 | 8.1 | **Brand integration** (§4.16): Cuervo Mark, wordmark, palette and type from the design kit, synced into `assets/brand/`, plus generated color tokens | The editor and runtime show the mark as window icon and splash in light and dark themes, and a sync script regenerates the brand assets from the kit (done: §4.16 "Clarified (Milestone 8.1)". `tools/sync_brand.py` syncs `assets/brand/` and records the kit commit; `cuervo` and `cuervo-editor` set the embedded app icon as their window icon; the editor's splash draws the imported mark and wordmark in the Bone and Raven themes on Vulkan and GL, and its UI switches between the two token-generated themes) |
 | 8.2 | **Node library** (§4.16): Shape, Path, Sprite, Text, Camera2D, Timer, Area, Emitter2D, AudioPlayer as prelude nodes | A level using every new node is built in the editor without code and round-trips through scene files with the same state hash (done: §4.16 "Clarified (Milestone 8.2)"; `examples/node_level` from `level.cmds`, the `node_level` test: editor-built, dump/build round trip and editor-played runs all reach `115a6d76bb125635` at tick 240) |
-| 8.3 | **Editor UI overhaul** (§4.16): themed with the brand tokens, gizmos, toolbar, command palette, multi-select, undo history, welcome screen, EULA agreement check box | The `examples/editor_level` workflow is redone with gizmos and the palette, with no raw ImGui-default styling left, and a fresh user account must check the EULA box before the editor or tools run (exported games never ask) (done: §4.16 "Clarified (Milestone 8.3)". The editor moved to ImGui's docking branch with a DockBuilder default layout and saved dock layouts; `editor_ui_tests` fails on any ImGui-default color; `examples/editor_level/level.cmds` uses the palette and gizmo verbs and still produces the same scene; the editor, `cuervo`, `cuervo-tools` and `plm` refuse to start until the EULA is accepted, and packs never ask) |
+| 8.3 | **Editor UI overhaul** (§4.16): themed with the brand tokens, gizmos, toolbar, command palette, multi-select, undo history, welcome screen | The `examples/editor_level` workflow is redone with gizmos and the palette, with no raw ImGui-default styling left (done: §4.16 "Clarified (Milestone 8.3)". The editor moved to ImGui's docking branch with a DockBuilder default layout and saved dock layouts; `editor_ui_tests` fails on any ImGui-default color; `examples/editor_level/level.cmds` uses the palette and gizmo verbs and still produces the same scene) |
 | 8.4 | **Documentation** (§4.16): manual, Pluma guide, generated API/node reference, first-game tutorial, branded static site | Every public prelude symbol is documented (enforced by a test) and the tutorial game builds in CI (done: §4.16 "Clarified (Milestone 8.4)". `tools/build_site.py` builds the branded static site and `docs_site` checks its links; `cuervo-tools docs --check-coverage` (`api_docs_coverage`) enforces a doc comment on every public prelude symbol; the tutorial runs, exports and matches GUIDE.md in CI) |
-| 8.5 | **Documentation reconciliation** (§4.16): align design, user and API documentation with the actual EULA, current milestone state, implemented systems, and support status; separate shipped, experimental, planned and unsupported behavior | A fresh reader can determine what is implemented and supported without relying on historical milestone notes; no active document claims that the license is undecided or that completed systems are still only planned(done: §4.16 "Clarified (Milestone 8.5)". [STATUS.md](STATUS.md) is the support matrix (shipped, experimental, planned, unsupported; desktop and web; Vulkan and GL), linked from the README, the guide and the docs site; the license summaries in the README, the guide, §2 and §4.18 match `LICENSE.md` (free during Beta, commercial terms at Version 1.0, grandfathering); stale "planned"/"later"/"not yet" notes for finished systems, wrong commands and counts, phase labels in user-facing pages and dates in status lines were fixed) |
+| 8.5 | **Documentation reconciliation** (§4.16): align design, user and API documentation with the actual MIT license, current milestone state, implemented systems, and support status; separate shipped, experimental, planned and unsupported behavior | A fresh reader can determine what is implemented and supported without relying on historical milestone notes; no active document claims that the license is undecided or that completed systems are still only planned(done: §4.16 "Clarified (Milestone 8.5)". [STATUS.md](STATUS.md) is the support matrix (shipped, experimental, planned, unsupported; desktop and web; Vulkan and GL), linked from the README, the guide and the docs site; the license summaries in the README, the guide, §2 and §4.18 match `LICENSE.md` (MIT License); stale "planned"/"later"/"not yet" notes for finished systems, wrong commands and counts, phase labels in user-facing pages and dates in status lines were fixed) |
 | 8.6 | **Performance baselines** (§4.15): publish repeatable simulation, render, memory and export-size measurements for representative particle/shape loads, native backends, WebGL2, debug and release builds | Benchmark commands record versioned baselines and flag regressions when agreed thresholds are exceeded; the 1k/10k/50k/100k workload results are reproducible on the reference machine (done: §4.15 "Clarified (Milestone 8.6)". `tools/bench.py record|capacity|compare` and `docs/perf/baseline-5800x3d-rtx3060ti-linux.json`; three runs agree within a few percent on the reference machine and every workload reaches one state hash on both backends, both builds and 1 or 8 jobs; `docs/PERFORMANCE.md` has the thresholds, the capacity table and what was measured. Known limit: the web baseline is recorded by hand) |
 | 8.7 | **Stabilization pass** (§4.12, §4.13, §5): prioritize Pluma semantics, scene serialization and migrations, editor workflows, replay behavior and export reliability before another major subsystem | A clean checkout can build the reference examples, round-trip scenes, hot-reload scripts, verify replays and launch source, AOT and stripped exports without known correctness regressions (done: §4.12 and §4.13 "Clarified (Milestone 8.7)", LANGUAGE.md 9.25. `examples_sweep_<name>` takes every example through runs, scene round-trips, replays, hot reload and exports; Pluma has a VM/AOT differential corpus and an integer reference model. Known limit: hot reload is not bit-exact for projects holding emitters or coroutines) |
 | 8.8 | **Supported-features contract** (§4.4, §4.16): classify features as stable, experimental, desktop-only, Web-compatible or unsupported; document the guarantees and limits of `compatible` and `full` render tiers | The README and generated/user documentation expose the same support matrix, and tier checks reject configurations that claim support the selected target does not provide(done: §4.4 "Clarified (Milestone 8.8)". [STATUS.md](STATUS.md) and the README summary are generated from `docs/support.json`, which the tier check and the exporter also read; `tier check --platform` and `export` refuse a Full project for the web and AOT when the export host is not the target) |
-| 8.9 | **End-to-end user workflow** (§4.11, §4.13): automate the fresh-checkout path from project creation through scene editing, running, exporting and launching the exported game | A workflow smoke test creates or opens a project, edits and saves a scene, runs it, exports it, launches the shipped artifact outside the project directory and verifies its exit status and deterministic state hash(done: §4.11 and §4.13 "Clarified (Milestone 8.9)". `workflow_smoke` starts from an empty directory with the shipped binaries: `cuervo-editor --new-project`, an editor command script that edits, saves and plays a scene, a hand-added script with a hot reload, bytecode and AOT (and stripped with `CUERVO_SLOW_TESTS`) exports launched from another directory with no EULA acceptance, and the same state hash in the editor, `cuervo --game` and the shipped game; the EULA refusal and the one-run `CUERVO_ACCEPT_EULA` acceptance are checked in the same test) |
+| 8.9 | **End-to-end user workflow** (§4.11, §4.13): automate the fresh-checkout path from project creation through scene editing, running, exporting and launching the exported game | A workflow smoke test creates or opens a project, edits and saves a scene, runs it, exports it, launches the shipped artifact outside the project directory and verifies its exit status and deterministic state hash(done: §4.11 and §4.13 "Clarified (Milestone 8.9)". `workflow_smoke` starts from an empty directory with the shipped binaries: `cuervo-editor --new-project`, an editor command script that edits, saves and plays a scene, a hand-added script with a hot reload, bytecode and AOT (and stripped with `CUERVO_SLOW_TESTS`) exports launched from another directory, and the same state hash in the editor, `cuervo --game` and the shipped game) |
 | 9 | **Advanced Local Systems** (§4.17): transform hierarchy and more nodes, Pluma library, UI widgets, animation, tilemaps and navigation, Box2D v3 physics, 2D SDF lighting/raymarching | A physics-based platformer with 2D lighting is playable |
 | 9.1 | **Transform hierarchy and node gaps** (§4.17): parent-relative transforms (toggleable), `Line2D`, `Polygon2D`, `Marker2D`, `VisibleOnScreenNotifier2D` | Moving a parent moves its children when the hierarchy is on, and world-space scenes behave exactly as before with it off (done: §4.17 "Clarified (Milestone 9.1)"; `hierarchy_tests` move a parent and check the child with the hierarchy on and off, and the shmup, tictak and editor_level hashes are unchanged with it off) |
 | 9.2a | **Pluma collections, strings and language** (§4.17): `Map`/`Set`/fixed arrays/`StrBuilder`, `List` and `str` methods, conversions, property accessors, `Result` and `?`, method values | A script uses each feature and the language test suite passes under the VM and AOT (done: §4.17 "Clarified (Milestone 9.2a)"; `tests/pluma/library_tests.cpp` runs the same program in the VM and AOT) |
@@ -1927,7 +1891,6 @@ interface can't drift toward either API.
 
 ### 7.3 Open decisions (not blocking)
 - Whether the ECS is exposed to scripts (milestone 12.4).
-- Version 1.0 commercial terms (EULA 3.2); until they are published, the Beta terms apply.
 
 ### 7.4 Validation environments
 - **Primary Arch development machine:** AMD Ryzen 7 5800X3D with an NVIDIA RTX 3060 Ti.

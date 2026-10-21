@@ -53,11 +53,8 @@ endif()
 include(CompilerFlags)
 include(Dependencies)
 include(Shaders)
-include(Eula)
+include(License)
 include(SupportData)
-# The EULA version (LICENSE.md) the programs ask users to accept: cuervo/platform/eula.hpp,
-# and pluma/repl's own copy of the gate (pluma never depends on cuervo/).
-cuervo_eula_version()
 
 add_subdirectory(pluma)
 add_subdirectory(cuervo)

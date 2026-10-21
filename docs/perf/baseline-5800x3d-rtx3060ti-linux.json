@@ -1,0 +1,3059 @@
+{
+  "builds": {
+    "debug": {
+      "backends": {
+        "gl": {
+          "bench": {
+            "duration_s": 6.0,
+            "runs": 3,
+            "warmup_s": 4.0
+          },
+          "capacity_60fps": {
+            "dense": {
+              "at_least": false,
+              "binding_limit": "frame",
+              "budget_ms": 16.667,
+              "context": {
+                "backend": "gl",
+                "build_type": "Debug",
+                "cpu": "AMD Ryzen 7 5800X3D 8-Core Processor",
+                "gpu": "3.3.0 NVIDIA 615.78.08 (NVIDIA GeForce RTX 3060 Ti/PCIe/SSE2), 4x MSAA, compatible tier",
+                "msaa": 4,
+                "resolution": "1280x720",
+                "threads": 8,
+                "video_driver": "offscreen"
+              },
+              "cpu_limit": {
+                "at_least": false,
+                "particles": 1160000,
+                "range": [
+                  1160000,
+                  1200000
+                ]
+              },
+              "frame_limit": {
+                "at_least": false,
+                "particles": 270000,
+                "range": [
+                  270000,
+                  320000
+                ]
+              },
+              "method": {
+                "duration_s": 4.0,
+                "max": 2000000,
+                "min": 10000,
+                "resolution": 0.05,
+                "runs_per_probe": 3,
+                "statistic": "p95 over the steady-state window, median of the runs",
+                "warmup_s": 4.0
+              },
+              "particles": 270000,
+              "probes": [
+                {
+                  "fps": 1709.8,
+                  "frame_p95_ms": 0.592,
+                  "frame_p95_runs": [
+                    0.605,
+                    0.592,
+                    0.587
+                  ],
+                  "live_particles": 9961,
+                  "particles": 10000,
+                  "sim_tick_p95_ms": 0.394,
+                  "sim_tick_p95_runs": [
+                    0.394,
+                    0.411,
+                    0.378
+                  ]
+                },
+                {
+                  "fps": 993.9,
+                  "frame_p95_ms": 1.5,
+                  "frame_p95_runs": [
+                    1.456,
+                    1.51,
+                    1.5
+                  ],
+                  "live_particles": 19906,
+                  "particles": 20000,
+                  "sim_tick_p95_ms": 0.648,
+                  "sim_tick_p95_runs": [
+                    0.62,
+                    0.668,
+                    0.648
+                  ]
+                },
+                {
+                  "fps": 537.9,
+                  "frame_p95_ms": 2.646,
+                  "frame_p95_runs": [
+                    2.677,
+                    2.646,
+                    2.638
+                  ],
+                  "live_particles": 39798,
+                  "particles": 40000,
+                  "sim_tick_p95_ms": 0.961,
+                  "sim_tick_p95_runs": [
+                    0.961,
+                    0.971,
+                    0.945
+                  ]
+                },
+                {
+                  "fps": 272.0,
+                  "frame_p95_ms": 4.862,
+                  "frame_p95_runs": [
+                    4.873,
+                    4.862,
+                    4.851
+                  ],
+                  "live_particles": 79585,
+                  "particles": 80000,
+                  "sim_tick_p95_ms": 1.569,
+                  "sim_tick_p95_runs": [
+                    1.606,
+                    1.569,
+                    1.568
+                  ]
+                },
+                {
+                  "fps": 129.7,
+                  "frame_p95_ms": 9.228,
+                  "frame_p95_runs": [
+                    9.228,
+                    9.265,
+                    9.146
+                  ],
+                  "live_particles": 159152,
+                  "particles": 160000,
+                  "sim_tick_p95_ms": 2.723,
+                  "sim_tick_p95_runs": [
+                    2.723,
+                    2.739,
+                    2.637
+                  ]
+                },
+                {
+                  "fps": 79.0,
+                  "frame_p95_ms": 14.045,
+                  "frame_p95_runs": [
+                    14.0,
+                    14.045,
+                    14.291
+                  ],
+                  "live_particles": 238710,
+                  "particles": 240000,
+                  "sim_tick_p95_ms": 3.914,
+                  "sim_tick_p95_runs": [
+                    3.914,
+                    3.798,
+                    3.995
+                  ]
+                },
+                {
+                  "fps": 70.4,
+                  "frame_p95_ms": 15.581,
+                  "frame_p95_runs": [
+                    15.828,
+                    15.581,
+                    15.29
+                  ],
+                  "live_particles": 258602,
+                  "particles": 260000,
+                  "sim_tick_p95_ms": 4.384,
+                  "sim_tick_p95_runs": [
+                    4.495,
+                    4.384,
+                    4.282
+                  ]
+                },
+                {
+                  "fps": 66.9,
+                  "frame_p95_ms": 16.052,
+                  "frame_p95_runs": [
+                    15.792,
+                    16.478,
+                    16.052
+                  ],
+                  "live_particles": 268551,
+                  "particles": 270000,
+                  "sim_tick_p95_ms": 4.45,
+                  "sim_tick_p95_runs": [
+                    4.447,
+                    4.672,
+                    4.45
+                  ]
+                },
+                {
+                  "fps": 63.7,
+                  "frame_p95_ms": 16.764,
+                  "frame_p95_runs": [
+                    16.764,
+                    16.38,
+                    16.783
+                  ],
+                  "live_particles": 278502,
+                  "particles": 280000,
+                  "sim_tick_p95_ms": 4.641,
+                  "sim_tick_p95_runs": [
+                    4.631,
+                    4.641,
+                    4.826
+                  ]
+                },
+                {
+                  "fps": 53.2,
+                  "frame_p95_ms": 22.952,
+                  "frame_p95_runs": [
+                    22.78,
+                    26.75,
+                    22.952
+                  ],
+                  "live_particles": 318284,
+                  "particles": 320000,
+                  "sim_tick_p95_ms": 5.506,
+                  "sim_tick_p95_runs": [
+                    5.506,
+                    6.383,
+                    5.343
+                  ]
+                },
+                {
+                  "fps": 16.3,
+                  "frame_p95_ms": 67.842,
+                  "frame_p95_runs": [
+                    67.842,
+                    77.199,
+                    67.452
+                  ],
+                  "live_particles": 636567,
+                  "particles": 640000,
+                  "sim_tick_p95_ms": 10.066,
+                  "sim_tick_p95_runs": [
+                    10.066,
+                    10.171,
+                    9.998
+                  ]
+                },
+                {
+                  "fps": 6.7,
+                  "frame_p95_ms": 168.598,
+                  "frame_p95_runs": [
+                    153.258,
+                    169.414,
+                    168.598
+                  ],
+                  "live_particles": 954923,
+                  "particles": 960000,
+                  "sim_tick_p95_ms": 13.947,
+                  "sim_tick_p95_runs": [
+                    13.947,
+                    15.188,
+                    13.734
+                  ]
+                },
+                {
+                  "fps": 5.8,
+                  "frame_p95_ms": 184.755,
+                  "frame_p95_runs": [
+                    182.174,
+                    184.755,
+                    185.793
+                  ],
+                  "live_particles": 1114065,
+                  "particles": 1120000,
+                  "sim_tick_p95_ms": 16.598,
+                  "sim_tick_p95_runs": [
+                    16.513,
+                    16.598,
+                    16.755
+                  ]
+                },
+                {
+                  "fps": 5.6,
+                  "frame_p95_ms": 183.131,
+                  "frame_p95_runs": [
+                    182.162,
+                    184.783,
+                    183.131
+                  ],
+                  "live_particles": 1153871,
+                  "particles": 1160000,
+                  "sim_tick_p95_ms": 16.417,
+                  "sim_tick_p95_runs": [
+                    16.417,
+                    16.663,
+                    16.233
+                  ]
+                },
+                {
+                  "fps": 5.4,
+                  "frame_p95_ms": 191.854,
+                  "frame_p95_runs": [
+                    190.191,
+                    191.854,
+                    193.546
+                  ],
+                  "live_particles": 1193560,
+                  "particles": 1200000,
+                  "sim_tick_p95_ms": 17.408,
+                  "sim_tick_p95_runs": [
+                    17.099,
+                    17.408,
+                    17.493
+                  ]
+                },
+                {
+                  "fps": 5.0,
+                  "frame_p95_ms": 208.574,
+                  "frame_p95_runs": [
+                    208.574,
+                    211.899,
+                    204.956
+                  ],
+                  "live_particles": 1272855,
+                  "particles": 1280000,
+                  "sim_tick_p95_ms": 18.867,
+                  "sim_tick_p95_runs": [
+                    18.867,
+                    19.413,
+                    18.448
+                  ]
+                }
+              ],
+              "project": "bench",
+              "range": [
+                270000,
+                320000
+              ],
+              "scene": "dense"
+            },
+            "sparse": {
+              "at_least": false,
+              "binding_limit": "frame",
+              "budget_ms": 16.667,
+              "context": {
+                "backend": "gl",
+                "build_type": "Debug",
+                "cpu": "AMD Ryzen 7 5800X3D 8-Core Processor",
+                "gpu": "3.3.0 NVIDIA 615.78.08 (NVIDIA GeForce RTX 3060 Ti/PCIe/SSE2), 4x MSAA, compatible tier",
+                "msaa": 4,
+                "resolution": "1280x720",
+                "threads": 8,
+                "video_driver": "offscreen"
+              },
+              "cpu_limit": {
+                "at_least": false,
+                "particles": 1160000,
+                "range": [
+                  1160000,
+                  1280000
+                ]
+              },
+              "frame_limit": {
+                "at_least": false,
+                "particles": 290000,
+                "range": [
+                  290000,
+                  300000
+                ]
+              },
+              "method": {
+                "duration_s": 4.0,
+                "max": 2000000,
+                "min": 10000,
+                "resolution": 0.05,
+                "runs_per_probe": 3,
+                "statistic": "p95 over the steady-state window, median of the runs",
+                "warmup_s": 4.0
+              },
+              "particles": 290000,
+              "probes": [
+                {
+                  "fps": 1698.3,
+                  "frame_p95_ms": 0.598,
+                  "frame_p95_runs": [
+                    0.612,
+                    0.598,
+                    0.586
+                  ],
+                  "live_particles": 9965,
+                  "particles": 10000,
+                  "sim_tick_p95_ms": 0.424,
+                  "sim_tick_p95_runs": [
+                    0.424,
+                    0.441,
+                    0.424
+                  ]
+                },
+                {
+                  "fps": 989.9,
+                  "frame_p95_ms": 1.469,
+                  "frame_p95_runs": [
+                    1.464,
+                    1.493,
+                    1.469
+                  ],
+                  "live_particles": 19921,
+                  "particles": 20000,
+                  "sim_tick_p95_ms": 0.639,
+                  "sim_tick_p95_runs": [
+                    0.616,
+                    0.645,
+                    0.639
+                  ]
+                },
+                {
+                  "fps": 531.0,
+                  "frame_p95_ms": 2.654,
+                  "frame_p95_runs": [
+                    2.677,
+                    2.632,
+                    2.654
+                  ],
+                  "live_particles": 39822,
+                  "particles": 40000,
+                  "sim_tick_p95_ms": 0.987,
+                  "sim_tick_p95_runs": [
+                    0.987,
+                    0.962,
+                    0.989
+                  ]
+                },
+                {
+                  "fps": 266.7,
+                  "frame_p95_ms": 4.87,
+                  "frame_p95_runs": [
+                    4.967,
+                    4.869,
+                    4.87
+                  ],
+                  "live_particles": 79627,
+                  "particles": 80000,
+                  "sim_tick_p95_ms": 1.546,
+                  "sim_tick_p95_runs": [
+                    1.595,
+                    1.539,
+                    1.546
+                  ]
+                },
+                {
+                  "fps": 128.9,
+                  "frame_p95_ms": 9.374,
+                  "frame_p95_runs": [
+                    9.142,
+                    9.379,
+                    9.374
+                  ],
+                  "live_particles": 159239,
+                  "particles": 160000,
+                  "sim_tick_p95_ms": 2.648,
+                  "sim_tick_p95_runs": [
+                    2.624,
+                    2.748,
+                    2.648
+                  ]
+                },
+                {
+                  "fps": 80.5,
+                  "frame_p95_ms": 13.98,
+                  "frame_p95_runs": [
+                    14.083,
+                    13.748,
+                    13.98
+                  ],
+                  "live_particles": 238839,
+                  "particles": 240000,
+                  "sim_tick_p95_ms": 3.827,
+                  "sim_tick_p95_runs": [
+                    3.827,
+                    3.795,
+                    3.929
+                  ]
+                },
+                {
+                  "fps": 66.4,
+                  "frame_p95_ms": 16.258,
+                  "frame_p95_runs": [
+                    16.121,
+                    16.258,
+                    16.418
+                  ],
+                  "live_particles": 278650,
+                  "particles": 280000,
+                  "sim_tick_p95_ms": 4.384,
+                  "sim_tick_p95_runs": [
+                    4.489,
+                    4.384,
+                    4.297
+                  ]
+                },
+                {
+                  "fps": 64.2,
+                  "frame_p95_ms": 16.386,
+                  "frame_p95_runs": [
+                    16.386,
+                    16.41,
+                    16.323
+                  ],
+                  "live_particles": 288601,
+                  "particles": 290000,
+                  "sim_tick_p95_ms": 4.316,
+                  "sim_tick_p95_runs": [
+                    4.316,
+                    4.347,
+                    4.26
+                  ]
+                },
+                {
+                  "fps": 61.2,
+                  "frame_p95_ms": 17.449,
+                  "frame_p95_runs": [
+                    17.449,
+                    16.877,
+                    17.835
+                  ],
+                  "live_particles": 298545,
+                  "particles": 300000,
+                  "sim_tick_p95_ms": 4.51,
+                  "sim_tick_p95_runs": [
+                    4.51,
+                    4.425,
+                    4.696
+                  ]
+                },
+                {
+                  "fps": 55.1,
+                  "frame_p95_ms": 22.093,
+                  "frame_p95_runs": [
+                    21.698,
+                    22.093,
+                    22.301
+                  ],
+                  "live_particles": 318447,
+                  "particles": 320000,
+                  "sim_tick_p95_ms": 5.001,
+                  "sim_tick_p95_runs": [
+                    4.934,
+                    5.276,
+                    5.001
+                  ]
+                },
+                {
+                  "fps": 18.8,
+                  "frame_p95_ms": 60.884,
+                  "frame_p95_runs": [
+                    60.884,
+                    64.323,
+                    60.842
+                  ],
+                  "live_particles": 636888,
+                  "particles": 640000,
+                  "sim_tick_p95_ms": 8.962,
+                  "sim_tick_p95_runs": [
+                    8.962,
+                    8.972,
+                    8.891
+                  ]
+                },
+                {
+                  "fps": 7.4,
+                  "frame_p95_ms": 145.9,
+                  "frame_p95_runs": [
+                    149.331,
+                    145.9,
+                    144.633
+                  ],
+                  "live_particles": 955396,
+                  "particles": 960000,
+                  "sim_tick_p95_ms": 12.941,
+                  "sim_tick_p95_runs": [
+                    13.327,
+                    12.909,
+                    12.941
+                  ]
+                },
+                {
+                  "fps": 6.1,
+                  "frame_p95_ms": 173.467,
+                  "frame_p95_runs": [
+                    174.943,
+                    171.739,
+                    173.467
+                  ],
+                  "live_particles": 1114573,
+                  "particles": 1120000,
+                  "sim_tick_p95_ms": 15.423,
+                  "sim_tick_p95_runs": [
+                    15.547,
+                    15.423,
+                    15.386
+                  ]
+                },
+                {
+                  "fps": 5.9,
+                  "frame_p95_ms": 178.038,
+                  "frame_p95_runs": [
+                    178.21,
+                    178.038,
+                    176.344
+                  ],
+                  "live_particles": 1154397,
+                  "particles": 1160000,
+                  "sim_tick_p95_ms": 15.999,
+                  "sim_tick_p95_runs": [
+                    16.037,
+                    15.999,
+                    15.688
+                  ]
+                },
+                {
+                  "fps": 5.7,
+                  "frame_p95_ms": 186.487,
+                  "frame_p95_runs": [
+                    182.499,
+                    186.487,
+                    197.472
+                  ],
+                  "live_particles": 1194068,
+                  "particles": 1200000,
+                  "sim_tick_p95_ms": 16.725,
+                  "sim_tick_p95_runs": [
+                    16.306,
+                    16.725,
+                    16.909
+                  ]
+                },
+                {
+                  "fps": 5.3,
+                  "frame_p95_ms": 194.417,
+                  "frame_p95_runs": [
+                    194.417,
+                    195.4,
+                    191.912
+                  ],
+                  "live_particles": 1273469,
+                  "particles": 1280000,
+                  "sim_tick_p95_ms": 17.381,
+                  "sim_tick_p95_runs": [
+                    17.392,
+                    17.381,
+                    16.973
+                  ]
+                }
+              ],
+              "project": "bench_spread",
+              "range": [
+                290000,
+                300000
+              ],
+              "scene": "sparse"
+            }
+          },
+          "gpu": "3.3.0 NVIDIA 615.78.08 (NVIDIA GeForce RTX 3060 Ti/PCIe/SSE2), 4x MSAA, compatible tier",
+          "msaa": 4,
+          "resolution": "1280x720",
+          "threads": 8,
+          "video_driver": "offscreen",
+          "workloads": {
+            "1000": {
+              "fps": 4695.3,
+              "frame_ms": {
+                "max": 2.235,
+                "mean": 0.213,
+                "p50": 0.206,
+                "p95": 0.218,
+                "p99": 0.34
+              },
+              "frames": 28172,
+              "hash_tick": 600,
+              "particles": 1010.0,
+              "peak_rss_mb": 270.1,
+              "render_cpu_ms": 0.169,
+              "runs": 3,
+              "sim_tick_ms": {
+                "max": 0.306,
+                "mean": 0.127,
+                "p95": 0.152
+              },
+              "sim_ticks": 360,
+              "spread": {
+                "fps": [
+                  4684.0,
+                  4712.7
+                ],
+                "frame_p95_ms": [
+                  0.217,
+                  0.219
+                ],
+                "sim_tick_mean_ms": [
+                  0.125,
+                  0.129
+                ]
+              },
+              "state_hash": "77e955bfebed7613",
+              "state_hash_jobs1": "77e955bfebed7613"
+            },
+            "10000": {
+              "fps": 1702.5,
+              "frame_ms": {
+                "max": 2.364,
+                "mean": 0.587,
+                "p50": 0.571,
+                "p95": 0.589,
+                "p99": 0.964
+              },
+              "frames": 10215,
+              "hash_tick": 600,
+              "particles": 9961.0,
+              "peak_rss_mb": 269.2,
+              "render_cpu_ms": 0.531,
+              "runs": 3,
+              "sim_tick_ms": {
+                "max": 0.55,
+                "mean": 0.35,
+                "p95": 0.434
+              },
+              "sim_ticks": 360,
+              "spread": {
+                "fps": [
+                  1697.3,
+                  1708.4
+                ],
+                "frame_p95_ms": [
+                  0.588,
+                  0.596
+                ],
+                "sim_tick_mean_ms": [
+                  0.344,
+                  0.36
+                ]
+              },
+              "state_hash": "bff47994b0264192",
+              "state_hash_jobs1": "bff47994b0264192"
+            },
+            "100000": {
+              "fps": 215.0,
+              "frame_ms": {
+                "max": 7.626,
+                "mean": 4.652,
+                "p50": 4.18,
+                "p95": 5.974,
+                "p99": 6.134
+              },
+              "frames": 1291,
+              "hash_tick": 600,
+              "particles": 99477.0,
+              "peak_rss_mb": 305.8,
+              "render_cpu_ms": 4.145,
+              "runs": 3,
+              "sim_tick_ms": {
+                "max": 2.156,
+                "mean": 1.635,
+                "p95": 1.844
+              },
+              "sim_ticks": 360,
+              "spread": {
+                "fps": [
+                  214.5,
+                  216.3
+                ],
+                "frame_p95_ms": [
+                  5.929,
+                  5.975
+                ],
+                "sim_tick_mean_ms": [
+                  1.619,
+                  1.649
+                ]
+              },
+              "state_hash": "d6d6a623a66410b3",
+              "state_hash_jobs1": "d6d6a623a66410b3"
+            },
+            "50000": {
+              "fps": 431.2,
+              "frame_ms": {
+                "max": 5.184,
+                "mean": 2.319,
+                "p50": 2.171,
+                "p95": 3.211,
+                "p99": 3.38
+              },
+              "frames": 2588,
+              "hash_tick": 600,
+              "particles": 49747.0,
+              "peak_rss_mb": 277.7,
+              "render_cpu_ms": 2.135,
+              "runs": 3,
+              "sim_tick_ms": {
+                "max": 1.359,
+                "mean": 0.977,
+                "p95": 1.166
+              },
+              "sim_ticks": 360,
+              "spread": {
+                "fps": [
+                  427.8,
+                  431.6
+                ],
+                "frame_p95_ms": [
+                  3.209,
+                  3.22
+                ],
+                "sim_tick_mean_ms": [
+                  0.974,
+                  0.979
+                ]
+              },
+              "state_hash": "08a148babe2ddac5",
+              "state_hash_jobs1": "08a148babe2ddac5"
+            }
+          }
+        },
+        "vulkan": {
+          "bench": {
+            "duration_s": 6.0,
+            "runs": 3,
+            "warmup_s": 4.0
+          },
+          "capacity_60fps": {
+            "dense": {
+              "at_least": false,
+              "binding_limit": "frame",
+              "budget_ms": 16.667,
+              "context": {
+                "backend": "vulkan",
+                "build_type": "Debug",
+                "cpu": "AMD Ryzen 7 5800X3D 8-Core Processor",
+                "gpu": "Vulkan 1.4.351 (NVIDIA GeForce RTX 3060 Ti), compatible tier",
+                "msaa": 4,
+                "resolution": "1280x720",
+                "threads": 8,
+                "video_driver": "auto"
+              },
+              "cpu_limit": {
+                "at_least": false,
+                "particles": 1160000,
+                "range": [
+                  1120000,
+                  1200000
+                ]
+              },
+              "frame_limit": {
+                "at_least": false,
+                "particles": 290000,
+                "range": [
+                  290000,
+                  300000
+                ]
+              },
+              "method": {
+                "duration_s": 4.0,
+                "max": 2000000,
+                "min": 10000,
+                "resolution": 0.05,
+                "runs_per_probe": 3,
+                "statistic": "p95 over the steady-state window, median of the runs",
+                "warmup_s": 4.0
+              },
+              "particles": 290000,
+              "probes": [
+                {
+                  "fps": 1295.9,
+                  "frame_p95_ms": 0.878,
+                  "frame_p95_runs": [
+                    0.878,
+                    0.803,
+                    0.927
+                  ],
+                  "live_particles": 9961,
+                  "particles": 10000,
+                  "sim_tick_p95_ms": 0.371,
+                  "sim_tick_p95_runs": [
+                    0.371,
+                    0.368,
+                    0.377
+                  ]
+                },
+                {
+                  "fps": 838.5,
+                  "frame_p95_ms": 1.597,
+                  "frame_p95_runs": [
+                    1.613,
+                    1.592,
+                    1.597
+                  ],
+                  "live_particles": 19906,
+                  "particles": 20000,
+                  "sim_tick_p95_ms": 0.556,
+                  "sim_tick_p95_runs": [
+                    0.567,
+                    0.552,
+                    0.556
+                  ]
+                },
+                {
+                  "fps": 487.6,
+                  "frame_p95_ms": 2.743,
+                  "frame_p95_runs": [
+                    2.767,
+                    2.728,
+                    2.743
+                  ],
+                  "live_particles": 39797,
+                  "particles": 40000,
+                  "sim_tick_p95_ms": 0.877,
+                  "sim_tick_p95_runs": [
+                    0.897,
+                    0.858,
+                    0.877
+                  ]
+                },
+                {
+                  "fps": 260.0,
+                  "frame_p95_ms": 4.944,
+                  "frame_p95_runs": [
+                    4.977,
+                    4.944,
+                    4.94
+                  ],
+                  "live_particles": 79585,
+                  "particles": 80000,
+                  "sim_tick_p95_ms": 1.505,
+                  "sim_tick_p95_runs": [
+                    1.501,
+                    1.505,
+                    1.513
+                  ]
+                },
+                {
+                  "fps": 127.3,
+                  "frame_p95_ms": 9.369,
+                  "frame_p95_runs": [
+                    9.415,
+                    9.365,
+                    9.369
+                  ],
+                  "live_particles": 159151,
+                  "particles": 160000,
+                  "sim_tick_p95_ms": 2.709,
+                  "sim_tick_p95_runs": [
+                    2.709,
+                    2.726,
+                    2.707
+                  ]
+                },
+                {
+                  "fps": 80.4,
+                  "frame_p95_ms": 13.78,
+                  "frame_p95_runs": [
+                    13.519,
+                    13.78,
+                    14.821
+                  ],
+                  "live_particles": 238713,
+                  "particles": 240000,
+                  "sim_tick_p95_ms": 3.894,
+                  "sim_tick_p95_runs": [
+                    3.71,
+                    3.894,
+                    4.978
+                  ]
+                },
+                {
+                  "fps": 66.3,
+                  "frame_p95_ms": 15.945,
+                  "frame_p95_runs": [
+                    16.102,
+                    15.824,
+                    15.945
+                  ],
+                  "live_particles": 278502,
+                  "particles": 280000,
+                  "sim_tick_p95_ms": 4.428,
+                  "sim_tick_p95_runs": [
+                    4.598,
+                    4.274,
+                    4.428
+                  ]
+                },
+                {
+                  "fps": 63.3,
+                  "frame_p95_ms": 16.535,
+                  "frame_p95_runs": [
+                    16.535,
+                    16.428,
+                    16.651
+                  ],
+                  "live_particles": 288446,
+                  "particles": 290000,
+                  "sim_tick_p95_ms": 4.562,
+                  "sim_tick_p95_runs": [
+                    4.562,
+                    4.508,
+                    4.645
+                  ]
+                },
+                {
+                  "fps": 61.4,
+                  "frame_p95_ms": 16.846,
+                  "frame_p95_runs": [
+                    17.173,
+                    16.816,
+                    16.846
+                  ],
+                  "live_particles": 298388,
+                  "particles": 300000,
+                  "sim_tick_p95_ms": 4.448,
+                  "sim_tick_p95_runs": [
+                    4.749,
+                    4.448,
+                    4.44
+                  ]
+                },
+                {
+                  "fps": 56.2,
+                  "frame_p95_ms": 21.499,
+                  "frame_p95_runs": [
+                    21.464,
+                    21.499,
+                    21.568
+                  ],
+                  "live_particles": 318285,
+                  "particles": 320000,
+                  "sim_tick_p95_ms": 4.864,
+                  "sim_tick_p95_runs": [
+                    4.756,
+                    4.866,
+                    4.864
+                  ]
+                },
+                {
+                  "fps": 16.5,
+                  "frame_p95_ms": 67.987,
+                  "frame_p95_runs": [
+                    68.468,
+                    67.987,
+                    66.64
+                  ],
+                  "live_particles": 636579,
+                  "particles": 640000,
+                  "sim_tick_p95_ms": 9.677,
+                  "sim_tick_p95_runs": [
+                    9.853,
+                    9.677,
+                    9.507
+                  ]
+                },
+                {
+                  "fps": 7.0,
+                  "frame_p95_ms": 154.071,
+                  "frame_p95_runs": [
+                    154.071,
+                    155.85,
+                    148.277
+                  ],
+                  "live_particles": 954821,
+                  "particles": 960000,
+                  "sim_tick_p95_ms": 13.754,
+                  "sim_tick_p95_runs": [
+                    15.226,
+                    13.754,
+                    13.677
+                  ]
+                },
+                {
+                  "fps": 6.0,
+                  "frame_p95_ms": 175.912,
+                  "frame_p95_runs": [
+                    175.985,
+                    174.539,
+                    175.912
+                  ],
+                  "live_particles": 1114178,
+                  "particles": 1120000,
+                  "sim_tick_p95_ms": 15.998,
+                  "sim_tick_p95_runs": [
+                    16.277,
+                    15.9,
+                    15.998
+                  ]
+                },
+                {
+                  "fps": 5.8,
+                  "frame_p95_ms": 180.576,
+                  "frame_p95_runs": [
+                    183.082,
+                    180.576,
+                    180.488
+                  ],
+                  "live_particles": 1153831,
+                  "particles": 1160000,
+                  "sim_tick_p95_ms": 16.548,
+                  "sim_tick_p95_runs": [
+                    17.003,
+                    16.418,
+                    16.548
+                  ]
+                },
+                {
+                  "fps": 5.6,
+                  "frame_p95_ms": 185.275,
+                  "frame_p95_runs": [
+                    185.275,
+                    192.739,
+                    184.756
+                  ],
+                  "live_particles": 1193600,
+                  "particles": 1200000,
+                  "sim_tick_p95_ms": 16.97,
+                  "sim_tick_p95_runs": [
+                    16.997,
+                    16.895,
+                    16.97
+                  ]
+                },
+                {
+                  "fps": 5.2,
+                  "frame_p95_ms": 201.267,
+                  "frame_p95_runs": [
+                    201.691,
+                    201.267,
+                    200.69
+                  ],
+                  "live_particles": 1272855,
+                  "particles": 1280000,
+                  "sim_tick_p95_ms": 18.372,
+                  "sim_tick_p95_runs": [
+                    18.624,
+                    18.372,
+                    18.364
+                  ]
+                }
+              ],
+              "project": "bench",
+              "range": [
+                290000,
+                300000
+              ],
+              "scene": "dense"
+            },
+            "sparse": {
+              "at_least": false,
+              "binding_limit": "frame",
+              "budget_ms": 16.667,
+              "context": {
+                "backend": "vulkan",
+                "build_type": "Debug",
+                "cpu": "AMD Ryzen 7 5800X3D 8-Core Processor",
+                "gpu": "Vulkan 1.4.351 (NVIDIA GeForce RTX 3060 Ti), compatible tier",
+                "msaa": 4,
+                "resolution": "1280x720",
+                "threads": 8,
+                "video_driver": "auto"
+              },
+              "cpu_limit": {
+                "at_least": false,
+                "particles": 1160000,
+                "range": [
+                  1160000,
+                  1280000
+                ]
+              },
+              "frame_limit": {
+                "at_least": false,
+                "particles": 240000,
+                "range": [
+                  240000,
+                  250000
+                ]
+              },
+              "method": {
+                "duration_s": 4.0,
+                "max": 2000000,
+                "min": 10000,
+                "resolution": 0.05,
+                "runs_per_probe": 3,
+                "statistic": "p95 over the steady-state window, median of the runs",
+                "warmup_s": 4.0
+              },
+              "particles": 240000,
+              "probes": [
+                {
+                  "fps": 1215.3,
+                  "frame_p95_ms": 1.033,
+                  "frame_p95_runs": [
+                    1.033,
+                    1.025,
+                    1.038
+                  ],
+                  "live_particles": 9965,
+                  "particles": 10000,
+                  "sim_tick_p95_ms": 0.394,
+                  "sim_tick_p95_runs": [
+                    0.385,
+                    0.402,
+                    0.394
+                  ]
+                },
+                {
+                  "fps": 770.9,
+                  "frame_p95_ms": 1.685,
+                  "frame_p95_runs": [
+                    1.693,
+                    1.685,
+                    1.657
+                  ],
+                  "live_particles": 19921,
+                  "particles": 20000,
+                  "sim_tick_p95_ms": 0.533,
+                  "sim_tick_p95_runs": [
+                    0.538,
+                    0.533,
+                    0.526
+                  ]
+                },
+                {
+                  "fps": 455.5,
+                  "frame_p95_ms": 2.884,
+                  "frame_p95_runs": [
+                    2.926,
+                    2.884,
+                    2.87
+                  ],
+                  "live_particles": 39821,
+                  "particles": 40000,
+                  "sim_tick_p95_ms": 0.879,
+                  "sim_tick_p95_runs": [
+                    0.871,
+                    0.892,
+                    0.879
+                  ]
+                },
+                {
+                  "fps": 232.5,
+                  "frame_p95_ms": 5.368,
+                  "frame_p95_runs": [
+                    5.368,
+                    5.351,
+                    5.389
+                  ],
+                  "live_particles": 79626,
+                  "particles": 80000,
+                  "sim_tick_p95_ms": 1.494,
+                  "sim_tick_p95_runs": [
+                    1.513,
+                    1.482,
+                    1.494
+                  ]
+                },
+                {
+                  "fps": 110.7,
+                  "frame_p95_ms": 11.033,
+                  "frame_p95_runs": [
+                    11.05,
+                    10.954,
+                    11.033
+                  ],
+                  "live_particles": 159241,
+                  "particles": 160000,
+                  "sim_tick_p95_ms": 2.63,
+                  "sim_tick_p95_runs": [
+                    2.699,
+                    2.567,
+                    2.63
+                  ]
+                },
+                {
+                  "fps": 69.8,
+                  "frame_p95_ms": 16.1,
+                  "frame_p95_runs": [
+                    16.294,
+                    16.078,
+                    16.1
+                  ],
+                  "live_particles": 238843,
+                  "particles": 240000,
+                  "sim_tick_p95_ms": 3.708,
+                  "sim_tick_p95_runs": [
+                    3.714,
+                    3.659,
+                    3.708
+                  ]
+                },
+                {
+                  "fps": 63.6,
+                  "frame_p95_ms": 17.0,
+                  "frame_p95_runs": [
+                    17.278,
+                    16.904,
+                    17.0
+                  ],
+                  "live_particles": 248780,
+                  "particles": 250000,
+                  "sim_tick_p95_ms": 4.026,
+                  "sim_tick_p95_runs": [
+                    4.097,
+                    4.026,
+                    3.903
+                  ]
+                },
+                {
+                  "fps": 60.8,
+                  "frame_p95_ms": 17.589,
+                  "frame_p95_runs": [
+                    17.763,
+                    17.589,
+                    17.551
+                  ],
+                  "live_particles": 258729,
+                  "particles": 260000,
+                  "sim_tick_p95_ms": 4.009,
+                  "sim_tick_p95_runs": [
+                    4.182,
+                    3.903,
+                    4.009
+                  ]
+                },
+                {
+                  "fps": 56.9,
+                  "frame_p95_ms": 21.085,
+                  "frame_p95_runs": [
+                    21.085,
+                    21.866,
+                    19.269
+                  ],
+                  "live_particles": 278643,
+                  "particles": 280000,
+                  "sim_tick_p95_ms": 4.377,
+                  "sim_tick_p95_runs": [
+                    4.478,
+                    4.34,
+                    4.377
+                  ]
+                },
+                {
+                  "fps": 48.2,
+                  "frame_p95_ms": 25.808,
+                  "frame_p95_runs": [
+                    25.679,
+                    25.808,
+                    25.958
+                  ],
+                  "live_particles": 318457,
+                  "particles": 320000,
+                  "sim_tick_p95_ms": 4.853,
+                  "sim_tick_p95_runs": [
+                    4.774,
+                    5.024,
+                    4.853
+                  ]
+                },
+                {
+                  "fps": 15.9,
+                  "frame_p95_ms": 69.584,
+                  "frame_p95_runs": [
+                    74.766,
+                    67.395,
+                    69.584
+                  ],
+                  "live_particles": 636893,
+                  "particles": 640000,
+                  "sim_tick_p95_ms": 8.877,
+                  "sim_tick_p95_runs": [
+                    9.266,
+                    8.844,
+                    8.877
+                  ]
+                },
+                {
+                  "fps": 7.6,
+                  "frame_p95_ms": 143.517,
+                  "frame_p95_runs": [
+                    143.517,
+                    146.12,
+                    143.111
+                  ],
+                  "live_particles": 955399,
+                  "particles": 960000,
+                  "sim_tick_p95_ms": 13.214,
+                  "sim_tick_p95_runs": [
+                    13.214,
+                    13.425,
+                    12.889
+                  ]
+                },
+                {
+                  "fps": 6.2,
+                  "frame_p95_ms": 172.706,
+                  "frame_p95_runs": [
+                    169.698,
+                    176.711,
+                    172.706
+                  ],
+                  "live_particles": 1114601,
+                  "particles": 1120000,
+                  "sim_tick_p95_ms": 15.884,
+                  "sim_tick_p95_runs": [
+                    15.519,
+                    16.43,
+                    15.884
+                  ]
+                },
+                {
+                  "fps": 6.0,
+                  "frame_p95_ms": 175.58,
+                  "frame_p95_runs": [
+                    177.828,
+                    175.376,
+                    175.58
+                  ],
+                  "live_particles": 1154543,
+                  "particles": 1160000,
+                  "sim_tick_p95_ms": 16.068,
+                  "sim_tick_p95_runs": [
+                    16.339,
+                    16.061,
+                    16.068
+                  ]
+                },
+                {
+                  "fps": 5.8,
+                  "frame_p95_ms": 183.741,
+                  "frame_p95_runs": [
+                    180.481,
+                    184.963,
+                    183.741
+                  ],
+                  "live_particles": 1194140,
+                  "particles": 1200000,
+                  "sim_tick_p95_ms": 16.87,
+                  "sim_tick_p95_runs": [
+                    16.447,
+                    17.009,
+                    16.87
+                  ]
+                },
+                {
+                  "fps": 5.4,
+                  "frame_p95_ms": 194.846,
+                  "frame_p95_runs": [
+                    196.024,
+                    190.279,
+                    194.846
+                  ],
+                  "live_particles": 1273455,
+                  "particles": 1280000,
+                  "sim_tick_p95_ms": 17.849,
+                  "sim_tick_p95_runs": [
+                    17.984,
+                    17.287,
+                    17.849
+                  ]
+                }
+              ],
+              "project": "bench_spread",
+              "range": [
+                240000,
+                250000
+              ],
+              "scene": "sparse"
+            }
+          },
+          "gpu": "Vulkan 1.4.351 (NVIDIA GeForce RTX 3060 Ti), compatible tier",
+          "msaa": 4,
+          "resolution": "1280x720",
+          "threads": 8,
+          "video_driver": "auto",
+          "workloads": {
+            "1000": {
+              "fps": 2455.5,
+              "frame_ms": {
+                "max": 1.471,
+                "mean": 0.407,
+                "p50": 0.398,
+                "p95": 0.429,
+                "p99": 0.534
+              },
+              "frames": 14734,
+              "hash_tick": 600,
+              "particles": 1010.0,
+              "peak_rss_mb": 270.4,
+              "render_cpu_ms": 0.23,
+              "runs": 3,
+              "sim_tick_ms": {
+                "max": 0.161,
+                "mean": 0.099,
+                "p95": 0.121
+              },
+              "sim_ticks": 360,
+              "spread": {
+                "fps": [
+                  2443.9,
+                  2474.5
+                ],
+                "frame_p95_ms": [
+                  0.422,
+                  0.459
+                ],
+                "sim_tick_mean_ms": [
+                  0.098,
+                  0.101
+                ]
+              },
+              "state_hash": "77e955bfebed7613",
+              "state_hash_jobs1": "77e955bfebed7613"
+            },
+            "10000": {
+              "fps": 1293.5,
+              "frame_ms": {
+                "max": 1.402,
+                "mean": 0.773,
+                "p50": 0.756,
+                "p95": 0.92,
+                "p99": 1.115
+              },
+              "frames": 7761,
+              "hash_tick": 600,
+              "particles": 9961.0,
+              "peak_rss_mb": 270.3,
+              "render_cpu_ms": 0.589,
+              "runs": 3,
+              "sim_tick_ms": {
+                "max": 0.468,
+                "mean": 0.314,
+                "p95": 0.379
+              },
+              "sim_ticks": 360,
+              "spread": {
+                "fps": [
+                  1293.1,
+                  1295.1
+                ],
+                "frame_p95_ms": [
+                  0.888,
+                  0.933
+                ],
+                "sim_tick_mean_ms": [
+                  0.311,
+                  0.317
+                ]
+              },
+              "state_hash": "bff47994b0264192",
+              "state_hash_jobs1": "bff47994b0264192"
+            },
+            "100000": {
+              "fps": 208.3,
+              "frame_ms": {
+                "max": 6.55,
+                "mean": 4.8,
+                "p50": 4.346,
+                "p95": 6.064,
+                "p99": 6.273
+              },
+              "frames": 1251,
+              "hash_tick": 600,
+              "particles": 99476.0,
+              "peak_rss_mb": 280.8,
+              "render_cpu_ms": 4.175,
+              "runs": 3,
+              "sim_tick_ms": {
+                "max": 2.092,
+                "mean": 1.556,
+                "p95": 1.869
+              },
+              "sim_ticks": 360,
+              "spread": {
+                "fps": [
+                  203.0,
+                  209.1
+                ],
+                "frame_p95_ms": [
+                  6.012,
+                  6.183
+                ],
+                "sim_tick_mean_ms": [
+                  1.537,
+                  1.609
+                ]
+              },
+              "state_hash": "d6d6a623a66410b3",
+              "state_hash_jobs1": "d6d6a623a66410b3"
+            },
+            "50000": {
+              "fps": 401.1,
+              "frame_ms": {
+                "max": 3.774,
+                "mean": 2.493,
+                "p50": 2.352,
+                "p95": 3.276,
+                "p99": 3.433
+              },
+              "frames": 2408,
+              "hash_tick": 600,
+              "particles": 49746.0,
+              "peak_rss_mb": 274.6,
+              "render_cpu_ms": 2.185,
+              "runs": 3,
+              "sim_tick_ms": {
+                "max": 1.238,
+                "mean": 0.88,
+                "p95": 1.064
+              },
+              "sim_ticks": 360,
+              "spread": {
+                "fps": [
+                  400.5,
+                  401.7
+                ],
+                "frame_p95_ms": [
+                  3.266,
+                  3.304
+                ],
+                "sim_tick_mean_ms": [
+                  0.875,
+                  0.9
+                ]
+              },
+              "state_hash": "08a148babe2ddac5",
+              "state_hash_jobs1": "08a148babe2ddac5"
+            }
+          }
+        }
+      },
+      "build_type": "Debug",
+      "commit": "a1b7913caa4b",
+      "compiler": "c++ (GCC) 16.2.1 20260810",
+      "exports": {
+        "bench": {
+          "full_pack_bytes": 1148016,
+          "full_player_bytes": 52985992,
+          "stripped_pack_bytes": 1148016,
+          "stripped_player_bytes": 3634232
+        },
+        "shmup": {
+          "full_pack_bytes": 1887808,
+          "full_player_bytes": 52985992,
+          "stripped_pack_bytes": 1887808,
+          "stripped_player_bytes": 4445400
+        }
+      },
+      "preset": "gl1"
+    },
+    "release": {
+      "backends": {
+        "gl": {
+          "bench": {
+            "duration_s": 6.0,
+            "runs": 3,
+            "warmup_s": 4.0
+          },
+          "capacity_60fps": {
+            "dense": {
+              "at_least": false,
+              "binding_limit": "frame",
+              "budget_ms": 16.667,
+              "context": {
+                "backend": "gl",
+                "build_type": "Release",
+                "cpu": "AMD Ryzen 7 5800X3D 8-Core Processor",
+                "gpu": "3.3.0 NVIDIA 615.78.08 (NVIDIA GeForce RTX 3060 Ti/PCIe/SSE2), 4x MSAA, compatible tier",
+                "msaa": 4,
+                "resolution": "1280x720",
+                "threads": 8,
+                "video_driver": "offscreen"
+              },
+              "cpu_limit": {
+                "at_least": true,
+                "particles": 2000000,
+                "range": [
+                  2000000,
+                  null
+                ]
+              },
+              "frame_limit": {
+                "at_least": false,
+                "particles": 1505000,
+                "range": [
+                  1460000,
+                  1640000
+                ]
+              },
+              "method": {
+                "duration_s": 4.0,
+                "max": 2000000,
+                "min": 10000,
+                "resolution": 0.05,
+                "runs_per_probe": 3,
+                "statistic": "p95 over the steady-state window, median of the runs",
+                "warmup_s": 4.0
+              },
+              "particles": 1505000,
+              "probes": [
+                {
+                  "fps": 8325.5,
+                  "frame_p95_ms": 0.119,
+                  "frame_p95_runs": [
+                    0.118,
+                    0.119,
+                    0.119
+                  ],
+                  "live_particles": 9961,
+                  "particles": 10000,
+                  "sim_tick_p95_ms": 0.057,
+                  "sim_tick_p95_runs": [
+                    0.053,
+                    0.057,
+                    0.057
+                  ]
+                },
+                {
+                  "fps": 5095.0,
+                  "frame_p95_ms": 0.196,
+                  "frame_p95_runs": [
+                    0.195,
+                    0.196,
+                    0.196
+                  ],
+                  "live_particles": 19906,
+                  "particles": 20000,
+                  "sim_tick_p95_ms": 0.072,
+                  "sim_tick_p95_runs": [
+                    0.073,
+                    0.071,
+                    0.072
+                  ]
+                },
+                {
+                  "fps": 2808.2,
+                  "frame_p95_ms": 0.359,
+                  "frame_p95_runs": [
+                    0.359,
+                    0.36,
+                    0.359
+                  ],
+                  "live_particles": 39798,
+                  "particles": 40000,
+                  "sim_tick_p95_ms": 0.103,
+                  "sim_tick_p95_runs": [
+                    0.103,
+                    0.102,
+                    0.104
+                  ]
+                },
+                {
+                  "fps": 1488.6,
+                  "frame_p95_ms": 0.682,
+                  "frame_p95_runs": [
+                    0.681,
+                    0.682,
+                    0.682
+                  ],
+                  "live_particles": 79585,
+                  "particles": 80000,
+                  "sim_tick_p95_ms": 0.16,
+                  "sim_tick_p95_runs": [
+                    0.159,
+                    0.166,
+                    0.16
+                  ]
+                },
+                {
+                  "fps": 761.8,
+                  "frame_p95_ms": 1.336,
+                  "frame_p95_runs": [
+                    1.336,
+                    1.338,
+                    1.335
+                  ],
+                  "live_particles": 159152,
+                  "particles": 160000,
+                  "sim_tick_p95_ms": 0.283,
+                  "sim_tick_p95_runs": [
+                    0.274,
+                    0.285,
+                    0.283
+                  ]
+                },
+                {
+                  "fps": 381.0,
+                  "frame_p95_ms": 2.669,
+                  "frame_p95_runs": [
+                    2.666,
+                    2.669,
+                    2.678
+                  ],
+                  "live_particles": 318279,
+                  "particles": 320000,
+                  "sim_tick_p95_ms": 0.545,
+                  "sim_tick_p95_runs": [
+                    0.545,
+                    0.53,
+                    0.584
+                  ]
+                },
+                {
+                  "fps": 188.7,
+                  "frame_p95_ms": 5.392,
+                  "frame_p95_runs": [
+                    5.393,
+                    5.392,
+                    5.37
+                  ],
+                  "live_particles": 636543,
+                  "particles": 640000,
+                  "sim_tick_p95_ms": 1.288,
+                  "sim_tick_p95_runs": [
+                    1.43,
+                    1.288,
+                    1.23
+                  ]
+                },
+                {
+                  "fps": 89.1,
+                  "frame_p95_ms": 12.487,
+                  "frame_p95_runs": [
+                    12.215,
+                    12.796,
+                    12.487
+                  ],
+                  "live_particles": 1273064,
+                  "particles": 1280000,
+                  "sim_tick_p95_ms": 4.359,
+                  "sim_tick_p95_runs": [
+                    4.245,
+                    4.359,
+                    4.361
+                  ]
+                },
+                {
+                  "fps": 76.7,
+                  "frame_p95_ms": 15.024,
+                  "frame_p95_runs": [
+                    15.043,
+                    14.706,
+                    15.024
+                  ],
+                  "live_particles": 1452118,
+                  "particles": 1460000,
+                  "sim_tick_p95_ms": 5.229,
+                  "sim_tick_p95_runs": [
+                    5.229,
+                    5.256,
+                    5.176
+                  ]
+                },
+                {
+                  "fps": 70.8,
+                  "frame_p95_ms": 15.708,
+                  "frame_p95_runs": [
+                    15.708,
+                    21.301,
+                    15.432
+                  ],
+                  "live_particles": 1496873,
+                  "particles": 1505000,
+                  "sim_tick_p95_ms": 5.421,
+                  "sim_tick_p95_runs": [
+                    5.421,
+                    6.074,
+                    5.41
+                  ]
+                },
+                {
+                  "fps": 67.9,
+                  "frame_p95_ms": 16.679,
+                  "frame_p95_runs": [
+                    16.21,
+                    16.679,
+                    16.693
+                  ],
+                  "live_particles": 1541638,
+                  "particles": 1550000,
+                  "sim_tick_p95_ms": 5.719,
+                  "sim_tick_p95_runs": [
+                    5.719,
+                    5.563,
+                    5.738
+                  ]
+                },
+                {
+                  "fps": 59.0,
+                  "frame_p95_ms": 17.916,
+                  "frame_p95_runs": [
+                    17.671,
+                    17.916,
+                    18.264
+                  ],
+                  "live_particles": 1631145,
+                  "particles": 1640000,
+                  "sim_tick_p95_ms": 5.486,
+                  "sim_tick_p95_runs": [
+                    5.51,
+                    5.486,
+                    5.36
+                  ]
+                },
+                {
+                  "fps": 37.9,
+                  "frame_p95_ms": 29.806,
+                  "frame_p95_runs": [
+                    34.876,
+                    29.564,
+                    29.806
+                  ],
+                  "live_particles": 1989195,
+                  "particles": 2000000,
+                  "sim_tick_p95_ms": 7.068,
+                  "sim_tick_p95_runs": [
+                    7.164,
+                    7.068,
+                    6.952
+                  ]
+                }
+              ],
+              "project": "bench",
+              "range": [
+                1460000,
+                1640000
+              ],
+              "scene": "dense"
+            },
+            "sparse": {
+              "at_least": false,
+              "binding_limit": "frame",
+              "budget_ms": 16.667,
+              "context": {
+                "backend": "gl",
+                "build_type": "Release",
+                "cpu": "AMD Ryzen 7 5800X3D 8-Core Processor",
+                "gpu": "3.3.0 NVIDIA 615.78.08 (NVIDIA GeForce RTX 3060 Ti/PCIe/SSE2), 4x MSAA, compatible tier",
+                "msaa": 4,
+                "resolution": "1280x720",
+                "threads": 8,
+                "video_driver": "offscreen"
+              },
+              "cpu_limit": {
+                "at_least": true,
+                "particles": 2000000,
+                "range": [
+                  2000000,
+                  null
+                ]
+              },
+              "frame_limit": {
+                "at_least": false,
+                "particles": 1550000,
+                "range": [
+                  1550000,
+                  1640000
+                ]
+              },
+              "method": {
+                "duration_s": 4.0,
+                "max": 2000000,
+                "min": 10000,
+                "resolution": 0.05,
+                "runs_per_probe": 3,
+                "statistic": "p95 over the steady-state window, median of the runs",
+                "warmup_s": 4.0
+              },
+              "particles": 1550000,
+              "probes": [
+                {
+                  "fps": 10631.6,
+                  "frame_p95_ms": 0.098,
+                  "frame_p95_runs": [
+                    0.097,
+                    0.098,
+                    0.098
+                  ],
+                  "live_particles": 9966,
+                  "particles": 10000,
+                  "sim_tick_p95_ms": 0.054,
+                  "sim_tick_p95_runs": [
+                    0.053,
+                    0.054,
+                    0.055
+                  ]
+                },
+                {
+                  "fps": 7783.4,
+                  "frame_p95_ms": 0.133,
+                  "frame_p95_runs": [
+                    0.133,
+                    0.134,
+                    0.133
+                  ],
+                  "live_particles": 19921,
+                  "particles": 20000,
+                  "sim_tick_p95_ms": 0.069,
+                  "sim_tick_p95_runs": [
+                    0.067,
+                    0.069,
+                    0.07
+                  ]
+                },
+                {
+                  "fps": 4683.2,
+                  "frame_p95_ms": 0.214,
+                  "frame_p95_runs": [
+                    0.214,
+                    0.214,
+                    0.214
+                  ],
+                  "live_particles": 39822,
+                  "particles": 40000,
+                  "sim_tick_p95_ms": 0.101,
+                  "sim_tick_p95_runs": [
+                    0.093,
+                    0.104,
+                    0.101
+                  ]
+                },
+                {
+                  "fps": 2555.7,
+                  "frame_p95_ms": 0.393,
+                  "frame_p95_runs": [
+                    0.393,
+                    0.392,
+                    0.393
+                  ],
+                  "live_particles": 79627,
+                  "particles": 80000,
+                  "sim_tick_p95_ms": 0.154,
+                  "sim_tick_p95_runs": [
+                    0.155,
+                    0.154,
+                    0.154
+                  ]
+                },
+                {
+                  "fps": 1352.9,
+                  "frame_p95_ms": 0.777,
+                  "frame_p95_runs": [
+                    0.787,
+                    0.777,
+                    0.772
+                  ],
+                  "live_particles": 159237,
+                  "particles": 160000,
+                  "sim_tick_p95_ms": 0.277,
+                  "sim_tick_p95_runs": [
+                    0.266,
+                    0.283,
+                    0.277
+                  ]
+                },
+                {
+                  "fps": 684.3,
+                  "frame_p95_ms": 1.678,
+                  "frame_p95_runs": [
+                    1.678,
+                    1.781,
+                    1.651
+                  ],
+                  "live_particles": 318444,
+                  "particles": 320000,
+                  "sim_tick_p95_ms": 0.517,
+                  "sim_tick_p95_runs": [
+                    0.494,
+                    0.517,
+                    0.539
+                  ]
+                },
+                {
+                  "fps": 279.9,
+                  "frame_p95_ms": 4.622,
+                  "frame_p95_runs": [
+                    4.558,
+                    4.686,
+                    4.622
+                  ],
+                  "live_particles": 636886,
+                  "particles": 640000,
+                  "sim_tick_p95_ms": 1.291,
+                  "sim_tick_p95_runs": [
+                    1.232,
+                    1.362,
+                    1.291
+                  ]
+                },
+                {
+                  "fps": 103.5,
+                  "frame_p95_ms": 12.102,
+                  "frame_p95_runs": [
+                    11.939,
+                    13.296,
+                    12.102
+                  ],
+                  "live_particles": 1273780,
+                  "particles": 1280000,
+                  "sim_tick_p95_ms": 3.547,
+                  "sim_tick_p95_runs": [
+                    3.547,
+                    3.773,
+                    3.478
+                  ]
+                },
+                {
+                  "fps": 80.6,
+                  "frame_p95_ms": 14.643,
+                  "frame_p95_runs": [
+                    14.643,
+                    14.441,
+                    14.95
+                  ],
+                  "live_particles": 1452909,
+                  "particles": 1460000,
+                  "sim_tick_p95_ms": 4.385,
+                  "sim_tick_p95_runs": [
+                    4.385,
+                    4.189,
+                    4.442
+                  ]
+                },
+                {
+                  "fps": 71.3,
+                  "frame_p95_ms": 16.065,
+                  "frame_p95_runs": [
+                    16.065,
+                    16.21,
+                    15.925
+                  ],
+                  "live_particles": 1542472,
+                  "particles": 1550000,
+                  "sim_tick_p95_ms": 4.698,
+                  "sim_tick_p95_runs": [
+                    4.698,
+                    4.811,
+                    4.621
+                  ]
+                },
+                {
+                  "fps": 66.4,
+                  "frame_p95_ms": 16.688,
+                  "frame_p95_runs": [
+                    16.346,
+                    16.688,
+                    17.5
+                  ],
+                  "live_particles": 1587242,
+                  "particles": 1595000,
+                  "sim_tick_p95_ms": 4.68,
+                  "sim_tick_p95_runs": [
+                    4.616,
+                    4.68,
+                    5.118
+                  ]
+                },
+                {
+                  "fps": 63.0,
+                  "frame_p95_ms": 17.359,
+                  "frame_p95_runs": [
+                    16.717,
+                    19.681,
+                    17.359
+                  ],
+                  "live_particles": 1632023,
+                  "particles": 1640000,
+                  "sim_tick_p95_ms": 5.124,
+                  "sim_tick_p95_runs": [
+                    5.124,
+                    5.54,
+                    5.001
+                  ]
+                },
+                {
+                  "fps": 40.5,
+                  "frame_p95_ms": 28.74,
+                  "frame_p95_runs": [
+                    28.3,
+                    28.74,
+                    28.81
+                  ],
+                  "live_particles": 1990282,
+                  "particles": 2000000,
+                  "sim_tick_p95_ms": 6.196,
+                  "sim_tick_p95_runs": [
+                    6.184,
+                    6.312,
+                    6.196
+                  ]
+                }
+              ],
+              "project": "bench_spread",
+              "range": [
+                1550000,
+                1640000
+              ],
+              "scene": "sparse"
+            }
+          },
+          "gpu": "3.3.0 NVIDIA 615.78.08 (NVIDIA GeForce RTX 3060 Ti/PCIe/SSE2), 4x MSAA, compatible tier",
+          "msaa": 4,
+          "resolution": "1280x720",
+          "threads": 8,
+          "video_driver": "offscreen",
+          "workloads": {
+            "1000": {
+              "fps": 16235.3,
+              "frame_ms": {
+                "max": 2.821,
+                "mean": 0.062,
+                "p50": 0.057,
+                "p95": 0.065,
+                "p99": 0.078
+              },
+              "frames": 97413,
+              "hash_tick": 600,
+              "particles": 1010.0,
+              "peak_rss_mb": 275.4,
+              "render_cpu_ms": 0.031,
+              "runs": 3,
+              "sim_tick_ms": {
+                "max": 0.042,
+                "mean": 0.028,
+                "p95": 0.025
+              },
+              "sim_ticks": 360,
+              "spread": {
+                "fps": [
+                  16197.3,
+                  16266.2
+                ],
+                "frame_p95_ms": [
+                  0.065,
+                  0.065
+                ],
+                "sim_tick_mean_ms": [
+                  0.028,
+                  0.029
+                ]
+              },
+              "state_hash": "77e955bfebed7613",
+              "state_hash_jobs1": "77e955bfebed7613"
+            },
+            "10000": {
+              "fps": 8400.5,
+              "frame_ms": {
+                "max": 2.448,
+                "mean": 0.119,
+                "p50": 0.115,
+                "p95": 0.118,
+                "p99": 0.137
+              },
+              "frames": 50404,
+              "hash_tick": 600,
+              "particles": 9961.0,
+              "peak_rss_mb": 269.9,
+              "render_cpu_ms": 0.063,
+              "runs": 3,
+              "sim_tick_ms": {
+                "max": 0.062,
+                "mean": 0.049,
+                "p95": 0.054
+              },
+              "sim_ticks": 360,
+              "spread": {
+                "fps": [
+                  8307.1,
+                  8403.8
+                ],
+                "frame_p95_ms": [
+                  0.118,
+                  0.118
+                ],
+                "sim_tick_mean_ms": [
+                  0.049,
+                  0.053
+                ]
+              },
+              "state_hash": "bff47994b0264192",
+              "state_hash_jobs1": "bff47994b0264192"
+            },
+            "100000": {
+              "fps": 1195.7,
+              "frame_ms": {
+                "max": 2.559,
+                "mean": 0.836,
+                "p50": 0.833,
+                "p95": 0.85,
+                "p99": 1.037
+              },
+              "frames": 7175,
+              "hash_tick": 600,
+              "particles": 99476.0,
+              "peak_rss_mb": 312.7,
+              "render_cpu_ms": 0.378,
+              "runs": 3,
+              "sim_tick_ms": {
+                "max": 0.441,
+                "mean": 0.164,
+                "p95": 0.193
+              },
+              "sim_ticks": 360,
+              "spread": {
+                "fps": [
+                  1183.6,
+                  1199.6
+                ],
+                "frame_p95_ms": [
+                  0.847,
+                  0.851
+                ],
+                "sim_tick_mean_ms": [
+                  0.164,
+                  0.167
+                ]
+              },
+              "state_hash": "d6d6a623a66410b3",
+              "state_hash_jobs1": "d6d6a623a66410b3"
+            },
+            "50000": {
+              "fps": 2301.4,
+              "frame_ms": {
+                "max": 2.258,
+                "mean": 0.435,
+                "p50": 0.431,
+                "p95": 0.439,
+                "p99": 0.463
+              },
+              "frames": 13809,
+              "hash_tick": 600,
+              "particles": 49746.0,
+              "peak_rss_mb": 292.7,
+              "render_cpu_ms": 0.202,
+              "runs": 3,
+              "sim_tick_ms": {
+                "max": 0.293,
+                "mean": 0.105,
+                "p95": 0.118
+              },
+              "sim_ticks": 360,
+              "spread": {
+                "fps": [
+                  2297.2,
+                  2302.1
+                ],
+                "frame_p95_ms": [
+                  0.439,
+                  0.44
+                ],
+                "sim_tick_mean_ms": [
+                  0.101,
+                  0.107
+                ]
+              },
+              "state_hash": "08a148babe2ddac5",
+              "state_hash_jobs1": "08a148babe2ddac5"
+            }
+          }
+        },
+        "vulkan": {
+          "bench": {
+            "duration_s": 6.0,
+            "runs": 3,
+            "warmup_s": 4.0
+          },
+          "capacity_60fps": {
+            "dense": {
+              "at_least": false,
+              "binding_limit": "frame",
+              "budget_ms": 16.667,
+              "context": {
+                "backend": "vulkan",
+                "build_type": "Release",
+                "cpu": "AMD Ryzen 7 5800X3D 8-Core Processor",
+                "gpu": "Vulkan 1.4.351 (NVIDIA GeForce RTX 3060 Ti), compatible tier",
+                "msaa": 4,
+                "resolution": "1280x720",
+                "threads": 8,
+                "video_driver": "auto"
+              },
+              "cpu_limit": {
+                "at_least": true,
+                "particles": 2000000,
+                "range": [
+                  2000000,
+                  null
+                ]
+              },
+              "frame_limit": {
+                "at_least": false,
+                "particles": 1820000,
+                "range": [
+                  1820000,
+                  1910000
+                ]
+              },
+              "method": {
+                "duration_s": 4.0,
+                "max": 2000000,
+                "min": 10000,
+                "resolution": 0.05,
+                "runs_per_probe": 3,
+                "statistic": "p95 over the steady-state window, median of the runs",
+                "warmup_s": 4.0
+              },
+              "particles": 1820000,
+              "probes": [
+                {
+                  "fps": 7440.4,
+                  "frame_p95_ms": 0.143,
+                  "frame_p95_runs": [
+                    0.139,
+                    0.146,
+                    0.143
+                  ],
+                  "live_particles": 9961,
+                  "particles": 10000,
+                  "sim_tick_p95_ms": 0.088,
+                  "sim_tick_p95_runs": [
+                    0.088,
+                    0.087,
+                    0.091
+                  ]
+                },
+                {
+                  "fps": 5980.9,
+                  "frame_p95_ms": 0.179,
+                  "frame_p95_runs": [
+                    0.173,
+                    0.179,
+                    0.179
+                  ],
+                  "live_particles": 19906,
+                  "particles": 20000,
+                  "sim_tick_p95_ms": 0.067,
+                  "sim_tick_p95_runs": [
+                    0.064,
+                    0.067,
+                    0.07
+                  ]
+                },
+                {
+                  "fps": 3832.1,
+                  "frame_p95_ms": 0.293,
+                  "frame_p95_runs": [
+                    0.299,
+                    0.29,
+                    0.293
+                  ],
+                  "live_particles": 39797,
+                  "particles": 40000,
+                  "sim_tick_p95_ms": 0.098,
+                  "sim_tick_p95_runs": [
+                    0.1,
+                    0.098,
+                    0.096
+                  ]
+                },
+                {
+                  "fps": 2063.4,
+                  "frame_p95_ms": 0.518,
+                  "frame_p95_runs": [
+                    0.515,
+                    0.518,
+                    0.518
+                  ],
+                  "live_particles": 79585,
+                  "particles": 80000,
+                  "sim_tick_p95_ms": 0.168,
+                  "sim_tick_p95_runs": [
+                    0.158,
+                    0.183,
+                    0.168
+                  ]
+                },
+                {
+                  "fps": 1058.3,
+                  "frame_p95_ms": 1.165,
+                  "frame_p95_runs": [
+                    1.158,
+                    1.166,
+                    1.165
+                  ],
+                  "live_particles": 159151,
+                  "particles": 160000,
+                  "sim_tick_p95_ms": 0.248,
+                  "sim_tick_p95_runs": [
+                    0.259,
+                    0.234,
+                    0.248
+                  ]
+                },
+                {
+                  "fps": 534.1,
+                  "frame_p95_ms": 2.111,
+                  "frame_p95_runs": [
+                    2.111,
+                    2.111,
+                    2.127
+                  ],
+                  "live_particles": 318278,
+                  "particles": 320000,
+                  "sim_tick_p95_ms": 0.455,
+                  "sim_tick_p95_runs": [
+                    0.455,
+                    0.469,
+                    0.453
+                  ]
+                },
+                {
+                  "fps": 269.5,
+                  "frame_p95_ms": 4.0,
+                  "frame_p95_runs": [
+                    3.986,
+                    4.057,
+                    4.0
+                  ],
+                  "live_particles": 636540,
+                  "particles": 640000,
+                  "sim_tick_p95_ms": 0.95,
+                  "sim_tick_p95_runs": [
+                    0.97,
+                    0.95,
+                    0.938
+                  ]
+                },
+                {
+                  "fps": 130.8,
+                  "frame_p95_ms": 9.725,
+                  "frame_p95_runs": [
+                    9.814,
+                    9.694,
+                    9.725
+                  ],
+                  "live_particles": 1273070,
+                  "particles": 1280000,
+                  "sim_tick_p95_ms": 4.399,
+                  "sim_tick_p95_runs": [
+                    4.412,
+                    4.217,
+                    4.399
+                  ]
+                },
+                {
+                  "fps": 84.1,
+                  "frame_p95_ms": 14.333,
+                  "frame_p95_runs": [
+                    14.367,
+                    14.011,
+                    14.333
+                  ],
+                  "live_particles": 1631140,
+                  "particles": 1640000,
+                  "sim_tick_p95_ms": 6.76,
+                  "sim_tick_p95_runs": [
+                    6.95,
+                    6.468,
+                    6.76
+                  ]
+                },
+                {
+                  "fps": 67.7,
+                  "frame_p95_ms": 16.159,
+                  "frame_p95_runs": [
+                    16.28,
+                    16.096,
+                    16.159
+                  ],
+                  "live_particles": 1810155,
+                  "particles": 1820000,
+                  "sim_tick_p95_ms": 7.753,
+                  "sim_tick_p95_runs": [
+                    7.808,
+                    7.753,
+                    7.581
+                  ]
+                },
+                {
+                  "fps": 60.8,
+                  "frame_p95_ms": 17.337,
+                  "frame_p95_runs": [
+                    17.298,
+                    19.343,
+                    17.337
+                  ],
+                  "live_particles": 1899668,
+                  "particles": 1910000,
+                  "sim_tick_p95_ms": 8.081,
+                  "sim_tick_p95_runs": [
+                    8.089,
+                    7.935,
+                    8.081
+                  ]
+                },
+                {
+                  "fps": 56.9,
+                  "frame_p95_ms": 22.984,
+                  "frame_p95_runs": [
+                    22.984,
+                    23.345,
+                    18.378
+                  ],
+                  "live_particles": 1989176,
+                  "particles": 2000000,
+                  "sim_tick_p95_ms": 7.756,
+                  "sim_tick_p95_runs": [
+                    7.844,
+                    7.756,
+                    7.725
+                  ]
+                }
+              ],
+              "project": "bench",
+              "range": [
+                1820000,
+                1910000
+              ],
+              "scene": "dense"
+            },
+            "sparse": {
+              "at_least": false,
+              "binding_limit": "frame",
+              "budget_ms": 16.667,
+              "context": {
+                "backend": "vulkan",
+                "build_type": "Release",
+                "cpu": "AMD Ryzen 7 5800X3D 8-Core Processor",
+                "gpu": "Vulkan 1.4.351 (NVIDIA GeForce RTX 3060 Ti), compatible tier",
+                "msaa": 4,
+                "resolution": "1280x720",
+                "threads": 8,
+                "video_driver": "auto"
+              },
+              "cpu_limit": {
+                "at_least": true,
+                "particles": 2000000,
+                "range": [
+                  2000000,
+                  null
+                ]
+              },
+              "frame_limit": {
+                "at_least": false,
+                "particles": 1910000,
+                "range": [
+                  1910000,
+                  2000000
+                ]
+              },
+              "method": {
+                "duration_s": 4.0,
+                "max": 2000000,
+                "min": 10000,
+                "resolution": 0.05,
+                "runs_per_probe": 3,
+                "statistic": "p95 over the steady-state window, median of the runs",
+                "warmup_s": 4.0
+              },
+              "particles": 1910000,
+              "probes": [
+                {
+                  "fps": 7471.0,
+                  "frame_p95_ms": 0.143,
+                  "frame_p95_runs": [
+                    0.143,
+                    0.142,
+                    0.151
+                  ],
+                  "live_particles": 9965,
+                  "particles": 10000,
+                  "sim_tick_p95_ms": 0.053,
+                  "sim_tick_p95_runs": [
+                    0.053,
+                    0.053,
+                    0.057
+                  ]
+                },
+                {
+                  "fps": 6035.2,
+                  "frame_p95_ms": 0.179,
+                  "frame_p95_runs": [
+                    0.179,
+                    0.177,
+                    0.179
+                  ],
+                  "live_particles": 19920,
+                  "particles": 20000,
+                  "sim_tick_p95_ms": 0.067,
+                  "sim_tick_p95_runs": [
+                    0.066,
+                    0.068,
+                    0.067
+                  ]
+                },
+                {
+                  "fps": 4362.2,
+                  "frame_p95_ms": 0.238,
+                  "frame_p95_runs": [
+                    0.238,
+                    0.247,
+                    0.226
+                  ],
+                  "live_particles": 39822,
+                  "particles": 40000,
+                  "sim_tick_p95_ms": 0.089,
+                  "sim_tick_p95_runs": [
+                    0.089,
+                    0.119,
+                    0.088
+                  ]
+                },
+                {
+                  "fps": 2897.5,
+                  "frame_p95_ms": 0.356,
+                  "frame_p95_runs": [
+                    0.356,
+                    0.357,
+                    0.356
+                  ],
+                  "live_particles": 79627,
+                  "particles": 80000,
+                  "sim_tick_p95_ms": 0.135,
+                  "sim_tick_p95_runs": [
+                    0.129,
+                    0.135,
+                    0.153
+                  ]
+                },
+                {
+                  "fps": 1743.0,
+                  "frame_p95_ms": 0.592,
+                  "frame_p95_runs": [
+                    0.585,
+                    0.592,
+                    0.639
+                  ],
+                  "live_particles": 159237,
+                  "particles": 160000,
+                  "sim_tick_p95_ms": 0.231,
+                  "sim_tick_p95_runs": [
+                    0.23,
+                    0.231,
+                    0.231
+                  ]
+                },
+                {
+                  "fps": 950.1,
+                  "frame_p95_ms": 1.366,
+                  "frame_p95_runs": [
+                    1.366,
+                    1.361,
+                    1.382
+                  ],
+                  "live_particles": 318444,
+                  "particles": 320000,
+                  "sim_tick_p95_ms": 0.432,
+                  "sim_tick_p95_runs": [
+                    0.44,
+                    0.426,
+                    0.432
+                  ]
+                },
+                {
+                  "fps": 490.0,
+                  "frame_p95_ms": 2.688,
+                  "frame_p95_runs": [
+                    2.67,
+                    2.688,
+                    2.689
+                  ],
+                  "live_particles": 636889,
+                  "particles": 640000,
+                  "sim_tick_p95_ms": 0.803,
+                  "sim_tick_p95_runs": [
+                    0.803,
+                    0.826,
+                    0.803
+                  ]
+                },
+                {
+                  "fps": 153.1,
+                  "frame_p95_ms": 8.854,
+                  "frame_p95_runs": [
+                    8.854,
+                    8.916,
+                    8.78
+                  ],
+                  "live_particles": 1273776,
+                  "particles": 1280000,
+                  "sim_tick_p95_ms": 3.791,
+                  "sim_tick_p95_runs": [
+                    3.809,
+                    3.791,
+                    3.764
+                  ]
+                },
+                {
+                  "fps": 87.1,
+                  "frame_p95_ms": 14.259,
+                  "frame_p95_runs": [
+                    15.417,
+                    13.37,
+                    14.259
+                  ],
+                  "live_particles": 1632045,
+                  "particles": 1640000,
+                  "sim_tick_p95_ms": 6.728,
+                  "sim_tick_p95_runs": [
+                    6.976,
+                    6.243,
+                    6.728
+                  ]
+                },
+                {
+                  "fps": 71.1,
+                  "frame_p95_ms": 15.462,
+                  "frame_p95_runs": [
+                    15.462,
+                    15.413,
+                    16.272
+                  ],
+                  "live_particles": 1811155,
+                  "particles": 1820000,
+                  "sim_tick_p95_ms": 7.243,
+                  "sim_tick_p95_runs": [
+                    7.262,
+                    7.239,
+                    7.243
+                  ]
+                },
+                {
+                  "fps": 64.8,
+                  "frame_p95_ms": 16.517,
+                  "frame_p95_runs": [
+                    16.595,
+                    16.517,
+                    16.337
+                  ],
+                  "live_particles": 1900717,
+                  "particles": 1910000,
+                  "sim_tick_p95_ms": 7.496,
+                  "sim_tick_p95_runs": [
+                    7.496,
+                    7.489,
+                    7.542
+                  ]
+                },
+                {
+                  "fps": 59.1,
+                  "frame_p95_ms": 17.52,
+                  "frame_p95_runs": [
+                    17.52,
+                    19.115,
+                    17.305
+                  ],
+                  "live_particles": 1990276,
+                  "particles": 2000000,
+                  "sim_tick_p95_ms": 7.952,
+                  "sim_tick_p95_runs": [
+                    8.042,
+                    7.952,
+                    7.952
+                  ]
+                }
+              ],
+              "project": "bench_spread",
+              "range": [
+                1910000,
+                2000000
+              ],
+              "scene": "sparse"
+            }
+          },
+          "gpu": "Vulkan 1.4.351 (NVIDIA GeForce RTX 3060 Ti), compatible tier",
+          "msaa": 4,
+          "resolution": "1280x720",
+          "threads": 8,
+          "video_driver": "auto",
+          "workloads": {
+            "1000": {
+              "fps": 9494.9,
+              "frame_ms": {
+                "max": 0.265,
+                "mean": 0.105,
+                "p50": 0.102,
+                "p95": 0.12,
+                "p99": 0.144
+              },
+              "frames": 56970,
+              "hash_tick": 600,
+              "particles": 1010.0,
+              "peak_rss_mb": 252.3,
+              "render_cpu_ms": 0.023,
+              "runs": 3,
+              "sim_tick_ms": {
+                "max": 0.047,
+                "mean": 0.033,
+                "p95": 0.036
+              },
+              "sim_ticks": 360,
+              "spread": {
+                "fps": [
+                  9430.3,
+                  9507.3
+                ],
+                "frame_p95_ms": [
+                  0.119,
+                  0.121
+                ],
+                "sim_tick_mean_ms": [
+                  0.03,
+                  0.034
+                ]
+              },
+              "state_hash": "77e955bfebed7613",
+              "state_hash_jobs1": "77e955bfebed7613"
+            },
+            "10000": {
+              "fps": 7419.3,
+              "frame_ms": {
+                "max": 2.008,
+                "mean": 0.135,
+                "p50": 0.134,
+                "p95": 0.144,
+                "p99": 0.199
+              },
+              "frames": 44517,
+              "hash_tick": 600,
+              "particles": 9961.0,
+              "peak_rss_mb": 252.8,
+              "render_cpu_ms": 0.051,
+              "runs": 3,
+              "sim_tick_ms": {
+                "max": 0.114,
+                "mean": 0.049,
+                "p95": 0.056
+              },
+              "sim_ticks": 360,
+              "spread": {
+                "fps": [
+                  7374.1,
+                  7427.4
+                ],
+                "frame_p95_ms": [
+                  0.143,
+                  0.145
+                ],
+                "sim_tick_mean_ms": [
+                  0.049,
+                  0.049
+                ]
+              },
+              "state_hash": "bff47994b0264192",
+              "state_hash_jobs1": "bff47994b0264192"
+            },
+            "100000": {
+              "fps": 1663.5,
+              "frame_ms": {
+                "max": 1.876,
+                "mean": 0.601,
+                "p50": 0.592,
+                "p95": 0.645,
+                "p99": 0.813
+              },
+              "frames": 9982,
+              "hash_tick": 600,
+              "particles": 99476.0,
+              "peak_rss_mb": 262.7,
+              "render_cpu_ms": 0.315,
+              "runs": 3,
+              "sim_tick_ms": {
+                "max": 0.221,
+                "mean": 0.148,
+                "p95": 0.17
+              },
+              "sim_ticks": 360,
+              "spread": {
+                "fps": [
+                  1652.9,
+                  1687.0
+                ],
+                "frame_p95_ms": [
+                  0.635,
+                  0.649
+                ],
+                "sim_tick_mean_ms": [
+                  0.147,
+                  0.148
+                ]
+              },
+              "state_hash": "d6d6a623a66410b3",
+              "state_hash_jobs1": "d6d6a623a66410b3"
+            },
+            "50000": {
+              "fps": 3175.6,
+              "frame_ms": {
+                "max": 2.14,
+                "mean": 0.315,
+                "p50": 0.309,
+                "p95": 0.347,
+                "p99": 0.558
+              },
+              "frames": 19054,
+              "hash_tick": 600,
+              "particles": 49746.0,
+              "peak_rss_mb": 256.5,
+              "render_cpu_ms": 0.172,
+              "runs": 3,
+              "sim_tick_ms": {
+                "max": 0.149,
+                "mean": 0.099,
+                "p95": 0.115
+              },
+              "sim_ticks": 360,
+              "spread": {
+                "fps": [
+                  3159.1,
+                  3187.4
+                ],
+                "frame_p95_ms": [
+                  0.347,
+                  0.348
+                ],
+                "sim_tick_mean_ms": [
+                  0.096,
+                  0.099
+                ]
+              },
+              "state_hash": "08a148babe2ddac5",
+              "state_hash_jobs1": "08a148babe2ddac5"
+            }
+          }
+        }
+      },
+      "build_type": "Release",
+      "commit": "a1b7913caa4b",
+      "compiler": "c++ (GCC) 16.2.1 20260810",
+      "exports": {
+        "bench": {
+          "full_pack_bytes": 1148016,
+          "full_player_bytes": 5235504,
+          "stripped_pack_bytes": 1148016,
+          "stripped_player_bytes": 3634232
+        },
+        "shmup": {
+          "full_pack_bytes": 1887808,
+          "full_player_bytes": 5235504,
+          "stripped_pack_bytes": 1887808,
+          "stripped_player_bytes": 4445400
+        }
+      },
+      "preset": "gl1r"
+    }
+  },
+  "host": {
+    "cpu": "AMD Ryzen 7 5800X3D 8-Core Processor",
+    "logical_cpus": 16,
+    "os": "Linux-7.2.11-arch1-1-x86_64-with-glibc2.44",
+    "python": "3.14.8"
+  },
+  "machine_id": "5800x3d-rtx3060ti-linux",
+  "schema_version": 1,
+  "timestamp": 1792501628
+}

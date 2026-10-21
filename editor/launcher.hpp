@@ -6,10 +6,8 @@
 #include "cuervo/brand/brand.hpp"
 #include "cuervo/rhi/rhi.hpp"
 
-// The editor's first-launch windows (DESIGN.md 4.16 "Clarified (Milestone 8.3)"): the
-// EULA agreement a fresh user must accept, then the welcome screen where a project is
-// picked (recent projects, templates, open a folder). Its own small window, device and
-// ImGui context, closed before the editor window opens.
+// The editor's welcome window: pick a project (recent projects, templates, open a folder).
+// Its own small window, device and ImGui context, closed before the editor window opens.
 namespace cuervo::editor {
 
 struct LauncherOptions {
@@ -21,24 +19,20 @@ struct LauncherOptions {
     std::optional<brand::Theme> theme;
     int width = 1100;
     int height = 760;
-    bool show_eula = false;      // the agreement comes first
-    bool show_welcome = true;    // then the project picker
-    // Screenshots: capture the first screen after this many frames and exit; nothing is stored.
+    bool show_welcome = true; // the project picker
+    // Screenshots: capture the first screen after this many frames and exit.
     std::string screenshot;
     int screenshot_frame = 6;
-    bool store_acceptance = true;
 };
 
-enum class LauncherOutcome { OpenProject, Declined, Closed, Continue, Failed };
+enum class LauncherOutcome { OpenProject, Closed, Continue, Failed };
 
 struct LauncherResult {
     LauncherOutcome outcome = LauncherOutcome::Closed;
     std::string project; // OpenProject: the folder to open
 };
 
-// Shows the screens in `options` and returns what the user chose. Accepting the EULA
-// writes eula-accepted.txt (unless `store_acceptance` is false). `Continue`: the EULA
-// was accepted and there is no welcome screen to show.
+// Shows the launcher and returns what the user chose.
 LauncherResult run_launcher(const LauncherOptions& options);
 
 } // namespace cuervo::editor

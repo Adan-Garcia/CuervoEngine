@@ -44,7 +44,6 @@
 #include "cuervo/core/log.hpp"
 #include "cuervo/jobs/job_system.hpp"
 #include "cuervo/math/simd.hpp"
-#include "cuervo/platform/eula.hpp"
 #include "cuervo/platform/platform.hpp"
 #include "cuervo/platform/window.hpp"
 #include "cuervo/render/camera.hpp"
@@ -142,9 +141,6 @@ int main(int argc, char** argv) {
     }
 #endif
 #if !defined(__EMSCRIPTEN__)
-    // The EULA gate (DESIGN.md 4.16): every use of the engine but running a pack. An exported game's
-    // players aren't Engine licensees, so --pack (and a game.pak next to the player) never asks.
-    if (!has_flag(argc, argv, "--pack") && !cuervo::eula::require_acceptance(argc, argv, "cuervo")) return EXIT_FAILURE;
     if (has_flag(argc, argv, "--dap")) return run_dap(argc, argv); // a debug adapter: dap_cli.hpp
 #endif
     if (has_flag(argc, argv, "--game") || has_flag(argc, argv, "--pack")) {

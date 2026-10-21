@@ -98,7 +98,7 @@ for a real release. The web runtime defaults to `build/web-pack/runtime`
    before the export succeeds. Every export also gets `licenses/`: the
    engine's `THIRD_PARTY_NOTICES.md` and the license texts of
    `third_party/licenses/` (SDL3, Vulkan headers, ...), because those licenses
-   ask for their notices to travel with the binary (LICENSE.md 11.1). The
+   ask for their notices to travel with the binary. The
    game's own license is the developer's to add.
 
 ## Stripped players

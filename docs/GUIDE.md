@@ -22,30 +22,14 @@ Reference material:
 
 ## 1. Install and build
 
-### Accept the license first
+### License
 
-Cuervo Engine is **source-available**, not open source. Before you build it, read the
-[Cuervo Engine Fair-Code License Agreement (EULA)](../LICENSE.md). **By downloading,
-building, running or otherwise using the Engine you agree to its terms**; if you don't
-agree, don't build or use it. In short: during Beta (before Version 1.0) the engine is free
-for learning, modding, non-commercial forks and commercial games, with no royalties, seat fees
-or reports. Commercial licensing terms will be introduced with Version 1.0; a game developed
-or released with a Beta version is grandfathered at $0 and never owes retroactive fees (the
-EULA's Section 3 and Schedule A have the exact terms). Your own game's code and assets stay
-yours.
+Cuervo Engine is licensed under the [MIT License](../LICENSE.md).
 
 The engine also includes third-party components under their own licenses (zlib, MIT,
 Apache-2.0, ...), listed in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) with
 their full texts in `third_party/licenses/`. Exported games carry those notices
 automatically (`licenses/` next to the player).
-
-**First run.** The built programs ask you to accept the agreement once per user and EULA
-version. The editor shows it in its first window: tick *I have read and agree to the Cuervo
-Engine License Agreement* (it starts unchecked), then *Accept and continue*; *Decline and
-quit* exits without using the Engine. `cuervo`, `cuervo-tools` and `plm` ask on the
-terminal. For scripts and CI pass `--accept-eula` (remembers it) or set
-`CUERVO_ACCEPT_EULA=<version>` (accepts that run only). Games you export never ask their
-players.
 
 ### Build
 
@@ -115,9 +99,8 @@ cuervo-editor --new-project starfall --template walker --name "Starfall"   # --t
 cuervo-editor --project starfall      # edit it; cuervo --game starfall runs it; section 9 ships it
 ```
 
-It refuses a folder that already has files, so nothing is overwritten. Like every program
-here it needs the license accepted first (section 1); `CUERVO_ACCEPT_EULA=<version>`
-does for one run. `tests/workflow_smoke.cmake` runs this whole path (new project, edit and save a
+It refuses a folder that already has files, so nothing is overwritten.
+`tests/workflow_smoke.cmake` runs this whole path (new project, edit and save a
 scene, play, add a script, hot reload, export, launch the shipped game from another
 directory) on every build.
 

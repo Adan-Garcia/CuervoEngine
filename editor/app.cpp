@@ -1,7 +1,7 @@
 #include "editor/app.hpp"
-#include "editor/eula_view.hpp"
+#include "editor/license_view.hpp"
 #include "editor/launcher.hpp"
-#include "cuervo/platform/eula.hpp"
+#include "cuervo/platform/license.hpp"
 
 #include <SDL3/SDL.h>
 #include <imgui.h>
@@ -570,7 +570,7 @@ void EditorApp::update_title() {
 
 void EditorApp::draw_dialogs() {
     const char* names[] = {"",           "New Scene",         "Open Scene", "Save Scene As",
-                           "Add Child Node", "Unsaved Changes", "License Agreement", "Save Layout"};
+                           "Add Child Node", "Unsaved Changes", "License", "Save Layout"};
     if (dialog_ == Dialog::None) return;
     const char* name = names[static_cast<int>(dialog_)];
     if (!dialog_opened_) {
@@ -598,7 +598,7 @@ void EditorApp::draw_dialogs() {
     };
     const auto& classes = env_.classes().classes();
     if (dialog_ == Dialog::License) {
-        draw_eula(license_view_, false);
+        draw_license_dialog(license_view_);
         if (ImGui::Button("Close")) close();
     } else if (dialog_ == Dialog::SaveLayout) {
         ImGui::TextUnformatted("Name for the current panel arrangement:");
@@ -858,46 +858,24 @@ LauncherOptions launcher_options(const EditorOptions& o) {
 
 } // namespace
 
-// The start sequence (DESIGN.md 4.16 "Clarified (Milestone 8.3)"): the license agreement
-// when this user has not accepted it, the welcome screen when no project was given, then
+// The start sequence: the welcome screen when no project was given, then
 // the editor; "Close Project" and the recent-projects menu come back through the loop.
 int run_editor(const EditorOptions& options) {
     EditorOptions opts = options;
     const bool headless = (!opts.script_commands.empty() && opts.screenshot.empty()) || !opts.replay_verify.empty();
     const bool shot = !opts.screenshot.empty();
-    // Screenshots of a first-launch screen: show it, store nothing, exit.
-    if (shot && (opts.screen == "eula" || opts.screen == "welcome")) {
+    // Screenshots of a first-launch screen: show it, exit.
+    if (shot && opts.screen == "welcome") {
         LauncherOptions l = launcher_options(opts);
-        l.show_eula = opts.screen == "eula";
-        l.show_welcome = !l.show_eula;
-        l.store_acceptance = false;
+        l.show_welcome = true;
         const LauncherResult r = run_launcher(l);
         return r.outcome == LauncherOutcome::Failed ? EXIT_FAILURE : EXIT_SUCCESS;
     }
-    bool need_eula = false;
-    if (!headless) { // headless modes were gated by main() with the terminal rules
-        eula::GateInput gate;
-        gate.program = "cuervo-editor";
-        gate.version = eula::version();
-        gate.file = eula::acceptance_file();
-        gate.accept_flag = opts.accept_eula;
-        gate.env_version = platform::env("CUERVO_ACCEPT_EULA");
-        if (gate.env_version && gate.env_version->empty()) gate.env_version.reset();
-        std::string message;
-        need_eula = eula::run_gate(gate, message) != eula::GateResult::Accepted;
-        if (!message.empty()) LOG_WARN("{}", message);
-    }
-    bool want_welcome = opts.project.empty();
-    if (need_eula || want_welcome) {
+    bool want_welcome = (opts.project.empty() || opts.screen == "welcome") && !headless;
+    if (want_welcome) {
         LauncherOptions l = launcher_options(opts);
-        l.show_eula = need_eula;
-        l.show_welcome = want_welcome;
+        l.show_welcome = true;
         const LauncherResult r = run_launcher(l);
-        if (r.outcome == LauncherOutcome::Declined) {
-            LOG_ERROR("The license agreement was declined, so the editor did not start. Nothing was changed. "
-                      "Start it again and accept the agreement to use Cuervo Engine.");
-            return EXIT_FAILURE;
-        }
         if (r.outcome == LauncherOutcome::Failed) return EXIT_FAILURE;
         if (r.outcome == LauncherOutcome::Closed) return EXIT_SUCCESS;
         if (r.outcome == LauncherOutcome::OpenProject) opts.project = r.project;

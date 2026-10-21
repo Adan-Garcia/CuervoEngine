@@ -30,8 +30,7 @@ build/<dir>/editor/cuervo-editor --project examples/shmup --scene scenes/title.s
 | `--profile` | start the Profiler panel recording (engine zones + script functions) |
 | `--theme light\|dark` | the brand theme (Bone or Raven); default: the OS's preference. *View > Theme* switches it live |
 | `--splash`, `--no-splash` | hold the splash until a click or key (screenshots of it) / never show it. By default it shows for about a second and a half at start (not with `--screenshot`) |
-| `--accept-eula` | accept the license agreement for this user (stored; same as the check box). `CUERVO_ACCEPT_EULA=<version>` accepts one run without storing |
-| `--screen eula\|welcome` | show that first-launch screen even when it is not needed (screenshots; nothing is stored) |
+| `--screen welcome` | show the welcome screen even when a project is given (screenshots) |
 | `--layout <name>` | start in that saved layout (Default, Debugging, Minimal or yours) |
 | `--tool select\|move\|rotate\|scale`, `--select </a,/b>`, `--palette [query]` | start with that tool, those nodes selected, or the command palette open (screenshots of the gizmos and the palette) |
 
@@ -57,26 +56,15 @@ cuervo-editor --project examples/editor_level --theme dark --screenshot editor-d
 The editor is desktop-only: the web build (Emscripten) never configures `editor/`.
 `-DCUERVO_BUILD_EDITOR=OFF` skips it (and the Dear ImGui download) elsewhere too.
 
-## First run, welcome screen
+## Welcome screen
 
-A fresh user account sees the **license agreement** before anything else opens: the
-plain-English summary on top, the scrollable [agreement](../LICENSE.md) and the
-third-party notices below, and an **unchecked** "I have read and agree to the Cuervo
-Engine License Agreement" box. *Accept and continue* stays disabled until the box is
-checked; *Decline and quit* is the same size and exits with status 1 without using the
-engine. Acceptance is stored per user (`eula-accepted.txt` in the user data folder, with
-the EULA version and date), and a new EULA version asks again. `cuervo-editor
---accept-eula` accepts for scripts (stored), `CUERVO_ACCEPT_EULA=<version>` accepts one run
-(not stored); the headless modes (`--script-commands`, `--replay-verify`) and
-`cuervo-tools`/`cuervo`/`plm` ask on a terminal or need one of those. **Exported games
-never ask.** *Help > License Agreement* shows it again, read-only.
-
-Without `--project` the **welcome screen** follows: recent projects (newest first, a
+Without `--project` the **welcome screen** opens: recent projects (newest first, a
 missing folder is flagged and can be removed), *Open Folder...* or a typed path, and *New
 project* from a template (Empty 2D, Walker; `create_project()` in `projects.hpp`). The
 choice opens the editor; *Project > Switch Project...* comes back here. Recents live in
 `editor-recent-projects.txt` in the user data folder. Screenshot and test runs never
-write any of the per-user files.
+write any of the per-user files. *Help > License* displays the engine's MIT License and
+third-party notices.
 
 ## Interface
 
@@ -347,9 +335,8 @@ plays the saved scene in the editor to the runtime's state hash.
   defaults), shared widgets, the vector icons and the message formula.
 - `actions`, `layouts`, `projects` — the action registry with fuzzy search (the menus, toolbar
   and palette all run it), saved layouts (dock text per user), recents and templates.
-- `launcher`, `eula_view` — the first-launch window (agreement, then the welcome screen)
-  with its own device and ImGui context, run before the editor window opens. The EULA
-  gate itself is `cuervo/platform/eula.*`.
+- `launcher`, `license_view` — the welcome screen window and license viewer
+  with its own device and ImGui context, run before the editor window opens.
 
 `editor_core` (everything but the window and ImGui) is a library that
 `tests/editor/editor_tests.cpp`, `editor_6b_tests.cpp` and `editor_83_tests.cpp` link headless; the

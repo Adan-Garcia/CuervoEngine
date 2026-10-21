@@ -8,7 +8,7 @@
 # Cuervo Engine
 
 [![CI](https://github.com/Adan-Garcia/CuervoEngine/actions/workflows/ci.yml/badge.svg)](https://github.com/Adan-Garcia/CuervoEngine/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-Fair--Code-blue.svg)](LICENSE.md)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 [![Documentation](https://img.shields.io/badge/docs-website-orange.svg)](https://adan-garcia.github.io/CuervoEngine/)
 
 A 2D, vector-first, deterministic game engine in C++20 with its own statically typed
@@ -88,19 +88,11 @@ API reference, search, light and dark): `cmake --build build/debug --target docs
 
 ## License
 
-Cuervo Engine is source-available (not open source) under the [Cuervo Engine Fair-Code License
-Agreement (EULA)](LICENSE.md). During Beta (before Version 1.0) it is free for learning,
-modding, non-commercial forks and commercial games: no royalties, seat fees or reports.
-Commercial licensing terms will be introduced with Version 1.0; any game or product developed or
-released with a Beta version is grandfathered at $0 and owes no retroactive fees, and the new
-terms apply only if you upgrade it to Version 1.0 or later. The LICENSE.md text is the source
-of truth. **Read it before building: by building or using the Engine you agree to it.**
+Cuervo Engine is licensed under the [MIT License](LICENSE.md).
 Third-party components keep their own licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 and `third_party/licenses/`.
 
 ## Build and test
-
-By building you accept the [EULA](LICENSE.md) (see License above).
 
 ```sh
 cmake --preset debug          # or: release
@@ -116,13 +108,8 @@ players and release builds.
 
 ## Run
 
-The first run of `cuervo`, `cuervo-editor`, `cuervo-tools`, or `plm` asks you to accept
-the EULA. Use `--accept-eula` (stored for your user) or `CUERVO_ACCEPT_EULA=<version>` (one run)
-for scripted or headless runs; exported game players do not ask. The commands below assume
-you accepted once.
-
 ```sh
-./build/debug/runtime/cuervo --accept-eula --game examples/bench   # SDF shape stress test (Pluma); Space/Enter/Pad A cycles 1k/10k/50k/100k shapes, Esc quits
+./build/debug/runtime/cuervo --game examples/bench   # SDF shape stress test (Pluma); Space/Enter/Pad A cycles 1k/10k/50k/100k shapes, Esc quits
 ./build/debug/runtime/cuervo --game examples/bench --backend gl   # force a backend: vulkan | gl (default: Vulkan, falls back to GL)
 ./build/debug/runtime/cuervo --game examples/bench --quit-after 3 # exit after 3 seconds (smoke tests)
 SDL_VIDEO_DRIVER=offscreen ./build/debug/runtime/cuervo --game examples/bench --quit-after 3   # headless (GL only: no headless Vulkan on NVIDIA)
@@ -140,11 +127,11 @@ SDL_VIDEO_DRIVER=offscreen ./build/debug/runtime/cuervo --game examples/bench --
 ./build/debug/runtime/cuervo --game examples/shmup --jobs 4  # job system threads (or CUERVO_JOBS / project.toml `jobs`); same result for any count
 ./build/debug/tools/cuervo_tools/cuervo-tools tier check examples/shmup [--to full]  # render-tier migration report
 ./build/debug/tools/rhi_parity/rhi_parity features --backend vulkan  # device capabilities and tiers
-./build/debug/editor/cuervo-editor --accept-eula --project examples/editor_level  # the editor (editor/README.md): scene tree, view, inspector, undo
+./build/debug/editor/cuervo-editor --project examples/editor_level  # the editor (editor/README.md): scene tree, view, inspector, undo
 ./build/debug/editor/cuervo-editor --new-project mygame --template walker  # a new project (no window); then --project mygame, cuervo --game mygame, cuervo-tools export mygame
 ./build/debug/editor/cuervo-editor --project examples/shmup     # F5 plays the game in the editor; replays: docs/REPLAYS.md
 ./build/debug/runtime/cuervo --game examples/editor_level  # a level built in the editor without code (examples/editor_level/level.cmds)
-./build/debug/pluma/plm --accept-eula      # Pluma REPL: type code, see the results
+./build/debug/pluma/plm      # Pluma REPL: type code, see the results
 ```
 
 ## Examples

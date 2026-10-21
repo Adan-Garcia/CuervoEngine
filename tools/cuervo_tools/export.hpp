@@ -93,7 +93,7 @@ struct ExportOptions {
     // The engine's source root, holding THIRD_PARTY_NOTICES.md and
     // third_party/licenses/: copied into the output as `licenses/`, since
     // the player's third-party licenses (zlib, MIT, ...) ask for their notices
-    // to travel with it (LICENSE.md 11.1). Empty: no notices are copied.
+    // to travel with it. Empty: no notices are copied.
     std::filesystem::path notices_root;
     Progress progress;
 };

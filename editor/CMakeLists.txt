@@ -43,7 +43,7 @@ add_executable(editor
     app_ui.cpp
     ui.cpp
     history_panel.cpp
-    eula_view.cpp
+    license_view.cpp
     launcher.cpp
 )
 # The ImGui shaders go through the engine's shader pipeline (cmake/Shaders.cmake).

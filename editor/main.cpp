@@ -4,14 +4,13 @@
 //                 [--script-commands <file>] [--screenshot <file.ppm>]
 //                 [--quit-after <seconds>] [--size <w>x<h>] [--font <file.ttf>] [--view <x>,<y>,<zoom>]
 //                 [--jobs <n>] [--no-audio] [--tabs <Panel,...>] [--profile]
-//                 [--theme light|dark] [--splash|--no-splash] [--accept-eula] [--layout <name>]
-//                 [--screen eula|welcome] [--tool select|move|rotate|scale] [--select </a,/b>] [--palette [query]]
+//                 [--theme light|dark] [--splash|--no-splash] [--layout <name>]
+//                 [--screen welcome] [--tool select|move|rotate|scale] [--select </a,/b>] [--palette [query]]
 //   cuervo-editor --project <dir> --replay-verify <file.replay> [--jobs <n>]
 //   cuervo-editor --new-project <dir> [--template empty|walker] [--name <name>]
 //
-// --new-project makes a project the way the welcome screen's "New project" does and exits
-// (headless, so it follows the command-line EULA rules); --template defaults to empty and
-// --name to the folder's name.
+// --new-project makes a project the way the welcome screen's "New project" does and exits;
+// --template defaults to empty and --name to the folder's name.
 // --script-commands applies a file of editor operations (headless: no
 // window), saves and exits; with --screenshot it then opens the window and
 // captures it. --replay-verify plays a replay back headless and exits 1 at
@@ -27,7 +26,6 @@
 #include "cuervo/core/profiler.hpp"
 #include "cuervo/jobs/job_system.hpp"
 #include "cuervo/platform/platform.hpp"
-#include "cuervo/platform/eula.hpp"
 #include "editor/app.hpp"
 #include "editor/projects.hpp"
 
@@ -51,7 +49,7 @@ int usage() {
     LOG_ERROR("usage: cuervo-editor --project <dir> [--scene <path>] [--backend gl|vulkan] [--gl-es] "
               "[--script-commands <file>] [--screenshot <file.ppm>] [--quit-after <seconds>] [--size <w>x<h>] "
               "[--font <file.ttf>] [--view <x>,<y>,<zoom>] [--jobs <n>] [--no-audio] [--tabs <Panel,...>] [--replay-verify <file.replay>] [--profile] "
-              "[--theme light|dark] [--splash|--no-splash] [--accept-eula] [--layout <name>] [--screen eula|welcome] "
+              "[--theme light|dark] [--splash|--no-splash] [--layout <name>] [--screen welcome] "
               "[--tool select|move|rotate|scale] [--select </a,/b>] [--palette [query]]\n"
               "       cuervo-editor --new-project <dir> [--template empty|walker] [--name <name>]");
     return EXIT_FAILURE;
@@ -69,11 +67,10 @@ int main(int argc, char** argv) {
     o.screenshot = std::string(arg_value(argc, argv, "--screenshot"));
     o.replay_verify = std::string(arg_value(argc, argv, "--replay-verify"));
     o.audio = !has_flag(argc, argv, "--no-audio");
-    o.accept_eula = has_flag(argc, argv, "--accept-eula");
     o.screen = std::string(arg_value(argc, argv, "--screen"));
     o.layout = std::string(arg_value(argc, argv, "--layout"));
-    if (o.screen != "" && o.screen != "eula" && o.screen != "welcome") {
-        LOG_ERROR("Unknown --screen '{}' (expected eula or welcome)", o.screen);
+    if (o.screen != "" && o.screen != "welcome") {
+        LOG_ERROR("Unknown --screen '{}' (expected welcome)", o.screen);
         return EXIT_FAILURE;
     }
     if (has_flag(argc, argv, "--new-project")) {
@@ -83,7 +80,6 @@ int main(int argc, char** argv) {
                       "Example: cuervo-editor --new-project mygame --template walker");
             return EXIT_FAILURE;
         }
-        if (!eula::require_acceptance(argc, argv, "cuervo-editor")) return EXIT_FAILURE;
         const std::filesystem::path folder = std::filesystem::absolute(std::filesystem::path(std::string(dir)));
         std::string_view name = arg_value(argc, argv, "--name");
         const std::string fallback = folder.filename().string();
@@ -97,11 +93,6 @@ int main(int argc, char** argv) {
         }
         LOG_INFO("Created project '{}' ({} template) in {}", name, tmpl, folder.string());
         return EXIT_SUCCESS;
-    }
-    // Headless runs (no window to show the agreement in) follow the command-line rules.
-    if (((!o.script_commands.empty() && o.screenshot.empty()) || !o.replay_verify.empty()) &&
-        !eula::require_acceptance(argc, argv, "cuervo-editor")) {
-        return EXIT_FAILURE;
     }
     // The Profiler panel starts recording (DESIGN.md 5.14).
     if (has_flag(argc, argv, "--profile")) profiler::set_enabled(true);

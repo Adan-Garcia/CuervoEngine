@@ -20,7 +20,7 @@
 #include "editor/asset_library.hpp"
 #include "editor/console_log.hpp"
 #include "editor/editor_document.hpp"
-#include "editor/eula_view.hpp"
+#include "editor/license_view.hpp"
 #include "editor/imgui_rhi.hpp"
 #include "editor/input_map_doc.hpp"
 #include "editor/layouts.hpp"
@@ -76,10 +76,7 @@ struct EditorOptions {
     // --splash: show the splash until a click or key (screenshots of it);
     // --no-splash: never. Default: shown at start, except for screenshots.
     SplashMode splash = SplashMode::Auto;
-    // 8.3. --accept-eula: accept the license agreement for this user (like the check box).
-    bool accept_eula = false;
-    // --screen eula|welcome: show that first-launch screen even when it isn't needed
-    // (screenshots; nothing is stored).
+    // --screen welcome: show the welcome screen even when a project is given (for screenshots/tests).
     std::string screen;
     // --tool select|move|rotate|scale, --select </a,/b>, --palette [query]: start in that
     // state (screenshots of the gizmos and the palette).
@@ -274,7 +271,7 @@ private:
     std::string switch_target_;
     std::string layout_name_input_;
     double clock_ = 0.0;
-    EulaView license_view_;
+    LicenseView license_view_;
     bool discard_switch_ = false;     // the discard dialog was opened by a project switch
     // Docking (ImGui docking branch): a layout to apply at the next draw_docks.
     std::string pending_dock_;        // ImGui ini text to load

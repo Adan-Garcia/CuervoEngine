@@ -59,7 +59,6 @@ python3 tools/bench.py check   docs/perf/baseline-<machine-id>.json            #
 python3 tools/bench.py report  docs/perf/baseline-<machine-id>.json            # Markdown tables
 ```
 
-Tools need the EULA accepted (`CUERVO_ACCEPT_EULA=<version>`, never stored by the tool).
 `record` and `capacity` merge into the file they are given, keyed by build type, so one file holds
 debug and release. GL runs use the `offscreen` SDL driver on Linux (no window, no compositor
 in the way); Vulkan needs a real display (`WAYLAND_DISPLAY` defaults to `wayland-0` when no

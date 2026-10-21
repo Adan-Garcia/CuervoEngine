@@ -11,8 +11,7 @@ add_library(cuervo STATIC
     platform/file_watcher.cpp
     platform/main_loop.cpp
     platform/sdl_keymap.cpp
-    platform/eula.cpp
-    platform/eula_text.cpp
+    platform/license.cpp
     brand/brand.cpp
     rhi/rhi.cpp
     rhi/gl/gl_loader.cpp
@@ -192,10 +191,9 @@ include(Brand)
 cuervo_brand_generate("${CMAKE_CURRENT_BINARY_DIR}/generated_brand")
 target_include_directories(cuervo PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/generated_brand")
 
-# The EULA's version and text (LICENSE.md, cmake/Eula.cmake): the acceptance gate.
-cuervo_eula_embed("${CMAKE_CURRENT_BINARY_DIR}/generated_eula")
-target_include_directories(cuervo PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated_eula")
-target_compile_definitions(cuervo PRIVATE CUERVO_EULA_VERSION="${CUERVO_EULA_VERSION}" CUERVO_EULA_DATE="${CUERVO_EULA_DATE}")
+# The license and notices text (LICENSE.md, THIRD_PARTY_NOTICES.md, cmake/License.cmake).
+cuervo_license_embed("${CMAKE_CURRENT_BINARY_DIR}/generated_license")
+target_include_directories(cuervo PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated_license")
 
 # GLSL 450 -> SPIR-V + GLSL 330 + GLSL ES 300 headers (cmake/Shaders.cmake).
 cuervo_add_shaders(cuervo

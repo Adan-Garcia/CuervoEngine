@@ -73,8 +73,6 @@ if(NOT CMAKE_HOST_WIN32)
     set(ENV{SDL_VIDEO_DRIVER} offscreen)
 endif()
 set(ENV{CUERVO_USER_DIR} "${OUT}/user")
-# An exported game never asks for the EULA (DESIGN.md 4.16): run it as a customer would, with nothing accepted.
-unset(ENV{CUERVO_ACCEPT_EULA})
 foreach(variant shipped shipped_aot)
     execute_process(
         COMMAND "${OUT}/${variant}/${LAUNCHER_EXE}" --backend gl --no-audio --screenshot "${variant}.ppm"

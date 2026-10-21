@@ -44,7 +44,6 @@
 #include <vector>
 
 #include "cuervo/assets/pack.hpp"
-#include "cuervo/platform/eula.hpp"
 #include "cuervo/platform/platform.hpp"
 #include "cuervo/scene/scene_file.hpp"
 #include "cuervo/script/script_host.hpp"
@@ -527,11 +526,6 @@ int docs_command(int argc, char** argv) {
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc < 2) return usage();
-    // The EULA gate (DESIGN.md 4.16). `lsp` is started by editors without a terminal: it honors a stored
-    // acceptance and otherwise fails with the message on stderr.
-    if (!cuervo::eula::require_acceptance(argc, argv, "cuervo-tools")) return 1;
-    cuervo::eula::strip_accept_flag(argc, argv);
     if (argc < 2) return usage();
     const std::string_view group = argv[1];
     if (group == "lsp") return lsp_command(argc, argv);

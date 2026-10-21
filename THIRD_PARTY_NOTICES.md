@@ -1,9 +1,7 @@
 # Third-party notices
 
-Cuervo Engine is distributed under its own license ([LICENSE.md](LICENSE.md)). It includes,
-links to or ships with the components below, each under its own license. Section 11.1 of
-the Engine license does not change those licenses; where one conflicts with the Engine
-license for that component, the component's license controls for that component only.
+Cuervo Engine is distributed under the MIT License ([LICENSE.md](LICENSE.md)). It includes,
+links to or ships with the components below, each under its own license.
 
 The full license texts are in [`third_party/licenses/`](third_party/licenses/), copied
 verbatim from each component's pinned release (`cmake/Dependencies.cmake`) or, for

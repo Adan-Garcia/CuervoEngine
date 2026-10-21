@@ -308,7 +308,7 @@ void EditorApp::add_app_actions() {
         request_add_child(doc_.selection() != 0 ? doc_.selection() : doc_.model().root());
         return true;
     });
-    add("help.license", "License Agreement", "Help", "", {}, [this] {
+    add("help.license", "License", "Help", "", {}, [this] {
         show_license();
         return true;
     });

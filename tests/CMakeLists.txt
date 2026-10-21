@@ -33,8 +33,7 @@ set(CUERVO_TEST_SOURCES
     cuervo/node_tests.cpp
     cuervo/hierarchy_tests.cpp
     cuervo/animation_tests.cpp
-    cuervo/eula_tests.cpp
-    ${PROJECT_SOURCE_DIR}/pluma/repl/eula_gate.cpp
+    cuervo/license_tests.cpp
 )
 
 if(CUERVO_FEATURE_AUDIO)
@@ -52,8 +51,7 @@ endif()
 
 add_executable(cuervo_tests ${CUERVO_TEST_SOURCES})
 target_link_libraries(cuervo_tests PRIVATE cuervo cuervo_export cuervo_api_docs doctest)
-target_include_directories(cuervo_tests PRIVATE ${PROJECT_SOURCE_DIR}/pluma/repl)
-target_compile_definitions(cuervo_tests PRIVATE CUERVO_EULA_VERSION="${CUERVO_EULA_VERSION}" CUERVO_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets"
+target_compile_definitions(cuervo_tests PRIVATE CUERVO_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets"
     CUERVO_EXAMPLES_DIR="${PROJECT_SOURCE_DIR}/examples")
 add_test(NAME cuervo_tests COMMAND cuervo_tests)
 set_tests_properties(cuervo_tests PROPERTIES TIMEOUT 360)
@@ -307,7 +305,6 @@ if(TARGET editor AND TARGET runtime AND TARGET cuervo_tools AND NOT EMSCRIPTEN)
         -DTOOLS=$<TARGET_FILE:cuervo_tools>
         -DRUNTIME=$<TARGET_FILE:runtime>
         -DEDITOR=$<TARGET_FILE:editor>
-        -DVERSION=${CUERVO_EULA_VERSION}
         -DOUT=${CMAKE_CURRENT_BINARY_DIR}/workflow_smoke
         -DPLAYER_CACHE=${_workflow_player_cache}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/workflow_smoke.cmake)
@@ -347,16 +344,6 @@ if(CUERVO_SLOW_TESTS AND TARGET runtime AND TARGET cuervo_tools AND NOT EMSCRIPT
     set_tests_properties(export_stripped_tictak PROPERTIES TIMEOUT 1800)
 endif()
 
-# The EULA gate through the shipped binaries (tests/eula.cmake).
-if(TARGET runtime AND TARGET cuervo_tools AND NOT EMSCRIPTEN)
-    add_test(NAME eula_gate COMMAND ${CMAKE_COMMAND}
-        -DTOOLS=$<TARGET_FILE:cuervo_tools> -DRUNTIME=$<TARGET_FILE:runtime>
-        -DPROJECT=${PROJECT_SOURCE_DIR}/examples/tictak -DVERSION=${CUERVO_EULA_VERSION}
-        -DOUT=${CMAKE_CURRENT_BINARY_DIR}/eula_gate
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/eula.cmake)
-    set_tests_properties(eula_gate PROPERTIES TIMEOUT 180)
-endif()
-
 # The documentation site (milestone 8.4, tools/build_site.py, DESIGN.md 4.16): `cmake --build <dir> --target
 # docs_site` writes <dir>/site. The ctest builds it and fails on any Markdown link that points nowhere or any
 # broken internal link/fragment in the output. The brand fonts ship with it, so it needs the editor's fonts.
@@ -388,16 +375,6 @@ if(CUERVO_PYTHON3)
         set_tests_properties(docs_site PROPERTIES TIMEOUT 120)
     endif()
 endif()
-
-# Every test that runs a program (cuervo, cuervo-tools, cuervo-editor, plm) accepts the EULA the way CI
-# does (DESIGN.md 4.16 "EULA agreement"); tests/eula.cmake checks the gate itself with this unset.
-get_property(_all_tests DIRECTORY PROPERTY TESTS)
-foreach(_t IN LISTS _all_tests)
-    if(_t STREQUAL "eula_gate" OR _t STREQUAL "workflow_smoke")
-        continue()
-    endif()
-    set_property(TEST ${_t} APPEND PROPERTY ENVIRONMENT "CUERVO_ACCEPT_EULA=${CUERVO_EULA_VERSION}")
-endforeach()
 
 # The editor's style against ImGui's own defaults (theme.cpp only; no window).
 if(TARGET editor AND TARGET imgui)

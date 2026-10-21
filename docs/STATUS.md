@@ -20,9 +20,7 @@ regenerates them; the `support_matrix_up_to_date` test fails when they are stale
 Each row also says **where** the feature works and which render **tier** it needs. *Desktop only* means Linux and Windows but not the web; a row that lists Web is web-compatible. Windows is an experimental platform, so every Windows entry inherits that level. `-` in Tier means the feature does not depend on the render tier. `cuervo-tools tier check --platform <linux|windows|web>` and `cuervo-tools export` refuse a project that claims more than a row here provides for the target.
 <!-- support-matrix:end legend -->
 
-The engine is source-available under the [EULA](../LICENSE.md): free during Beta, commercial
-games included, with commercial terms to be introduced at Version 1.0 and grandfathering for
-products built or released during Beta. The EULA text is the source of truth.
+The engine is licensed under the [MIT License](../LICENSE.md).
 
 ## Platforms
 
