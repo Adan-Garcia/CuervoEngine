@@ -79,6 +79,9 @@ jobs:
           $url = "https://github.com/KhronosGroup/glslang/releases/download/16.6.0/glslang-16.6.0-windows-x86_64-release.zip"
           Invoke-WebRequest -Uri $url -OutFile "glslang.zip"
           Expand-Archive -Path "glslang.zip" -DestinationPath "C:\tools\glslang"
+          if (Test-Path "C:\tools\glslang\bin\glslang.exe") {
+              Copy-Item "C:\tools\glslang\bin\glslang.exe" "C:\tools\glslang\bin\glslangValidator.exe"
+          }
           echo "C:\tools\glslang\bin" >> $env:GITHUB_PATH
 
       - name: Configure CMake (Release)
@@ -91,12 +94,14 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path package\bin
-          Copy-Item build\release\runtime\cuervo.exe package\bin\
-          Copy-Item build\release\editor\cuervo-editor.exe package\bin\
-          Copy-Item build\release\tools\cuervo_tools\cuervo-tools.exe package\bin\
-          Copy-Item build\release\pluma\plm.exe package\bin\
-          Copy-Item -Recurse third_party\licenses package\
-          Copy-Item LICENSE.md, README.md, THIRD_PARTY_NOTICES.md package\
+          Copy-Item build\release\runtime\cuervo.exe -Destination package\bin\
+          Copy-Item build\release\editor\cuervo-editor.exe -Destination package\bin\
+          Copy-Item build\release\tools\cuervo_tools\cuervo-tools.exe -Destination package\bin\
+          Copy-Item build\release\pluma\plm.exe -Destination package\bin\
+          Copy-Item -Recurse third_party\licenses -Destination package\
+          Copy-Item LICENSE.md -Destination package\
+          Copy-Item README.md -Destination package\
+          Copy-Item THIRD_PARTY_NOTICES.md -Destination package\
           Compress-Archive -Path package\* -DestinationPath cuervo-windows-x86_64.zip
 
       - name: Upload Windows Artifact

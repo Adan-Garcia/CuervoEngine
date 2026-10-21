@@ -50,6 +50,9 @@ jobs:
           $url = "https://github.com/KhronosGroup/glslang/releases/download/16.6.0/glslang-16.6.0-windows-x86_64-release.zip"
           Invoke-WebRequest -Uri $url -OutFile "glslang.zip"
           Expand-Archive -Path "glslang.zip" -DestinationPath "C:\tools\glslang"
+          if (Test-Path "C:\tools\glslang\bin\glslang.exe") {
+              Copy-Item "C:\tools\glslang\bin\glslang.exe" "C:\tools\glslang\bin\glslangValidator.exe"
+          }
           echo "C:\tools\glslang\bin" >> $env:GITHUB_PATH
 
       - name: Configure CMake

@@ -4,7 +4,7 @@
 # so the runtime never compiles shader source except GL's own glCompileShader
 # on the generated GLSL.
 
-find_program(GLSLANG_VALIDATOR glslangValidator
+find_program(GLSLANG_VALIDATOR NAMES glslangValidator glslang
     HINTS "$ENV{VULKAN_SDK}/bin"
     DOC "glslangValidator from Khronos glslang (GLSL -> SPIR-V)")
 if(NOT GLSLANG_VALIDATOR)
