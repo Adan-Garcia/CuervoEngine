@@ -272,10 +272,12 @@ bool EditorApp::open_window(std::string& error) {
     const bool want_splash = options_.splash == SplashMode::On ||
                              (options_.splash == SplashMode::Auto && options_.screenshot.empty());
     if (want_splash) {
-        if (splash_.init(*device_, text_, CUERVO_BRAND_DIR, CUERVO_FONT_DISPLAY)) {
+        const std::string brand_dir = platform::utf8(platform::find_asset("brand", CUERVO_BRAND_DIR));
+        const std::string display_font = platform::utf8(platform::find_asset("fonts/Outfit-Medium.ttf", CUERVO_FONT_DISPLAY));
+        if (splash_.init(*device_, text_, brand_dir, display_font)) {
             splash_state_ = options_.splash == SplashMode::On ? SplashState::Held : SplashState::Timed;
         } else {
-            LOG_WARN("Splash: the brand mark could not be loaded from '{}'", CUERVO_BRAND_DIR);
+            LOG_WARN("Splash: the brand mark could not be loaded from '{}'", brand_dir);
         }
     }
     if (!ImGui_ImplSDL3_InitForOther(window_.native())) {

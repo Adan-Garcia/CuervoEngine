@@ -61,6 +61,17 @@ std::filesystem::path path_from_utf8(std::string_view text);
 // if unknown. A release build finds its `game.pak` here (docs/EXPORT.md).
 std::filesystem::path executable_dir();
 
+// Finds an engine asset (e.g. "fonts/LiberationSans-Regular.ttf", "brand", "demo/robot.svg").
+// Searches:
+// 1. CUERVO_ASSETS_DIR environment variable
+// 2. Compiled fallback path (if non-empty and exists on disk)
+// 3. <executable_dir>/assets/<subpath>
+// 4. <executable_dir>/../assets/<subpath>
+// 5. <executable_dir>/../share/cuervo/assets/<subpath>
+// 6. ./assets/<subpath>
+// Returns the first path that exists on disk, or the fallback path if none exist.
+std::filesystem::path find_asset(std::string_view subpath, std::string_view fallback = {});
+
 // The per-user writable directory for a game's saves (DESIGN.md 7.2 "Save
 // data": SDL_GetPrefPath("Cuervo", <game>), e.g. ~/.local/share/Cuervo/<game>/
 // on Linux, %APPDATA%/Cuervo/<game>/ on Windows, MEMFS on the web).

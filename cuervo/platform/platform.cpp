@@ -64,6 +64,42 @@ std::filesystem::path executable_dir() {
     return base != nullptr ? path_from_utf8(base) : std::filesystem::path();
 }
 
+std::filesystem::path find_asset(std::string_view subpath, std::string_view fallback) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    // 1. Environment variable override
+    if (auto dir = env("CUERVO_ASSETS_DIR"); dir && !dir->empty()) {
+        auto p = path_from_utf8(*dir) / path_from_utf8(subpath);
+        if (fs::exists(p, ec)) return p;
+    }
+    // 2. Compiled fallback if it exists (e.g. running from repo during development)
+    if (!fallback.empty()) {
+        auto p = path_from_utf8(fallback);
+        if (fs::exists(p, ec)) return p;
+    }
+    // 3. Relative to executable: <exe_dir>/assets/<subpath>
+    const auto exe = executable_dir();
+    if (!exe.empty()) {
+        auto p1 = exe / "assets" / path_from_utf8(subpath);
+        if (fs::exists(p1, ec)) return p1;
+
+        // 4. Relative to parent: <exe_dir>/../assets/<subpath> (standard when binaries are in bin/)
+        auto p2 = exe.parent_path() / "assets" / path_from_utf8(subpath);
+        if (fs::exists(p2, ec)) return p2;
+
+        // 5. Standard install prefix: <exe_dir>/../share/cuervo/assets/<subpath>
+        auto p3 = exe.parent_path() / "share" / "cuervo" / "assets" / path_from_utf8(subpath);
+        if (fs::exists(p3, ec)) return p3;
+    }
+    // 6. Current working directory fallback: ./assets/<subpath>
+    auto cwd_assets = fs::current_path(ec) / "assets" / path_from_utf8(subpath);
+    if (!ec && fs::exists(cwd_assets, ec)) return cwd_assets;
+
+    return fallback.empty()
+               ? (exe.empty() ? path_from_utf8(subpath) : exe.parent_path() / "assets" / path_from_utf8(subpath))
+               : path_from_utf8(fallback);
+}
+
 std::filesystem::path user_data_dir(std::string_view game) {
     if (auto dir = env("CUERVO_USER_DIR"); dir && !dir->empty()) {
         std::filesystem::path p = path_from_utf8(*dir);

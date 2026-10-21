@@ -37,6 +37,11 @@ jobs:
           cp build/release/editor/cuervo-editor package/bin/
           cp build/release/tools/cuervo_tools/cuervo-tools package/bin/
           cp build/release/pluma/plm package/bin/
+          cp -r assets package/
+          mkdir -p package/assets/fonts
+          cp build/release/_deps/outfit-src/fonts/ttf/Outfit-Medium.ttf package/assets/fonts/ 2>/dev/null || true
+          cp build/release/_deps/figtree-src/fonts/ttf/Figtree-*.ttf package/assets/fonts/ 2>/dev/null || true
+          cp build/release/_deps/jetbrains_mono-src/fonts/ttf/JetBrainsMono-Regular.ttf package/assets/fonts/ 2>/dev/null || true
           cp -r third_party/licenses package/
           cp LICENSE.md README.md THIRD_PARTY_NOTICES.md package/
           tar -czvf cuervo-linux-x86_64.tar.gz -C package .
@@ -98,6 +103,11 @@ jobs:
           Copy-Item build\release\editor\cuervo-editor.exe -Destination package\bin\
           Copy-Item build\release\tools\cuervo_tools\cuervo-tools.exe -Destination package\bin\
           Copy-Item build\release\pluma\plm.exe -Destination package\bin\
+          Copy-Item -Recurse assets -Destination package\
+          if (!(Test-Path package\assets\fonts)) { New-Item -ItemType Directory -Force -Path package\assets\fonts }
+          Copy-Item build\release\_deps\outfit-src\fonts\ttf\Outfit-Medium.ttf -Destination package\assets\fonts\ -ErrorAction SilentlyContinue
+          Copy-Item build\release\_deps\figtree-src\fonts\ttf\Figtree-*.ttf -Destination package\assets\fonts\ -ErrorAction SilentlyContinue
+          Copy-Item build\release\_deps\jetbrains_mono-src\fonts\ttf\JetBrainsMono-Regular.ttf -Destination package\assets\fonts\ -ErrorAction SilentlyContinue
           Copy-Item -Recurse third_party\licenses -Destination package\
           Copy-Item LICENSE.md -Destination package\
           Copy-Item README.md -Destination package\

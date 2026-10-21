@@ -195,7 +195,7 @@ int run_dap(int /*argc*/, char** /*argv*/) {
     o.backend = backend == "gl" || !rhi::backend_compiled_in(rhi::Backend::Vulkan) ? rhi::Backend::OpenGL
                                                                                     : rhi::Backend::Vulkan;
     o.allow_fallback = backend.empty();
-    o.font_path = CUERVO_DEFAULT_FONT;
+    o.font_path = platform::utf8(platform::find_asset("fonts/LiberationSans-Regular.ttf", CUERVO_DEFAULT_FONT));
     if (!args->bool_or("noDebug", false)) {
         o.debugger = &debugger;
         debugger.set_source_root(fs::absolute(platform::path_from_utf8(o.dir)));

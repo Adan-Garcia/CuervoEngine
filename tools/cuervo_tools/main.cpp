@@ -226,7 +226,9 @@ bool pack_options(const Flags& f, cuervo::tools::PackOptions& o, std::string& er
         o.scripts = *s;
     }
     o.strip = f.strip;
-    o.font_path = f.font.empty() ? std::string(CUERVO_TOOLS_DEFAULT_FONT) : f.font;
+    o.font_path = f.font.empty()
+                      ? platform::utf8(platform::find_asset("fonts/LiberationSans-Regular.ttf", CUERVO_TOOLS_DEFAULT_FONT))
+                      : f.font;
     o.engine_version = CUERVO_TOOLS_ENGINE_VERSION;
     return true;
 }

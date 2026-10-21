@@ -5,6 +5,7 @@
 #include <filesystem>
 
 #include "cuervo/core/log.hpp"
+#include "cuervo/platform/platform.hpp"
 
 namespace cuervo::editor::theme {
 
@@ -223,16 +224,30 @@ void load_fonts(const std::string& fallback_ttf) {
     ImGuiIO& io = ImGui::GetIO();
     namespace fs = std::filesystem;
     std::error_code ec;
-    if (fs::is_regular_file(CUERVO_FONT_UI, ec)) {
-        io.Fonts->AddFontFromFileTTF(CUERVO_FONT_UI, ui_font_size);
-    } else if (!fallback_ttf.empty() && fs::is_regular_file(fallback_ttf, ec) && fallback_ttf.ends_with(".ttf")) {
-        LOG_WARN("Brand UI font missing ('{}'), using '{}'", CUERVO_FONT_UI, fallback_ttf);
-        io.Fonts->AddFontFromFileTTF(fallback_ttf.c_str(), ui_font_size);
+
+    const std::filesystem::path ui_font = platform::find_asset("fonts/Figtree-Regular.ttf", CUERVO_FONT_UI);
+    const std::filesystem::path mono_font = platform::find_asset("fonts/JetBrainsMono-Regular.ttf", CUERVO_FONT_MONO);
+    const std::filesystem::path disp_font = platform::find_asset("fonts/Outfit-Medium.ttf", CUERVO_FONT_DISPLAY);
+
+    if (fs::is_regular_file(ui_font, ec)) {
+        const std::string path_str = platform::utf8(ui_font);
+        io.Fonts->AddFontFromFileTTF(path_str.c_str(), ui_font_size);
+    } else {
+        std::string fallback = fallback_ttf;
+        if (fallback.empty() || !fs::is_regular_file(fallback, ec)) {
+            fallback = platform::utf8(platform::find_asset("fonts/LiberationSans-Regular.ttf"));
+        }
+        if (!fallback.empty() && fs::is_regular_file(fallback, ec) && fallback.ends_with(".ttf")) {
+            LOG_WARN("Brand UI font missing ('{}'), using '{}'", platform::utf8(ui_font), fallback);
+            io.Fonts->AddFontFromFileTTF(fallback.c_str(), ui_font_size);
+        }
     }
-    mono = fs::is_regular_file(CUERVO_FONT_MONO, ec) ? io.Fonts->AddFontFromFileTTF(CUERVO_FONT_MONO, mono_font_size)
-                                                     : nullptr;
-    display = fs::is_regular_file(CUERVO_FONT_DISPLAY, ec) ? io.Fonts->AddFontFromFileTTF(CUERVO_FONT_DISPLAY, 22.0f)
-                                                           : nullptr;
+    mono = fs::is_regular_file(mono_font, ec)
+               ? io.Fonts->AddFontFromFileTTF(platform::utf8(mono_font).c_str(), mono_font_size)
+               : nullptr;
+    display = fs::is_regular_file(disp_font, ec)
+                  ? io.Fonts->AddFontFromFileTTF(platform::utf8(disp_font).c_str(), 22.0f)
+                  : nullptr;
 }
 
 ImFont* mono_font() { return mono; }

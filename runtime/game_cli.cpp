@@ -85,7 +85,9 @@ int run_game_cli(int argc, char** argv) {
     o.font_path = std::string(arg_value(argc, argv, "--font"));
     // A pack carries its font (.cuervo/default.efont); a project uses the
     // engine's default font unless --font says otherwise.
-    if (o.font_path.empty() && o.pack.empty()) o.font_path = CUERVO_DEFAULT_FONT;
+    if (o.font_path.empty() && o.pack.empty()) {
+        o.font_path = platform::utf8(platform::find_asset("fonts/LiberationSans-Regular.ttf", CUERVO_DEFAULT_FONT));
+    }
     o.hot_reload = !has_flag(argc, argv, "--no-hot-reload");
     o.record = std::string(arg_value(argc, argv, "--record"));
     o.audio = !has_flag(argc, argv, "--no-audio");

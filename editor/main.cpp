@@ -193,6 +193,8 @@ int main(int argc, char** argv) {
     if (has_flag(argc, argv, "--splash")) o.splash = editor::SplashMode::On;
     if (has_flag(argc, argv, "--no-splash")) o.splash = editor::SplashMode::Off;
     o.font_path = std::string(arg_value(argc, argv, "--font"));
-    if (o.font_path.empty()) o.font_path = CUERVO_DEFAULT_FONT;
+    if (o.font_path.empty()) {
+        o.font_path = platform::utf8(platform::find_asset("fonts/LiberationSans-Regular.ttf", CUERVO_DEFAULT_FONT));
+    }
     return editor::run_editor(o);
 }

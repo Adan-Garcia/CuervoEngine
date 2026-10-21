@@ -168,7 +168,7 @@ int main(int argc, char** argv) {
     }
     std::string font_path(arg_value(argc, argv, "--font"));
     if (font_path.empty()) {
-        font_path = CUERVO_DEFAULT_FONT;
+        font_path = platform::utf8(platform::find_asset("fonts/LiberationSans-Regular.ttf", CUERVO_DEFAULT_FONT));
     }
     std::string screenshot_path(arg_value(argc, argv, "--screenshot"));
     if (auto env = platform::env("CUERVO_SCREENSHOT"); screenshot_path.empty() && env) {
@@ -274,7 +274,9 @@ int main(int argc, char** argv) {
 
     if (!demo.empty()) {
         VectorDemoOptions demo_options;
-        demo_options.svg_path = svg_path.empty() ? std::string(CUERVO_DEMO_SVG) : svg_path;
+        demo_options.svg_path = svg_path.empty()
+                                    ? platform::utf8(platform::find_asset("demo/robot.svg", CUERVO_DEMO_SVG))
+                                    : svg_path;
         demo_options.font_path = font_path;
         demo_options.screenshot = screenshot_path;
         demo_options.quit_after = quit_after;
