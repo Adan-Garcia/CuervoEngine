@@ -28,8 +28,10 @@ set(ENV{CUERVO_SCREENSHOT_TICK} "${TICK}")
 set(saved_eula "$ENV{CUERVO_ACCEPT_EULA}")
 if(CMAKE_HOST_WIN32)
     set(EXE_SUFFIX ".exe")
+    set(PLATFORM windows)
 else()
     set(EXE_SUFFIX "")
+    set(PLATFORM linux)
 endif()
 
 set(press_args "")
@@ -204,7 +206,7 @@ foreach(variant ${variants})
         set(export_args --engine stripped --strip --player-cache "${PLAYER_CACHE}")
     endif()
     execute_process(
-        COMMAND "${TOOLS}" export "${OUT}/src_${variant}/${NAME}" --platform linux ${export_args} -o "${OUT}/dist_${variant}"
+        COMMAND "${TOOLS}" export "${OUT}/src_${variant}/${NAME}" --platform ${PLATFORM} ${export_args} -o "${OUT}/dist_${variant}"
         RESULT_VARIABLE code OUTPUT_VARIABLE out ERROR_VARIABLE err)
     if(NOT code EQUAL 0)
         fail("export (${variant}) failed (${code})" "${out}" "${err}")

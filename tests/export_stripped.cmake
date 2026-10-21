@@ -13,13 +13,21 @@
 # Invoked by ctest with -DTOOLS=... -DRUNTIME=<full player> -DPROJECT=...
 # -DNAME=<launcher> -DOUT=... -DPLAYER_CACHE=...
 
+if(CMAKE_HOST_WIN32)
+    set(PLATFORM windows)
+    set(EXE_SUFFIX ".exe")
+else()
+    set(PLATFORM linux)
+    set(EXE_SUFFIX "")
+endif()
+
 file(REMOVE_RECURSE "${OUT}")
 file(MAKE_DIRECTORY "${OUT}/src" "${OUT}/cwd" "${OUT}/user")
 file(COPY "${PROJECT}/" DESTINATION "${OUT}/src/game")
 file(COPY "${PROJECT}/" DESTINATION "${OUT}/dev/game")
 
 execute_process(
-    COMMAND "${TOOLS}" export "${OUT}/src/game" --platform linux --engine stripped --strip -o "${OUT}/dist"
+    COMMAND "${TOOLS}" export "${OUT}/src/game" --platform ${PLATFORM} --engine stripped --strip -o "${OUT}/dist"
             --player-cache "${PLAYER_CACHE}"
     RESULT_VARIABLE code OUTPUT_VARIABLE out ERROR_VARIABLE err)
 if(NOT code EQUAL 0)
@@ -43,7 +51,7 @@ endif()
 set(ENV{CUERVO_USER_DIR} "${OUT}/user")
 set(ENV{CUERVO_SCREENSHOT_TICK} 240)
 execute_process(
-    COMMAND "${OUT}/shipped/${NAME}" --backend gl --no-audio --screenshot "${OUT}/shipped.ppm"
+    COMMAND "${OUT}/shipped/${NAME}${EXE_SUFFIX}" --backend gl --no-audio --screenshot "${OUT}/shipped.ppm"
     WORKING_DIRECTORY "${OUT}/cwd"
     RESULT_VARIABLE code OUTPUT_VARIABLE out ERROR_VARIABLE err)
 set(log "${out}${err}")
