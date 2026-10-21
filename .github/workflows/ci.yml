@@ -55,11 +55,35 @@ jobs:
           }
           echo "C:\tools\glslang\bin" >> $env:GITHUB_PATH
 
+      - name: Install Mesa LLVMpipe (Software OpenGL)
+        shell: pwsh
+        run: |
+          $url = "https://github.com/mmozeiko/build-mesa/releases/download/26.2.5/mesa-llvmpipe-x64-26.2.5.7z"
+          Invoke-WebRequest -Uri $url -OutFile "mesa.7z"
+          7z x mesa.7z -o"C:\tools\mesa"
+          # System-wide OpenGL ICD registration for headless Windows Server VMs
+          Copy-Item "C:\tools\mesa\opengl32.dll" -Destination "C:\Windows\System32\mesadrv.dll" -Force
+          New-Item -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\OpenGLDrivers\MSOGL" -Force
+          Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\OpenGLDrivers\MSOGL" -Name "DLL" -Value "mesadrv.dll"
+          Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\OpenGLDrivers\MSOGL" -Name "DriverVersion" -Type DWord -Value 1
+          Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\OpenGLDrivers\MSOGL" -Name "Flags" -Type DWord -Value 1
+          Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\OpenGLDrivers\MSOGL" -Name "Version" -Type DWord -Value 2
+          echo "GALLIUM_DRIVER=llvmpipe" >> $env:GITHUB_ENV
+          echo "CUERVO_PARITY_VULKAN=0" >> $env:GITHUB_ENV
+          echo "C:\tools\mesa" >> $env:GITHUB_PATH
+
       - name: Configure CMake
         run: cmake --preset debug
 
       - name: Build All Targets
         run: cmake --build --preset debug
 
+      - name: Deploy Mesa opengl32.dll to binary directories
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path "build\debug" -Recurse -Directory | ForEach-Object {
+              Copy-Item "C:\tools\mesa\opengl32.dll" -Destination $_.FullName -ErrorAction SilentlyContinue
+          }
+
       - name: Run Test Suite
-        run: ctest --preset debug --output-on-failure --timeout 180
+        run: ctest --preset debug --output-on-failure --timeout 360

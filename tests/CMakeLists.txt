@@ -56,6 +56,7 @@ target_include_directories(cuervo_tests PRIVATE ${PROJECT_SOURCE_DIR}/pluma/repl
 target_compile_definitions(cuervo_tests PRIVATE CUERVO_EULA_VERSION="${CUERVO_EULA_VERSION}" CUERVO_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets"
     CUERVO_EXAMPLES_DIR="${PROJECT_SOURCE_DIR}/examples")
 add_test(NAME cuervo_tests COMMAND cuervo_tests)
+set_tests_properties(cuervo_tests PROPERTIES TIMEOUT 360)
 
 add_executable(pluma_tests
     doctest_main.cpp
