@@ -82,26 +82,33 @@ std::filesystem::path find_asset(std::string_view subpath, std::string_view fall
         auto p = path_from_utf8(fallback);
         if (fs::exists(p, ec)) return p;
     }
-    // 3. Relative to executable: <exe_dir>/assets/<subpath>
+    // 3. Search upwards from the executable directory: <dir>/assets/<subpath>
     const auto exe = executable_dir();
     if (!exe.empty()) {
-        auto p1 = exe / "assets" / path_from_utf8(subpath);
-        if (fs::exists(p1, ec)) return p1;
+        for (fs::path cur = exe; !cur.empty(); ) {
+            auto p = cur / "assets" / path_from_utf8(subpath);
+            if (fs::exists(p, ec)) return p;
+            auto parent = cur.parent_path();
+            if (parent == cur) break;
+            cur = std::move(parent);
+        }
 
-        // 4. Relative to parent: <exe_dir>/../assets/<subpath> (standard when binaries are in bin/)
-        auto p2 = exe.parent_path() / "assets" / path_from_utf8(subpath);
-        if (fs::exists(p2, ec)) return p2;
-
-        // 5. Standard install prefix: <exe_dir>/../share/cuervo/assets/<subpath>
-        auto p3 = exe.parent_path() / "share" / "cuervo" / "assets" / path_from_utf8(subpath);
-        if (fs::exists(p3, ec)) return p3;
+        // Standard install prefix: <exe_dir>/../share/cuervo/assets/<subpath>
+        auto p_share = exe.parent_path() / "share" / "cuervo" / "assets" / path_from_utf8(subpath);
+        if (fs::exists(p_share, ec)) return p_share;
     }
-    // 6. Current working directory fallback: ./assets/<subpath>
-    auto cwd_assets = fs::current_path(ec) / "assets" / path_from_utf8(subpath);
-    if (!ec && fs::exists(cwd_assets, ec)) return cwd_assets;
+    // 4. Search upwards from current working directory: <dir>/assets/<subpath>
+    for (fs::path cur = fs::current_path(ec); !ec && !cur.empty(); ) {
+        auto p = cur / "assets" / path_from_utf8(subpath);
+        if (fs::exists(p, ec)) return p;
+        auto parent = cur.parent_path();
+        if (parent == cur) break;
+        cur = std::move(parent);
+    }
 
+    if (!fallback.empty()) return path_from_utf8(fallback);
     if (!exe.empty()) return exe.parent_path() / "assets" / path_from_utf8(subpath);
-    return fallback.empty() ? path_from_utf8(subpath) : path_from_utf8(fallback);
+    return path_from_utf8(subpath);
 }
 
 std::filesystem::path user_data_dir(std::string_view game) {
