@@ -61,7 +61,12 @@ std::filesystem::path path_from_utf8(std::string_view text) {
 
 std::filesystem::path executable_dir() {
     const char* base = SDL_GetBasePath(); // owned by SDL (SDL3)
-    return base != nullptr ? path_from_utf8(base) : std::filesystem::path();
+    if (base == nullptr) return {};
+    auto p = path_from_utf8(base);
+    while (p.has_relative_path() && p.filename().empty()) {
+        p = p.parent_path();
+    }
+    return p;
 }
 
 std::filesystem::path find_asset(std::string_view subpath, std::string_view fallback) {
@@ -95,9 +100,8 @@ std::filesystem::path find_asset(std::string_view subpath, std::string_view fall
     auto cwd_assets = fs::current_path(ec) / "assets" / path_from_utf8(subpath);
     if (!ec && fs::exists(cwd_assets, ec)) return cwd_assets;
 
-    return fallback.empty()
-               ? (exe.empty() ? path_from_utf8(subpath) : exe.parent_path() / "assets" / path_from_utf8(subpath))
-               : path_from_utf8(fallback);
+    if (!exe.empty()) return exe.parent_path() / "assets" / path_from_utf8(subpath);
+    return fallback.empty() ? path_from_utf8(subpath) : path_from_utf8(fallback);
 }
 
 std::filesystem::path user_data_dir(std::string_view game) {
