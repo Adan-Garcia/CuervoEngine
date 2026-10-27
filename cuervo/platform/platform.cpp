@@ -61,7 +61,12 @@ std::filesystem::path path_from_utf8(std::string_view text) {
 
 std::filesystem::path executable_dir() {
     const char* base = SDL_GetBasePath(); // owned by SDL (SDL3)
-    return base != nullptr ? path_from_utf8(base) : std::filesystem::path();
+    if (base == nullptr) return {};
+    auto p = path_from_utf8(base);
+    while (p.has_relative_path() && p.filename().empty()) {
+        p = p.parent_path();
+    }
+    return p;
 }
 
 std::filesystem::path find_asset(std::string_view subpath, std::string_view fallback) {

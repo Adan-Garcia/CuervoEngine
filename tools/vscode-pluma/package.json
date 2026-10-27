@@ -2,7 +2,7 @@
   "name": "pluma",
   "displayName": "Pluma (Cuervo Engine)",
   "description": "Pluma language support for Cuervo Engine games: syntax highlighting, the Pluma language server (diagnostics, completion, hover, go to definition, rename, formatting) and the script debugger.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "cuervo",
   "repository": {
     "type": "git",

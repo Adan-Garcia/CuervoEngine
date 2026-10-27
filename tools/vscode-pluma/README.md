@@ -28,7 +28,7 @@ Or, for development, link the directory into VS Code's extensions folder and rel
 window (run `npm install` first so `node_modules/` exists):
 
 ```sh
-ln -s "$PWD" ~/.vscode/extensions/cuervo.pluma-0.2.0
+ln -s "$PWD" ~/.vscode/extensions/cuervo.pluma-0.2.1
 ```
 
 ## Settings

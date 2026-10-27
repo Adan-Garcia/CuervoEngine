@@ -9,6 +9,7 @@
 #include <set>
 #include <string>
 
+#include "cuervo/platform/platform.hpp"
 #include "cuervo/rhi/rhi.hpp"
 #include "cuervo/script/support.hpp"
 #include "cuervo/script/tier_check.hpp"
@@ -167,4 +168,15 @@ TEST_CASE("tier check --platform: a Compatible project is accepted everywhere") 
         REQUIRE_MESSAGE(r, error);
         CHECK(r->ok());
     }
+}
+
+TEST_CASE("platform: executable_dir strips trailing separator and find_asset resolves brand") {
+    const auto exe = platform::executable_dir();
+    if (!exe.empty()) {
+        CHECK_FALSE(exe.filename().empty());
+        CHECK(exe.parent_path() != exe);
+    }
+    const auto brand = platform::find_asset("brand", CUERVO_ASSETS_DIR "/brand"); // a build tree finds it through the fallback
+    CHECK(fs::exists(brand));
+    CHECK(fs::exists(brand / "logo" / "mark-ember.svg"));
 }

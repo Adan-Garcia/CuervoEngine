@@ -2432,7 +2432,11 @@ std::string default_c_compiler() {
     if (cc_env != nullptr && cc_env[0] != '\0') return cc_env;
 #endif
 #if defined(PLUMA_DEFAULT_CC)
-    if (PLUMA_DEFAULT_CC[0] != '\0') return PLUMA_DEFAULT_CC;
+    // The build machine's compiler; a prebuilt package on another machine
+    // finds one on PATH instead.
+    if (std::error_code ec; PLUMA_DEFAULT_CC[0] != '\0' && std::filesystem::exists(PLUMA_DEFAULT_CC, ec)) {
+        return PLUMA_DEFAULT_CC;
+    }
 #endif
 #if defined(_WIN32)
     return "clang";
