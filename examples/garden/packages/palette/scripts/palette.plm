@@ -1,0 +1,16 @@
+// Petal colors for examples/garden.
+
+var petals = ["ff5973", "ffcc4d", "59d9ff", "b38cff", "7dff9e"]
+
+pub fn petal(i: int) -> Color {
+    return Color.hex(petals[i % petals.len()])
+}
+
+pub fn leaf() -> Color {
+    return mix(Color.hex("2e8b57"), Color.hex("9acd32"))
+}
+
+// Private to the package; the game has a `mix` of its own.
+fn mix(a: Color, b: Color) -> Color {
+    return Color.rgb((a.r + b.r) * 0.5, (a.g + b.g) * 0.5, (a.b + b.b) * 0.5)
+}

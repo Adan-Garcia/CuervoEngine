@@ -305,6 +305,9 @@ struct Function {
     // `@native`: the body is a host function registered under `name`
     // (pluma/bindings.hpp).
     bool is_native = false;
+    // The host function's name when it isn't `name`: an `@extern` C function
+    // (pluma/ffi.hpp key "ffi|lib|symbol|signature", LANGUAGE.md 9.28).
+    std::string native_name;
     // Identifies a lambda across recompiles (hot reload, DESIGN.md 5.13):
     // the enclosing function's name and the lambda's ordinal in it.
     std::string stable_key;
@@ -444,7 +447,8 @@ struct TraitInfo {
 };
 
 // Everything known about a program across compilation units (a REPL session
-// adds a unit per input). Names are global (DESIGN.md 5.11).
+// adds a unit per input). Names are global (DESIGN.md 5.11) within a
+// namespace: the root one, or a package's (LANGUAGE.md 9.26).
 struct Program {
     Program();
     Program(const Program&) = delete;
@@ -457,8 +461,16 @@ struct Program {
     struct Symbol {
         SymKind kind;
         void* ptr;
+        // LANGUAGE.md 9.26: a package's names are keyed "pkg.Name" and only
+        // `pub` ones are visible outside it. Packages see the root names of
+        // preludes, never the game's own.
+        std::string_view module = {}; // empty: the root namespace
+        bool is_pub = false;
+        bool prelude = false;
     };
     std::map<std::string, Symbol, std::less<>> globals;
+    // Every package with a file in a checked unit (import targets).
+    std::set<std::string, std::less<>> modules;
 
     std::vector<std::unique_ptr<ClassInfo>> classes;
     std::vector<std::unique_ptr<StructInfo>> structs;
@@ -466,6 +478,8 @@ struct Program {
     std::vector<std::unique_ptr<TraitInfo>> traits;
     std::vector<std::unique_ptr<Function>> functions;
     std::vector<std::unique_ptr<GlobalVar>> global_vars;
+    // `@test` functions of units checked with CheckOptions::tests, in source order.
+    std::vector<Function*> tests;
     std::vector<std::unique_ptr<FieldInfo>> fields;
     std::vector<std::unique_ptr<LocalVar>> locals;
     std::vector<std::unique_ptr<GenericParamInfo>> generic_params;

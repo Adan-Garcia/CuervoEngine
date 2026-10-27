@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <filesystem>
 
 #include "cuervo/core/log.hpp"
@@ -12,6 +13,8 @@ namespace cuervo::editor::theme {
 namespace {
 
 brand::Theme current_theme = brand::Theme::Dark;
+float current_ui_scale = 1.0f;
+float current_font_scale = 1.0f;
 ImFont* mono = nullptr;
 ImFont* display = nullptr;
 
@@ -19,6 +22,20 @@ using brand::mix;
 using brand::with_alpha;
 
 } // namespace
+
+float ui_scale() { return current_ui_scale; }
+
+void set_ui_scale(float scale) {
+    current_ui_scale = std::clamp(scale, 0.5f, 3.0f);
+    apply(current_theme);
+}
+
+float font_scale() { return current_font_scale; }
+
+void set_font_scale(float scale) {
+    current_font_scale = std::clamp(scale, 0.5f, 3.0f);
+    apply(current_theme);
+}
 
 brand::Theme current() { return current_theme; }
 
@@ -78,6 +95,7 @@ void pop_danger_button() { ImGui::PopStyleColor(5); }
 
 void apply(brand::Theme theme) {
     current_theme = theme;
+    if (ImGui::GetCurrentContext() == nullptr) return;
     const brand::ThemeColors& t = brand::colors(theme);
     ImGuiStyle& s = ImGui::GetStyle();
 
@@ -218,6 +236,12 @@ void apply(brand::Theme theme) {
     c[ImGuiCol_NavWindowingHighlight] = im(with_alpha(t.focus, 0.7f));
     c[ImGuiCol_NavWindowingDimBg] = im(with_alpha(brand::palette::raven, 0.35f));
     c[ImGuiCol_ModalWindowDimBg] = im(with_alpha(brand::palette::raven, 0.45f));
+
+    // Dynamic UI and font scaling
+    if (std::abs(current_ui_scale - 1.0f) > 0.001f) {
+        s.ScaleAllSizes(current_ui_scale);
+    }
+    s.FontScaleMain = current_ui_scale * current_font_scale;
 }
 
 void load_fonts(const std::string& fallback_ttf) {

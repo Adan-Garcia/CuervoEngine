@@ -23,6 +23,12 @@ const brand::ThemeColors& colors();
 // The OS preference (SDL_GetSystemTheme), dark when it doesn't say.
 brand::Theme system_theme();
 
+// UI and Font scaling factors (1.0 = 100%).
+float ui_scale();
+void set_ui_scale(float scale);
+float font_scale();
+void set_font_scale(float scale);
+
 constexpr ImVec4 im(rhi::Color c) { return {c.r, c.g, c.b, c.a}; }
 ImU32 im32(rhi::Color c);
 

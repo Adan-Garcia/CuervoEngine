@@ -1,0 +1,18 @@
+# Top-down navigation level (DESIGN.md 4.17, milestone 9.5): a TileMapLayer with
+# ground and obstacle tiles, a NavigationRegion2D baked from the tilemap, and
+# an agent navigating around obstacles using deterministic A*.
+#   cuervo --game examples/topdown_nav
+name = "Topdown Nav"
+main = "Demo"
+virtual_size = [1280, 720]
+tick_rate = 60
+seed = 20261023
+clear_color = "141824"
+render_tier = "compatible"
+
+[input.actions]
+click = ["Mouse.Left"]
+target_1 = ["Key.Num1", "Pad.North"]
+target_2 = ["Key.Num2", "Pad.East"]
+target_3 = ["Key.Num3", "Pad.South"]
+target_4 = ["Key.Num4", "Pad.West"]

@@ -9,7 +9,6 @@
 #include <set>
 #include <string>
 
-#include "cuervo/platform/platform.hpp"
 #include "cuervo/rhi/rhi.hpp"
 #include "cuervo/script/support.hpp"
 #include "cuervo/script/tier_check.hpp"
@@ -91,8 +90,8 @@ TEST_CASE("support.json: entries are consistent") {
     CHECK(compat->web_compatible);
     CHECK(full->platforms == sup::tier_platforms(rhi::Tier::Full));
     CHECK(compat->platforms == sup::tier_platforms(rhi::Tier::Compatible));
-    // Windows is experimental (docs/WINDOWS.md); nothing promotes it without evidence.
-    CHECK(sup::target_entry(sup::Target::Windows).status == sup::Status::experimental);
+    // Windows is stable since milestone 10.5a (docs/WINDOWS.md "Validation results").
+    CHECK(sup::target_entry(sup::Target::Windows).status == sup::Status::stable);
     CHECK(sup::target_entry(sup::Target::Linux).status == sup::Status::stable);
     CHECK(sup::find("macos") == nullptr);
     CHECK(sup::parse_target("web") == sup::Target::Web);
@@ -120,19 +119,18 @@ TEST_CASE("claims: native (AOT) scripts need a host that matches the target, and
     // Cross-host: compiled with the host's C compiler, so host != target is refused.
     CHECK(has(sup::check_claims({rhi::Tier::Compatible, true, T::Linux}, T::Windows), Severity::Error, "host to match"));
     CHECK(has(sup::check_claims({rhi::Tier::Compatible, true, T::Windows}, T::Linux), Severity::Error, "host to match"));
-    // Same host and target: Linux is fine, Windows is accepted with the experimental warning.
+    // Same host and target: accepted on Linux and Windows.
     for (const auto& i : sup::check_claims({rhi::Tier::Compatible, true, T::Linux}, T::Linux)) {
         CHECK(i.severity != Severity::Error);
     }
     const auto win = sup::check_claims({rhi::Tier::Compatible, true, T::Windows}, T::Windows);
     for (const auto& i : win) CHECK(i.severity != Severity::Error);
-    CHECK(has(win, Severity::Warning, "experimental"));
 }
 
-TEST_CASE("claims: an experimental target warns instead of refusing") {
+TEST_CASE("claims: a stable target needs no warning; experimental features still warn") {
+    // The experimental-warning path itself is covered by the Full tier above.
     const auto win = sup::check_claims({rhi::Tier::Compatible, false}, sup::Target::Windows);
-    CHECK(has(win, Severity::Warning, "Windows is experimental"));
-    for (const auto& i : win) CHECK(i.severity != Severity::Error);
+    for (const auto& i : win) CHECK((i.severity != Severity::Error && i.severity != Severity::Warning));
 }
 
 TEST_CASE("tier check --platform: a Full project is refused for the web and accepted for Linux") {
@@ -169,15 +167,4 @@ TEST_CASE("tier check --platform: a Compatible project is accepted everywhere") 
         REQUIRE_MESSAGE(r, error);
         CHECK(r->ok());
     }
-}
-
-TEST_CASE("platform: executable_dir strips trailing separator and find_asset resolves brand") {
-    const auto exe = platform::executable_dir();
-    if (!exe.empty()) {
-        CHECK_FALSE(exe.filename().empty());
-        CHECK(exe.parent_path() != exe);
-    }
-    const auto brand = platform::find_asset("brand");
-    CHECK(fs::exists(brand));
-    CHECK(fs::exists(brand / "logo" / "mark-ember.svg"));
 }

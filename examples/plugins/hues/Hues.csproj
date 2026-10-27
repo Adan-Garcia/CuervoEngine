@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The hues plugin (C#). The engine loads bin/Hues.dll through hostfxr and
+       calls Hues.Plugin.Entry (docs/PLUGINS.md). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Loadable as a component: a runtimeconfig.json and deps.json beside it. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
+    <AssemblyName>Hues</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../bindings/dotnet/Cuervo.Plugin/Cuervo.Plugin.csproj" />
+  </ItemGroup>
+</Project>

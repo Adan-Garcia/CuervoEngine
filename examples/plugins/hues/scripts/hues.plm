@@ -1,0 +1,27 @@
+// The hues plugin's script API. The `@native` functions are implemented in C#
+// (src/Plugin.cs) and run on .NET in the desktop player and editor.
+
+// A node whose size pulses over `period` seconds.
+pub class Pulse extends Node2D {
+    var period = 1.5
+    var t = 0.0
+    var turn = 0.0 // where on the hue wheel this pulse sits
+
+    fn update(dt: float) {
+        t += dt
+    }
+
+    // 0.65..1.35, a triangle wave over `period` (native: reads `t`, `period`).
+    @native fn scale() -> float {}
+
+    fn color() -> Color {
+        var c = hue(turn + t * 0.1)
+        return Color.rgb(c.x, c.y, c.z)
+    }
+}
+
+// A color of the hue wheel, `t` in turns, as RGB in 0..1.
+@native pub fn hue(t: float) -> vec3 {}
+
+// The plugin's own description.
+@native pub fn describe() -> str {}

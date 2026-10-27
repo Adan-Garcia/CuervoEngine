@@ -140,7 +140,10 @@ public:
                 // Elements take the shape of the list's current first element,
                 // or (for an empty default) of the saved value itself.
                 const auto* cur = static_cast<const pluma::ListObj*>(like.o);
-                auto* l = pluma::new_list();
+                // Traced or not as the list it replaces (its element type's
+                // acyclicity, pluma/heap.hpp): a traced list held by an
+                // untraced object breaks the cycle collector's accounting.
+                auto* l = pluma::new_list((cur->flags & pluma::objflag::Untraced) != 0);
                 Value out = Value::object(l);
                 pluma::retain(out);
                 for (std::size_t i = 0; i < v.items.size(); ++i) {

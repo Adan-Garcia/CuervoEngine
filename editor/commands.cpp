@@ -59,6 +59,17 @@ void RenameCommand::revert(SceneModel& model) {
 }
 std::string RenameCommand::label() const { return std::format("Rename to '{}'", after_); }
 
+ChangeTypeCommand::ChangeTypeCommand(NodeId node, std::string before, std::string after)
+    : node_(node), before_(std::move(before)), after_(std::move(after)) {}
+
+void ChangeTypeCommand::apply(SceneModel& model) {
+    if (ModelNode* n = model.get(node_)) n->type = after_;
+}
+void ChangeTypeCommand::revert(SceneModel& model) {
+    if (ModelNode* n = model.get(node_)) n->type = before_;
+}
+std::string ChangeTypeCommand::label() const { return std::format("Change type of node to '{}'", after_); }
+
 // ------------------------------------------------------------ Insert
 
 InsertCommand::InsertCommand(Subtree tree, NodeId parent, std::size_t index, std::string label)

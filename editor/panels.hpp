@@ -57,6 +57,8 @@ std::unique_ptr<Panel> make_tier_panel();
 std::unique_ptr<Panel> make_profiler_panel();
 // Milestone 8.3.
 std::unique_ptr<Panel> make_history_panel();
+// Milestone 9.8.
+std::unique_ptr<Panel> make_animation_panel();
 
 // Drag-and-drop payload of the asset browser: a project-relative path
 // (NUL-terminated). Inspector text fields and the scene view accept it.

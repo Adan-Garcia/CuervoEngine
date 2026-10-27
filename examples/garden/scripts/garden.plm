@@ -1,0 +1,78 @@
+// examples/garden: a row of flowers driven by two packages (LANGUAGE.md
+// 9.26). `tween` comes from examples/libs/tween, `palette` is vendored in
+// packages/palette. The game declares its own `petal`, `petals`, `mix` and
+// `clamp01`, which the packages also declare: each package is a namespace,
+// so nothing clashes. (`tween.Tween` and `tween.Ease` also share their
+// names with the engine's `Tween` and the std library's `Ease`.)
+
+import tween
+import palette
+
+// The game's own `petals` and `petal`: petal counts, not colors.
+var petals = [5, 6, 8]
+
+fn petal(i: int) -> int {
+    return petals[i % petals.len()]
+}
+
+// The game's own `mix` and `clamp01` (each package has a private one).
+fn mix(a: float, b: float, t: float) -> float {
+    return a + (b - a) * clamp01(t)
+}
+
+fn clamp01(x: float) -> float {
+    return x < 0.0 ? 0.0 : (x > 1.0 ? 1.0 : x)
+}
+
+class Garden extends Node {
+    var blooms = List<tween.Tween>()
+    var planted = 0
+    var curves = [tween.Ease.Linear, tween.Ease.InQuad, tween.Ease.OutQuad, tween.Ease.InOutCubic]
+
+    fn ready() {
+        for i in 0..5 {
+            add_bloom(i)
+        }
+    }
+
+    fn add_bloom(i: int) {
+        blooms.push(tween.Tween(12.0, 48.0, 60 + i * 15, curves[i % curves.len()]))
+    }
+
+    fn update(dt: float) {
+        if Input.pressed(#more) && blooms.len() < 12 {
+            planted += 1
+            add_bloom(blooms.len())
+        }
+        for b in blooms {
+            b.advance()
+        }
+    }
+
+    // Read by tests/cuervo/package_tests.cpp.
+    fn total_radius() -> float {
+        var sum = 0.0
+        for b in blooms {
+            sum += b.value()
+        }
+        return sum
+    }
+
+    fn draw(g: Canvas) {
+        var n = blooms.len()
+        for i in 0..n {
+            var x = mix(120.0, Screen.size.x - 120.0, (i as float) / ((n - 1) as float))
+            var base = vec2(x, Screen.size.y - 80.0)
+            var head = vec2(x, Screen.size.y * (i % 2 == 0 ? 0.45 : 0.55))
+            g.line(base, head, palette.leaf(), 6.0)
+            var r = blooms[i].value()
+            var count = petal(i)
+            for k in 0..count {
+                var a = (k as float) * TAU / (count as float)
+                g.circle(head + vec2(cos(a), sin(a)) * r * 0.6, r * 0.45, palette.petal(i + k))
+            }
+            g.circle(head, r * 0.35, Color.hex("fff2b3"))
+        }
+        g.text(vec2(24.0, 24.0), "Space: plant a flower ({planted} planted)", 20.0, Color.hex("e0e6ff"))
+    }
+}

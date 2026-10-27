@@ -31,7 +31,7 @@
   {
    "id": "windows",
    "name": "Windows",
-   "status": "experimental"
+   "status": "stable"
   },
   {
    "id": "web",
@@ -82,7 +82,7 @@
     },
     {
      "id": "web-chrome",
-     "name": "Web (WebGL2 / WASM), Chrome",
+     "name": "Web (WebGPU or WebGL2 / WASM), Chrome",
      "status": "stable",
      "platforms": [
       "web"
@@ -90,7 +90,7 @@
      "desktop_only": false,
      "web": true,
      "tier": "compatible",
-     "note": "Single-threaded by default; the shmup reaches the same state hash as the native build. See [WEB.md](WEB.md). Compatible tier only."
+     "note": "Single-threaded by default; WebGPU when the browser has it, else WebGL2 (one build). The shmup reaches the same state hash as the native build on both. See [WEB.md](WEB.md). Compatible tier only."
     },
     {
      "id": "web-threads",
@@ -118,15 +118,15 @@
     },
     {
      "id": "windows",
-     "name": "Windows",
-     "status": "experimental",
+     "name": "Windows 10/11 x86-64",
+     "status": "stable",
      "platforms": [
       "windows"
      ],
      "desktop_only": true,
      "web": false,
      "tier": "none",
-     "note": "The Clang debug build passes all tests and matches the Linux state hashes on Intel Arc (GL) and an RTX 4070 (Vulkan). MSVC, MinGW-w64 and release builds are not checked yet; not marked supported until milestone 10.5a passes. No prebuilt binaries; `export --platform windows` needs a Windows player. See [WINDOWS.md](WINDOWS.md)."
+     "note": "Milestone 10.5a. MSVC, MinGW-w64 GCC and Clang builds have zero warnings and pass the test suite (CI: MSVC Release, MinGW-w64 Debug), and the shmup reaches the Linux state hash on GL and Vulkan. UTF-8 code page and console, per-monitor DPI awareness, a GUI-subsystem player. See [WINDOWS.md](WINDOWS.md)."
     },
     {
      "id": "other-platforms",
@@ -236,14 +236,24 @@
      "note": "Visual particles run on the CPU on every tier today."
     },
     {
-     "id": "raster-images",
-     "name": "Raster images, sprite sheets, atlases, custom shaders, post-processing",
+     "id": "raster-processes",
+     "name": "Raster processes: images, sprite sheets, atlases, 9-slice, SVG fallback",
      "status": "planned",
      "platforms": [],
      "desktop_only": false,
      "web": false,
      "tier": "none",
-     "note": "Milestone 11.2. Art is vector first."
+     "note": "Milestone 11.2a. Art is vector first."
+    },
+    {
+     "id": "custom-shaders",
+     "name": "Custom user shaders, post-processing",
+     "status": "planned",
+     "platforms": [],
+     "desktop_only": false,
+     "web": false,
+     "tier": "none",
+     "note": "Milestone 11.2b."
     },
     {
      "id": "svg-fallback",
@@ -253,27 +263,34 @@
      "desktop_only": false,
      "web": false,
      "tier": "none",
-     "note": "Milestones 11.2 and 11.3."
+     "note": "Milestones 11.2a and 11.3."
     },
     {
      "id": "lighting",
-     "name": "2D lighting",
-     "status": "planned",
-     "platforms": [],
+     "name": "2D lighting (`PointLight2D`, `DirectionalLight2D`, `AmbientLight2D`, `LightOccluder2D`)",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
      "desktop_only": false,
-     "web": false,
-     "tier": "none",
-     "note": "Milestone 9.7."
+     "web": true,
+     "tier": "compatible",
+     "note": "Milestone 9.7. SDF occluders with raymarched hard and soft shadows, identical on Vulkan and GL; render only (never changes a state hash). Up to 32 lights and 128 occluders per view; see [API.md](API.md)."
     },
     {
      "id": "webgpu",
      "name": "WebGPU",
-     "status": "planned",
-     "platforms": [],
+     "status": "experimental",
+     "platforms": [
+      "linux",
+      "web"
+     ],
      "desktop_only": false,
-     "web": false,
-     "tier": "none",
-     "note": "Milestone 10, after Phases 8 and 9."
+     "web": true,
+     "tier": "compatible",
+     "note": "Milestones 10.1-10.3: the web default where the browser has it (WebGL2 otherwise, in the same build and in web exports), `--backend webgpu` on Linux (wgpu-native, `CUERVO_WEBGPU`). Every Compatible RHI feature; matches GL in every `rhi_parity` scene and Vulkan exactly, all WGSL generated from GLSL; the shmup and `lantern_cave` reach their native state hashes on WebGPU in headless Chrome, and the browser benchtest (100k shapes, 8 threads) runs stably at 390 FPS (milestone 10.4, [PERFORMANCE.md](PERFORMANCE.md) \"Web\"). Not in desktop exports. See [WEB.md](WEB.md) \"WebGPU\"."
     }
    ]
   },
@@ -446,14 +463,32 @@
      "note": "Not implemented. The track system is designed to carry cutout, skeletal and morph tracks (DESIGN.md 4.17)."
     },
     {
-     "id": "physics",
-     "name": "Physics (Box2D v3), tilemaps and navigation",
-     "status": "planned",
-     "platforms": [],
+     "id": "tilemaps-navigation",
+     "name": "Tilemaps (`TileMapLayer`, autotiling, paint tool) and navigation (`NavigationRegion2D`, `NavigationAgent2D`)",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
      "desktop_only": false,
-     "web": false,
+     "web": true,
      "tier": "none",
-     "note": "Milestones 9.5 and 9.6."
+     "note": "Milestone 9.5. Deterministic A* with strict tie-breaking; see [API.md](API.md)."
+    },
+    {
+     "id": "physics",
+     "name": "Physics (Box2D v3 scene-tree bodies)",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
+     "desktop_only": false,
+     "web": true,
+     "tier": "none",
+     "note": "Milestone 9.6. Box2D v3 scene-tree bodies (StaticBody2D, CharacterBody2D, RigidBody2D, Area2D, CollisionShape2D), raycasts, joints; see [API.md](API.md)."
     },
     {
      "id": "ecs",
@@ -554,7 +589,7 @@
      "desktop_only": true,
      "web": false,
      "tier": "none",
-     "note": "Host platform only: the export host must be the target (Linux or Windows). Needs a C compiler. Windows is validated with the Clang debug build (docs/WINDOWS.md). Not used for web exports (web games ship scripts as source); an AOT export for another platform is refused."
+     "note": "Host platform only: the export host must be the target (Linux or Windows). Needs a C compiler. On Windows the C compiler is LLVM clang with every toolchain (docs/WINDOWS.md). Not used for web exports (web games ship scripts as source); an AOT export for another platform is refused."
     },
     {
      "id": "lang-tools",
@@ -585,22 +620,42 @@
     {
      "id": "modules",
      "name": "Modules, `import` and packages",
-     "status": "planned",
-     "platforms": [],
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows",
+      "web"
+     ],
      "desktop_only": false,
+     "web": true,
+     "tier": "none",
+     "note": "Milestone 10.5b: `import`, `pub` across packages, `[dependencies]` with pinned versions (vendored or by path), packed into exports; see [PACKAGES.md](PACKAGES.md). `examples/garden` reaches its dev state hash from source and AOT packs on Linux, on Windows and in headless Chrome. Packages are shared through registries (10.5d)."
+    },
+    {
+     "id": "unit_tests",
+     "name": "Unit tests (`@test`)",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows"
+     ],
+     "desktop_only": true,
      "web": false,
      "tier": "none",
-     "note": "Milestone 10.5b; project scripts share one global namespace today."
+     "note": "Milestone 10.5b: `plm test` and `cuervo-tools test` run a game's or a package's `@test` functions, each in a fresh session; left out of builds. See [LANGUAGE.md](LANGUAGE.md) 9.27. Host tools."
     },
     {
      "id": "plugins",
      "name": "Plugin API, FFI, embedding",
-     "status": "planned",
-     "platforms": [],
-     "desktop_only": false,
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows"
+     ],
+     "desktop_only": true,
      "web": false,
      "tier": "none",
-     "note": "Milestone 10.5c."
+     "note": "Milestone 10.5c: native plugins over one C ABI (version 1) in C++, Rust and C# (.NET, desktop only), with nodes, natives and importers; C++ and Rust plugins link statically into AOT exports. `@extern` calls C functions ([LANGUAGE.md](LANGUAGE.md) 9.28); `pluma/embed/pluma_embed.h` hosts the VM from C. See [PLUGINS.md](PLUGINS.md). Not on the web yet."
     }
    ]
   },
@@ -647,15 +702,15 @@
     },
     {
      "id": "export-windows",
-     "name": "Export for Windows",
-     "status": "experimental",
+     "name": "Export for Windows (source and AOT scripts, stripped players)",
+     "status": "stable",
      "platforms": [
       "windows"
      ],
      "desktop_only": true,
      "web": false,
      "tier": "none",
-     "note": "Needs a Windows player (`--runtime`). An export of the shmup made with the Clang debug player reaches the Linux state hash with bytecode and AOT scripts; other games and release players are untested."
+     "note": "Ships the GUI-subsystem `cuervo-player.exe` of the build tree or a prebuilt package's export template. The shmup and the tutorial exported with source and AOT scripts reach their dev state hashes from another directory, with MSVC and MinGW-w64 players. Stripped players build on a Windows host (tictak's: -31 %, same hash). [EXPORT.md](EXPORT.md)."
     },
     {
      "id": "pack",
@@ -699,13 +754,29 @@
     },
     {
      "id": "registry",
-     "name": "Plugin registry, `license report`, signed prebuilt editor and export templates",
-     "status": "planned",
-     "platforms": [],
-     "desktop_only": false,
+     "name": "Package registry and `license report`",
+     "status": "stable",
+     "platforms": [
+      "linux",
+      "windows"
+     ],
+     "desktop_only": true,
      "web": false,
      "tier": "none",
-     "note": "Milestones 10.5a to 10.5d."
+     "note": "Milestone 10.5d: `cuervo-tools plugin verify|publish|install|list` over a directory registry with SHA-256 checksums, SPDX license checks, engine and ABI version ranges and a conformance state hash for sim-safe plugins; `license report` and exports list the packages' licenses. See [PLUGINS.md](PLUGINS.md). HTTP registries are not built yet."
+    },
+    {
+     "id": "prebuilt",
+     "name": "Signed prebuilt editor and export templates",
+     "status": "experimental",
+     "platforms": [
+      "linux",
+      "windows"
+     ],
+     "desktop_only": true,
+     "web": false,
+     "tier": "none",
+     "note": "Milestone 10.5a. The release workflow builds the editor, tools and players on a `v*` tag, with export templates in `templates/<platform>/`, a SHA-256 sum for every file (and a Sigstore attestation once the repository is public), and Authenticode signatures on the Windows executables when the repository has a signing certificate (docs/WINDOWS.md \"Prebuilt binaries\"). No release has been tagged yet."
     },
     {
      "id": "content-tools",
@@ -764,7 +835,7 @@
    ],
    "limits": {},
    "guarantees": [
-    "Runs on the Vulkan backend on Linux (and on Windows, experimental) only. Full has no fixed numeric minimums yet.",
+    "Runs on the Vulkan backend on Linux and Windows only. Full has no fixed numeric minimums yet.",
     "The Full RHI features in the table below are required: a Vulkan device missing one is refused."
    ],
    "refuses": [

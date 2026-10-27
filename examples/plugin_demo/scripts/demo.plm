@@ -1,0 +1,74 @@
+// examples/plugin_demo: nodes and functions from native plugins. Each plugin
+// is a package: `import` it and use its names like any other package's.
+
+import orbit
+import noise
+import hues
+
+class Demo extends Node {
+    var orbiters = List<orbit.Orbiter>()
+    var wisps = List<noise.Wisp>()
+    var pulses = List<hues.Pulse>()
+    var label = ""
+
+    fn ready() {
+        label = "{orbit.describe()}, {noise.describe()}, {hues.describe()}"
+        for i in 0..3 {
+            var o = orbit.Orbiter()
+            o.center = vec2(640.0, 360.0)
+            o.radius = 90.0 + 70.0 * (i as float)
+            o.speed = 1.6 - 0.4 * (i as float)
+            add_child(o)
+            orbiters.push(o)
+            // A pulse rides each orbiter; its size and color come from C#.
+            var p = hues.Pulse()
+            p.period = 1.0 + 0.5 * (i as float)
+            p.turn = (i as float) / 3.0
+            o.add_child(p)
+            pulses.push(p)
+        }
+        for i in 0..4 {
+            var w = noise.Wisp()
+            w.base = vec2(200.0 + 290.0 * (i as float), 620.0)
+            w.seed = 7 + i
+            add_child(w)
+            wisps.push(w)
+        }
+    }
+
+    // Read by tests/cuervo/plugin_tests.cpp: the wisps' combined displacement.
+    fn wisp_drift() -> float {
+        var d = 0.0
+        for w in wisps {
+            d += (w.position - w.base).length()
+        }
+        return d
+    }
+
+    // Read by tests/cuervo/plugin_tests.cpp.
+    fn total_laps() -> int {
+        var n = 0
+        for o in orbiters {
+            n += o.laps
+        }
+        return n
+    }
+
+    fn draw(g: Canvas) {
+        g.circle(vec2(640.0, 360.0), 18.0, Color.hex("ffcc4d"))
+        for i in 0..orbiters.len() {
+            var o = orbiters[i]
+            g.circle(o.center, o.radius, null, Color.hex("2a3050"), 2.0)
+            var p = pulses[i]
+            g.circle(o.position, 14.0 * p.scale(), p.color())
+        }
+        for w in wisps {
+            g.circle(w.base, 4.0, Color.hex("3a4068"))
+            g.circle(w.position, 10.0, Color.hex("b38cff"))
+        }
+        g.text(vec2(24.0, 24.0), label, 20.0, Color.hex("e0e6ff"))
+        var e = orbiters.len() > 0 ? orbiters[0].energy() : 0.0
+        g.text(vec2(24.0, 52.0), "laps {total_laps()}   inner energy {e}   orbits in 60 s: {orbit.orbits_in(60.0, 1.6)}", 18.0,
+               Color.hex("a0a8c8"))
+    }
+}

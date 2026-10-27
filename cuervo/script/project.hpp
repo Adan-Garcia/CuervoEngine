@@ -1,7 +1,9 @@
 #pragma once
 
+#include <compare>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -38,11 +40,25 @@
 //   shoot = ["Key.Z", "Key.Space", "Pad.South"]
 //   [input.axes]                  # 2D axes: Input.axis(#move) -> vec2
 //   move = ["Keys.Arrows", "Keys.WASD", "Pad.LeftStick"]
+//   [dependencies]                # packages (LANGUAGE.md 9.26, milestone 10.5b)
+//   tween = "1.2.0"               # vendored in packages/tween/
+//   [dependencies.fx]             # or a package in another directory
+//   path = "../libs/fx"
+//   version = "0.3.1"
 namespace cuervo::assets {
 class Vfs;
 }
 
 namespace cuervo::script {
+
+// A package dependency (project.toml or package.toml `[dependencies]`). The
+// version is pinned: the package's own `version` must equal it.
+struct Dependency {
+    std::string name;
+    std::string version;
+    std::string path; // a directory relative to the declaring manifest; empty: vendored
+    int line = 0;     // in the declaring manifest
+};
 
 struct Project {
     std::filesystem::path dir;
@@ -66,7 +82,109 @@ struct Project {
     FeatureOverrides features; // [features] in project.toml
     std::vector<std::pair<std::string, std::vector<std::string>>> actions;
     std::vector<std::pair<std::string, std::vector<std::string>>> axes;
+    std::vector<Dependency> dependencies; // [dependencies], in file order
 };
+
+// A semantic version, MAJOR.MINOR.PATCH.
+struct Version {
+    int major = 0;
+    int minor = 0;
+    int patch = 0;
+    auto operator<=>(const Version&) const = default;
+};
+// "1.2.3"; with `partial`, also "1" and "1.2" (missing parts are 0).
+std::optional<Version> parse_version(std::string_view text, bool partial = false);
+
+// A version range (milestone 10.5d, docs/PACKAGES.md "Version ranges"):
+// comma-separated clauses, all of which must hold. A clause is `>=V`, `>V`,
+// `<=V`, `<V`, `=V` or a bare `V` (exactly V), `^V` (compatible: the same
+// major version, or the same minor while the major is 0) or `*` (any).
+// Versions in a range may be partial ("1", "0.2").
+struct VersionRange {
+    enum class Op : std::uint8_t { Eq, Ge, Gt, Le, Lt, Caret };
+    struct Clause {
+        Op op = Op::Eq;
+        Version v;
+    };
+    std::vector<Clause> clauses; // empty: any version
+    std::string text = "*";      // as written ("*" when empty)
+    bool contains(const Version& v) const;
+};
+std::optional<VersionRange> parse_version_range(std::string_view text, std::string& error);
+
+// This engine's version (the CMake project version) and the plugin ABI it hosts.
+std::string_view engine_version();
+int plugin_abi_version();
+
+// A package's `package.toml` (docs/PACKAGES.md):
+//
+//   name = "tween"         # a Pluma identifier: the namespace scripts import
+//   version = "1.2.0"      # MAJOR.MINOR.PATCH
+//   description = "Easing curves and tweens"
+//   license = "MIT"        # an SPDX expression (cuervo-tools plugin verify checks it)
+//   engine = ">=0.1, <0.2" # engine versions it works with (default: any)
+//   [dependencies]         # as in project.toml
+//   [plugin]               # native code (milestone 10.5c, docs/PLUGINS.md)
+//   abi = 1                # the plugin ABI it was built for, or a range: ">=1, <3"
+//   sim_safe = true        # deterministic: may run in the simulation
+//   platforms = ["linux", "windows"]    # where it runs (default: from the libraries)
+//   linux = "lib/libnoise.so"           # shared library per platform
+//   linux_static = "lib/libnoise.a"     # linked into AOT exports (optional)
+//   windows = "lib/noise.dll"
+//   windows_static = "lib/noise.lib"         # AOT exports from MSVC-runtime builds
+//   windows_gnu_static = "lib/libnoise_gnu.a" # ... and from MinGW-w64 builds
+//   dotnet = "bin/Noise.dll"            # or a .NET assembly (C#, desktop VM only)
+//   dotnet_type = "Noise.Plugin, Noise" # its entry type (default: <assembly>.Plugin)
+struct PluginSpec {
+    bool present = false;
+    bool has_abi = false;
+    VersionRange abi; // over ABI versions ("1" is 1.0.0)
+    bool sim_safe = false;
+    // Package-relative paths. (Not `linux`: a predefined macro in GNU modes.)
+    // A static library only links with its own toolchain's C/C++ runtime, so
+    // Windows has one per ABI (MSVC, MinGW-w64); the DLL is plain C ABI.
+    std::string lib_linux, static_linux, lib_windows, static_windows, static_windows_gnu, dotnet, dotnet_type;
+    // `platforms`, or the platforms the library fields name: "linux",
+    // "windows" (a .NET plugin: both).
+    std::vector<std::string> platforms;
+    bool abi_compatible(int abi_version) const { return abi.contains(Version{abi_version, 0, 0}); }
+};
+
+struct PackageManifest {
+    std::string name;
+    std::string version;
+    std::string description;
+    std::string license;
+    VersionRange engine; // `engine`: the engine versions it works with
+    std::vector<Dependency> dependencies;
+    PluginSpec plugin;
+};
+
+// A package found for a project, with the VFS and path prefix its files are
+// read through ("packages/tween/" inside the project or its pack, "" for a
+// directory of its own).
+struct ResolvedPackage {
+    PackageManifest manifest;
+    std::shared_ptr<const assets::Vfs> vfs;
+    std::string prefix;
+    std::filesystem::path dir; // on disk; empty inside a pack
+};
+
+bool valid_package_name(std::string_view name);
+bool valid_version(std::string_view version);
+
+// Reads `<prefix>package.toml` through `vfs`.
+std::optional<PackageManifest> load_package_manifest(const assets::Vfs& vfs, std::string_view prefix,
+                                                     std::string& error);
+
+// Every package the project depends on, directly or not, dependencies
+// before their dependents (the order their globals initialize in). In a
+// pack every package is under `packages/<name>/`; in development a
+// dependency with a `path` is that directory, others are vendored under the
+// project's `packages/<name>/`. A version mismatch, two versions of one
+// package or a cycle is an error.
+bool resolve_packages(const Project& project, const assets::Vfs& vfs, std::vector<ResolvedPackage>& out,
+                      std::string& error);
 
 // Reads `<dir>/project.toml`. On failure returns nullopt and sets `error`.
 std::optional<Project> load_project(const std::filesystem::path& dir, std::string& error);
@@ -96,6 +214,8 @@ bool read_scripts(const Project& project, std::vector<pluma::SourceFile::Part>& 
 // Every `scripts/**/*.plm` through a VFS; `files` receives the real paths of
 // those that have one (directory mounts: watched for hot reload). Having
 // no scripts is not an error (a main_scene of prelude nodes needs none).
+// The project's packages come first, each file tagged with its package and
+// named `packages/<name>/scripts/...` (LANGUAGE.md 9.26).
 bool read_scripts(const assets::Vfs& vfs, std::vector<pluma::SourceFile::Part>& out,
                   std::vector<std::filesystem::path>* files, std::string& error);
 

@@ -1,0 +1,9 @@
+# A reusable Pluma package (docs/PACKAGES.md): easing curves and tweens.
+# Games depend on it from project.toml:
+#   [dependencies.tween]
+#   path = "../libs/tween"
+#   version = "1.2.0"
+name = "tween"
+version = "1.2.0"
+description = "Easing curves and value tweens driven by the fixed tick"
+license = "MIT"

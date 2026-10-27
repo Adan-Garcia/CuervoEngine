@@ -1,0 +1,12 @@
+# A native plugin written in C# (docs/PLUGINS.md), hosted on .NET by the
+# desktop player and editor. `cmake --build <build> --target hues_plugin` runs
+# `dotnet build` into bin/. Not available on the web or in AOT exports.
+name = "hues"
+version = "1.0.0"
+description = "Colors and a pulsing node, from C#"
+license = "MIT"
+
+[plugin]
+abi = 1
+sim_safe = false                 # used for drawing only: not part of the simulation
+dotnet = "bin/Hues.dll"          # entry: Hues.Plugin.Entry (docs/PLUGINS.md)

@@ -1,0 +1,291 @@
+// Lantern Cave (DESIGN.md 4.17, milestone 9.8): a dark cave platformer that
+// puts the 9.x systems together. The level is a TileMapLayer whose rock tiles
+// collide (TileMapCollision2D) and block light (`light_occluders`); an
+// AmbientLight2D darkens everything the lights don't reach. The explorer is
+// a CharacterBody2D carrying a PointLight2D lantern, with an AnimationPlayer
+// walk cycle; torches flicker through AnimationPlayer energy tracks, a
+// beacon's spot light sweeps the hall, and crates (RigidBody2D with a
+// LightOccluder2D) cast moving shadows as they are pushed. Collect every gem,
+// then reach the door.
+//
+//   move: A / D or arrows   jump: Space / W   restart: R
+//
+// The lights are render only: the simulation (and the replay hash) is the
+// same with lighting on or off.
+
+var gems_total = 0
+var gems_found = 0
+var escaped = false
+
+var ROCK = Color.hex("3a3346")
+var INK = Color.hex("f1ead8")
+var GOLD = Color.hex("ffcf5a")
+
+// The explorer: runs, jumps, pushes crates; the lantern light faces where
+// they walk.
+class Explorer extends CharacterBody2D {
+    @export var speed = 260.0
+    @export var jump_velocity = -700.0
+    @export var gravity = 1500.0
+    // Crates are pushed with this impulse per tick of contact.
+    @export var push = 18.0
+    var facing = 1.0
+    var anim: AnimationPlayer
+    var visual: Node2D
+    var state = ""
+
+    fn ready() {
+        super.ready()
+        if find("Anim") is AnimationPlayer a {
+            anim = a
+            build_animations(a)
+        }
+        if find("Visual") is Node2D v {
+            visual = v
+        }
+        play("idle")
+    }
+
+    // The walk cycle, built here so the scene file stays small: hips swing,
+    // the torso bobs, the lantern sways.
+    fn build_animations(a: AnimationPlayer) {
+        var idle = Animation { name = "idle", length = 90, mode = AnimLoop.Loop }
+        idle.key_value("Visual/Torso:position", 0, vec4(0.0, -6.0, 0.0, 0.0), AnimInterp.EaseInOut)
+        idle.key_value("Visual/Torso:position", 45, vec4(0.0, -4.5, 0.0, 0.0), AnimInterp.EaseInOut)
+        idle.key_value("Visual/Torso:position", 90, vec4(0.0, -6.0, 0.0, 0.0), AnimInterp.EaseInOut)
+        idle.key_float("Visual/HipL:rotation", 0, 0.0)
+        idle.key_float("Visual/HipR:rotation", 0, 0.0)
+        idle.key_float("Visual/Arm:rotation", 0, 0.1, AnimInterp.EaseInOut)
+        idle.key_float("Visual/Arm:rotation", 45, -0.05, AnimInterp.EaseInOut)
+        idle.key_float("Visual/Arm:rotation", 90, 0.1, AnimInterp.EaseInOut)
+        a.add_animation(idle)
+
+        var walk = Animation { name = "walk", length = 32, mode = AnimLoop.Loop }
+        walk.key_value("Visual/Torso:position", 0, vec4(0.0, -6.0, 0.0, 0.0), AnimInterp.EaseInOut)
+        walk.key_value("Visual/Torso:position", 8, vec4(0.0, -8.0, 0.0, 0.0), AnimInterp.EaseInOut)
+        walk.key_value("Visual/Torso:position", 16, vec4(0.0, -6.0, 0.0, 0.0), AnimInterp.EaseInOut)
+        walk.key_value("Visual/Torso:position", 24, vec4(0.0, -8.0, 0.0, 0.0), AnimInterp.EaseInOut)
+        walk.key_value("Visual/Torso:position", 32, vec4(0.0, -6.0, 0.0, 0.0), AnimInterp.EaseInOut)
+        walk.key_float("Visual/HipL:rotation", 0, 0.6, AnimInterp.EaseInOut)
+        walk.key_float("Visual/HipL:rotation", 16, -0.6, AnimInterp.EaseInOut)
+        walk.key_float("Visual/HipL:rotation", 32, 0.6, AnimInterp.EaseInOut)
+        walk.key_float("Visual/HipR:rotation", 0, -0.6, AnimInterp.EaseInOut)
+        walk.key_float("Visual/HipR:rotation", 16, 0.6, AnimInterp.EaseInOut)
+        walk.key_float("Visual/HipR:rotation", 32, -0.6, AnimInterp.EaseInOut)
+        walk.key_float("Visual/Arm:rotation", 0, 0.3, AnimInterp.EaseInOut)
+        walk.key_float("Visual/Arm:rotation", 16, -0.2, AnimInterp.EaseInOut)
+        walk.key_float("Visual/Arm:rotation", 32, 0.3, AnimInterp.EaseInOut)
+        a.add_animation(walk)
+
+        var jump = Animation { name = "jump", length = 1, mode = AnimLoop.None }
+        jump.key_value("Visual/Torso:position", 0, vec4(0.0, -7.0, 0.0, 0.0))
+        jump.key_float("Visual/HipL:rotation", 0, 0.7)
+        jump.key_float("Visual/HipR:rotation", 0, -0.35)
+        jump.key_float("Visual/Arm:rotation", 0, -0.6)
+        a.add_animation(jump)
+    }
+
+    fn play(s: str) {
+        if s != state && anim != null {
+            state = s
+            anim.play(s)
+        }
+    }
+
+    fn update(dt: float) {
+        if !is_on_floor() {
+            velocity.y = min(velocity.y + gravity * dt, 900.0)
+        }
+        var dir = 0.0
+        if !escaped {
+            if Input.held(#move_right) {
+                dir += 1.0
+            }
+            if Input.held(#move_left) {
+                dir -= 1.0
+            }
+            if Input.pressed(#jump) && is_on_floor() {
+                velocity.y = jump_velocity
+            }
+        }
+        velocity.x = dir * speed
+        if dir != 0.0 {
+            facing = dir
+        }
+        move_and_slide()
+        // Shove the crates we walk into.
+        for i in 0..get_slide_collision_count() {
+            if get_slide_collision(i).collider is Crate c {
+                c.apply_impulse(vec2(dir * push, 0.0))
+            }
+        }
+        if visual != null {
+            visual.scale = vec2(facing, 1.0)
+        }
+        if !is_on_floor() {
+            play("jump")
+        } else if dir != 0.0 {
+            play("walk")
+        } else {
+            play("idle")
+        }
+    }
+}
+
+// A pushable crate; its LightOccluder2D child casts the shadow.
+class Crate extends RigidBody2D {
+    fn ready() {
+        super.ready()
+    }
+
+    fn draw(g: Canvas) {
+        var p = global_position()
+        var r = global_rotation()
+        g.rect(p - vec2(20.0, 20.0), vec2(40.0, 40.0), fill = Color.hex("8a5a2b"), stroke = Color.hex("4a2e14"),
+               width = 3.0, rotation = r)
+        var d = vec2(14.0, 14.0).rotated(r)
+        var e = vec2(14.0, -14.0).rotated(r)
+        g.line(p - d, p + d, color = Color.hex("4a2e14"), width = 3.0)
+        g.line(p - e, p + e, color = Color.hex("4a2e14"), width = 3.0)
+    }
+}
+
+// A gem: glows (its own small light) until the explorer picks it up.
+class Gem extends Area2D {
+    var taken = false
+    var spin = 0.0
+
+    fn ready() {
+        super.ready()
+        gems_total += 1
+        body_entered.connect(fn(body: Node2D) {
+            if !taken && body is Explorer {
+                taken = true
+                gems_found += 1
+                queue_free()
+            }
+        })
+    }
+
+    fn update(dt: float) {
+        spin += dt * 2.0
+    }
+
+    fn draw(g: Canvas) {
+        var p = global_position() + vec2(0.0, sin(spin) * 3.0)
+        var pts = List<vec2>()
+        pts.push(vec2(0.0, -12.0))
+        pts.push(vec2(9.0, 0.0))
+        pts.push(vec2(0.0, 12.0))
+        pts.push(vec2(-9.0, 0.0))
+        g.polygon(pts, fill = Color.hex("6fe3ff"), stroke = Color.hex("e8fbff"), width = 2.0, pos = p)
+    }
+}
+
+// The way out: open once every gem is found.
+class ExitDoor extends Area2D {
+    fn ready() {
+        super.ready()
+        body_entered.connect(fn(body: Node2D) {
+            if body is Explorer && gems_found >= gems_total && !escaped {
+                escaped = true
+                print("Escaped the cave at tick {Time.tick} with {gems_found} gems")
+            }
+        })
+    }
+
+    fn draw(g: Canvas) {
+        var p = global_position()
+        var open = gems_found >= gems_total
+        g.rect(p - vec2(24.0, 40.0), vec2(48.0, 80.0), fill = open ? Color.hex("2f6b4a") : Color.hex("2a2433"),
+               stroke = open ? Color.hex("8affc1") : Color.hex("5a4f66"), width = 3.0, radius = 6.0)
+        g.circle(p + vec2(12.0, 4.0), 4.0, fill = GOLD)
+    }
+}
+
+// A wall torch: a flame and a light whose energy flickers (AnimationPlayer
+// "Flicker", offset by the torch's position so torches don't pulse together).
+class Torch extends Node2D {
+    fn ready() {
+        if find("Flicker") is AnimationPlayer a {
+            var f = Animation { name = "flicker", length = 48, mode = AnimLoop.Loop }
+            f.key_float("Light:energy", 0, 1.0, AnimInterp.EaseInOut)
+            f.key_float("Light:energy", 7, 1.25, AnimInterp.EaseInOut)
+            f.key_float("Light:energy", 15, 0.9, AnimInterp.EaseInOut)
+            f.key_float("Light:energy", 26, 1.15, AnimInterp.EaseInOut)
+            f.key_float("Light:energy", 37, 0.95, AnimInterp.EaseInOut)
+            f.key_float("Light:energy", 48, 1.0, AnimInterp.EaseInOut)
+            f.key_float("Flame:radius", 0, 6.0, AnimInterp.EaseInOut)
+            f.key_float("Flame:radius", 7, 7.5, AnimInterp.EaseInOut)
+            f.key_float("Flame:radius", 15, 5.5, AnimInterp.EaseInOut)
+            f.key_float("Flame:radius", 26, 7.0, AnimInterp.EaseInOut)
+            f.key_float("Flame:radius", 48, 6.0, AnimInterp.EaseInOut)
+            a.add_animation(f)
+            a.play("flicker")
+            a.seek((position.x as int % 48) as float)
+        }
+    }
+
+    fn draw(g: Canvas) {
+        var p = global_position()
+        g.rect(p + vec2(-3.0, 4.0), vec2(6.0, 18.0), fill = Color.hex("5b3a22"))
+    }
+}
+
+// A spot light hanging from the ceiling, sweeping back and forth.
+class Beacon extends Node2D {
+    @export var sweep = 0.9
+    @export var period = 4.0
+    var t = 0.0
+
+    fn update(dt: float) {
+        t += dt
+        rotation = 1.5707964 + sweep * sin(t * TAU / period)
+    }
+
+    fn draw(g: Canvas) {
+        var p = global_position()
+        g.circle(p, 9.0, fill = Color.hex("c9d6ff"), stroke = Color.hex("5a6688"), width = 2.0)
+    }
+}
+
+// Gem count and messages, in screen space above the lighting.
+class Hud extends CanvasLayer {
+    fn draw(g: Canvas) {
+        g.rect(vec2(16.0, 14.0), vec2(190.0, 40.0), fill = Color.rgb(0.05, 0.04, 0.08, 0.7), radius = 8.0)
+        g.text(vec2(32.0, 24.0), "Gems {gems_found} / {gems_total}", size = 20.0, color = GOLD)
+        if escaped {
+            g.text(Screen.size * 0.5, "You escaped the cave!", size = 40.0, color = INK, align = #center,
+                   baseline = #middle)
+            g.text(Screen.size * 0.5 + vec2(0.0, 44.0), "R to play again", size = 20.0, color = INK, align = #center,
+                   baseline = #middle)
+        } else if gems_found >= gems_total && gems_total > 0 {
+            g.text(vec2(Screen.size.x * 0.5, 40.0), "The door is open", size = 22.0, color = INK, align = #center)
+        }
+    }
+}
+
+// The root (project.toml `main`): loads the level and the HUD, and restarts.
+class Game extends Node {
+    var level: Node
+
+    fn ready() {
+        add_child(Hud())
+        load_level()
+    }
+
+    fn load_level() {
+        gems_total = 0
+        gems_found = 0
+        escaped = false
+        level = Scene.load("scenes/cave.scene")
+        add_child(level)
+    }
+
+    fn update(dt: float) {
+        if Input.pressed(#restart) {
+            level.queue_free()
+            load_level()
+        }
+    }
+}

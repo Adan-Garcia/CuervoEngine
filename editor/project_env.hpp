@@ -66,6 +66,11 @@ public:
     // init()) are logged once and leave an empty preview.
     void rebuild_preview(const scene::SceneDoc& doc);
     bool preview_ok() const { return preview_ok_; }
+    // Poses the preview at tick `tick` of animation `name` of the
+    // AnimationPlayer at doc index `player` (the timeline's scrub, milestone
+    // 9.8): play(name) then seek(tick) on the preview node. The pose stays
+    // until the next rebuild_preview. false (and `error`) when it can't.
+    bool preview_animation(std::size_t player, const std::string& name, float tick, std::string& error);
     // Per document node (same order as the doc), after layout.
     const std::vector<NodeBounds>& bounds() const { return bounds_; }
 

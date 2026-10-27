@@ -12,6 +12,7 @@
 
 namespace cuervo {
 class Window;
+enum class GraphicsApi; // platform/window.hpp
 }
 
 // Render hardware interface (DESIGN.md 4.4). The rest of the engine talks to
@@ -26,7 +27,9 @@ class Window;
 //    begin_frame and end_frame and resets at every begin_frame.
 namespace cuervo::rhi {
 
-enum class Backend { OpenGL, Vulkan };
+// WebGPU (milestone 10, experimental) is a Compatible-tier backend: native
+// through wgpu-native, in the browser through Emscripten's emdawnwebgpu.
+enum class Backend { OpenGL, Vulkan, WebGPU };
 
 // Project render tier (DESIGN.md 4.4). `Compatible` = features every backend
 // has (GLES 3.0 / WebGL2-level); `Full` = adds Vulkan-only features, no web
@@ -49,7 +52,8 @@ enum class Feature : std::uint32_t {
     UniformBuffers,    // bind_uniform_buffer with offsets
     Textures,          // RGBA8 / R8 2D textures, nearest / linear
     IntegerAttributes, // VertexFormat::UInt1
-    PointsAndLines,    // Topology::PointList / LineList / LineStrip (1 px wide)
+    PointsAndLines,    // Topology::PointList / LineList / LineStrip (1 px wide; shaders
+                       // that write gl_PointSize write 1.0: WGSL has no point size)
     Msaa,              // DeviceOptions::msaa_samples > 1 (optional: falls back to 1)
     FrameCapture,      // capture_frame (debug aid; optional)
     // Tier::Full -- Vulkan only.
@@ -177,6 +181,10 @@ struct ShaderSource {
     std::span<const std::uint32_t> spirv; // Vulkan
     std::string_view glsl330;             // desktop GL 3.3 core
     std::string_view glsl_es300;          // GLES 3.0 / WebGL2
+    // WebGPU, translated from the SPIR-V by naga; empty in builds without the
+    // WebGPU backend. Texture binding N is split into @group(1) @binding(2N)
+    // (texture) and @binding(2N + 1) (sampler); uniforms keep @group(0).
+    std::string_view wgsl;
     std::span<const UniformBlockBinding> uniform_blocks; // GL applies these after linking
     std::span<const TextureBinding> textures;            // likewise
 };
@@ -346,8 +354,18 @@ public:
 // matching GraphicsApi. Returns null (and logs why) on failure.
 std::unique_ptr<Device> create_device(Backend backend, Window& window, const DeviceOptions& options = {});
 
-// Whether this build includes the backend (Vulkan is off for web builds).
+// Whether this build includes the backend (Vulkan is off for web builds;
+// WebGPU only with CUERVO_WEBGPU).
 bool backend_compiled_in(Backend backend);
 std::string_view backend_name(Backend backend);
+// The --backend spelling: gl/opengl, vulkan/vk, webgpu/wgpu.
+bool parse_backend(std::string_view text, Backend& out);
+// What the window must be created for to host a device of `backend`.
+GraphicsApi graphics_api(Backend backend);
+// The backend used when none is asked for (DESIGN.md 4.4 "Clarified (Milestone
+// 10.3)"): Vulkan when built in; in the browser WebGPU when the page handed
+// over a device (web/webgpu_init.js), else GL (WebGL2). Players fall back to
+// GL when the default fails to open.
+Backend default_backend();
 
 } // namespace cuervo::rhi

@@ -1,5 +1,6 @@
 #include "editor/command_script.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <cstdint>
 #include <memory>

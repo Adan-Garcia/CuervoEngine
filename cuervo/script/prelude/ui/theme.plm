@@ -1,0 +1,47 @@
+// Engine API: UI themes and styling (DESIGN.md 4.10).
+//
+// Colors, font sizes and spacing of the UI widgets. Assign one to a
+// control's `theme` (or change UI.theme) to restyle a tree.
+
+// Colors, font sizes and spacing of the UI widgets. Assign one to a
+// control's `theme` (or change UI.theme) to restyle a tree.
+class Theme {
+    // Text sizes: widgets and Label #normal; Label #title; Label #small.
+    var font_size = 22.0
+    // Font size of Label #title.
+    var title_size = 52.0
+    // Font size of Label #small.
+    var small_size = 16.0
+    // Text colors. Labels: #dim and #small use `text_dim`, #title and #accent
+    // `accent`, #danger `danger`, #gold `gold`; widgets use `accent` when focused.
+    var text = Color.hex("e8ecff")
+    // Color of dim and small labels.
+    var text_dim = Color.hex("8890b0")
+    // Color of the text of a disabled widget.
+    var text_disabled = Color.hex("4c5370")
+    // Highlight color: focused widgets, title and accent labels.
+    var accent = Color.hex("7fe6ff")
+    // Color of Label #danger.
+    var danger = Color.hex("ff5a8a")
+    // Color of Label #gold.
+    var gold = Color.hex("ffd866")
+    // Panel background and border; button fills by state.
+    var panel = Color.hex("0d1124f6")
+    // Border color of panels.
+    var panel_border = Color.hex("2c3560")
+    // Fill of a button, toggle or slider at rest.
+    var button = Color.hex("161c38")
+    // Fill of a focused widget.
+    var button_focus = Color.hex("22305e")
+    // Fill of a widget while pressed.
+    var button_pressed = Color.hex("3a4c90")
+    var padding = vec2(20.0, 10.0) // inside buttons, toggles and sliders
+    // Inside a Panel, on every side.
+    var panel_padding = 28.0
+    // Between VBox/HBox children.
+    var separation = 12.0
+    // Corner radius and border width of panels and widgets.
+    var radius = 8.0
+    // Border width in pixels of panels and widgets.
+    var border = 2.0
+}

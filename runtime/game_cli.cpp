@@ -43,16 +43,13 @@ int run_game_cli(int argc, char** argv) {
         return EXIT_FAILURE;
     }
     const std::string_view backend = arg_value(argc, argv, "--backend");
-    o.backend = rhi::backend_compiled_in(rhi::Backend::Vulkan) ? rhi::Backend::Vulkan : rhi::Backend::OpenGL;
-    if (backend == "vulkan" || backend == "vk") {
-        o.backend = rhi::Backend::Vulkan;
+    o.backend = rhi::default_backend();
+    if (!backend.empty()) {
+        if (!rhi::parse_backend(backend, o.backend)) {
+            LOG_ERROR("Unknown --backend '{}' (expected vulkan, gl or webgpu)", backend);
+            return EXIT_FAILURE;
+        }
         o.allow_fallback = false;
-    } else if (backend == "gl" || backend == "opengl") {
-        o.backend = rhi::Backend::OpenGL;
-        o.allow_fallback = false;
-    } else if (!backend.empty()) {
-        LOG_ERROR("Unknown --backend '{}' (expected vulkan or gl)", backend);
-        return EXIT_FAILURE;
     }
     if (const std::string_view q = arg_value(argc, argv, "--quit-after"); !q.empty()) o.quit_after = std::atof(q.data());
     o.vsync = arg_value(argc, argv, "--vsync") != "off";
@@ -67,6 +64,10 @@ int run_game_cli(int argc, char** argv) {
     if (auto env = platform::env("CUERVO_SCREENSHOT"); o.screenshot.empty() && env) o.screenshot = *env;
     if (auto env = platform::env("CUERVO_SCREENSHOT_TICK"); env && !env->empty()) {
         o.screenshot_tick = std::strtoull(env->c_str(), nullptr, 10);
+    }
+    // The flag wins over the variable: a browser page has no environment (tools/bench.py --web).
+    if (const std::string_view t = arg_value(argc, argv, "--screenshot-tick"); !t.empty()) {
+        o.screenshot_tick = std::strtoull(std::string(t).c_str(), nullptr, 10);
     }
     o.presses = std::string(arg_value(argc, argv, "--press"));
     if (auto env = platform::env("CUERVO_PRESS"); o.presses.empty() && env) o.presses = *env;

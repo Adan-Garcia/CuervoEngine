@@ -18,7 +18,9 @@
 // On the web `run_main_loop` does not return to its caller (Emscripten
 // unwinds the C stack), which is why the loop object is heap-owned and why
 // nothing after the call may matter. VSync is the browser's
-// requestAnimationFrame cadence there.
+// requestAnimationFrame cadence there; without it (`vsync` false, e.g.
+// --bench) frames run back to back through setImmediate, on every backend
+// (WebGPU has no swap interval to turn off, milestone 10.4).
 namespace cuervo::platform {
 
 class FrameLoop {
@@ -31,7 +33,8 @@ public:
 };
 
 // Runs `loop` until frame() returns false and returns finish()'s result
-// (natively). On the web, see above.
-int run_main_loop(std::unique_ptr<FrameLoop> loop);
+// (natively). On the web, see above; `vsync` only matters there (natively
+// the device's present mode paces frames).
+int run_main_loop(std::unique_ptr<FrameLoop> loop, bool vsync = true);
 
 } // namespace cuervo::platform

@@ -110,9 +110,21 @@ bool Vfs::normalize(std::string_view path, std::string& out, std::string& error)
     return true;
 }
 
-std::optional<VfsFile> Vfs::open(std::string_view path, std::string& error) const {
-    std::string p;
-    if (!normalize(path, p, error)) return std::nullopt;
+void Vfs::add_derived(std::string source_extension, std::string output_extension, Convert convert) {
+    derived_.push_back({std::move(source_extension), std::move(output_extension), std::move(convert)});
+}
+
+const Vfs::Derived* Vfs::derived_for(const std::string& path, std::string& source) const {
+    for (const Derived& d : derived_) {
+        if (path.size() <= d.output_extension.size() || !path.ends_with(d.output_extension)) continue;
+        source = path.substr(0, path.size() - d.output_extension.size()) + d.source_extension;
+        if (exists_mounted(source)) return &d;
+    }
+    return nullptr;
+}
+
+// An unreadable file is reported as not found; open() then explains it.
+std::optional<VfsFile> Vfs::open_mounted(const std::string& p) const {
     for (const Mount& m : mounts_) {
         if (m.pack) {
             if (auto data = m.pack->find(p)) {
@@ -127,8 +139,40 @@ std::optional<VfsFile> Vfs::open(std::string_view path, std::string& error) cons
         std::error_code ec;
         if (!fs::is_regular_file(file, ec)) continue;
         VfsFile f;
-        if (!read_real(file, f.owned_)) {
-            error = std::format("can't read '{}'", platform::utf8(file));
+        if (!read_real(file, f.owned_)) return std::nullopt;
+        f.view_ = f.owned_;
+        return f;
+    }
+    return std::nullopt;
+}
+
+bool Vfs::exists_mounted(const std::string& p) const {
+    for (const Mount& m : mounts_) {
+        std::error_code ec;
+        if (m.pack ? m.pack->contains(p) : fs::is_regular_file(m.dir / platform::path_from_utf8(p), ec)) return true;
+    }
+    return false;
+}
+
+std::optional<VfsFile> Vfs::open(std::string_view path, std::string& error) const {
+    std::string p;
+    if (!normalize(path, p, error)) return std::nullopt;
+    if (auto f = open_mounted(p)) return f;
+    if (exists_mounted(p)) {
+        error = std::format("can't read '{}'", describe(p));
+        return std::nullopt;
+    }
+    std::string source;
+    if (const Derived* d = derived_for(p, source)) {
+        auto in = open_mounted(source);
+        if (!in) {
+            error = std::format("can't read '{}'", describe(source));
+            return std::nullopt;
+        }
+        VfsFile f;
+        std::string why;
+        if (!d->convert(source, in->bytes(), f.owned_, why)) {
+            error = std::move(why); // the converter names the file
             return std::nullopt;
         }
         f.view_ = f.owned_;
@@ -154,11 +198,8 @@ bool Vfs::exists(std::string_view path) const {
     std::string p;
     std::string error;
     if (!normalize(path, p, error)) return false;
-    for (const Mount& m : mounts_) {
-        std::error_code ec;
-        if (m.pack ? m.pack->contains(p) : fs::is_regular_file(m.dir / platform::path_from_utf8(p), ec)) return true;
-    }
-    return false;
+    std::string source;
+    return exists_mounted(p) || derived_for(p, source) != nullptr;
 }
 
 std::vector<std::string> Vfs::list(std::string_view dir_in, std::string_view extension) const {
@@ -168,6 +209,12 @@ std::vector<std::string> Vfs::list(std::string_view dir_in, std::string_view ext
     std::vector<std::string> out;
     auto consider = [&](std::string path) {
         if (!under(path, dir) || hidden(path)) return;
+        for (const Derived& d : derived_) {
+            if (path.size() > d.source_extension.size() && path.ends_with(d.source_extension)) {
+                std::string made = path.substr(0, path.size() - d.source_extension.size()) + d.output_extension;
+                if (extension.empty() || made.ends_with(extension)) out.push_back(std::move(made));
+            }
+        }
         if (!extension.empty() && !path.ends_with(extension)) return;
         out.push_back(std::move(path));
     };

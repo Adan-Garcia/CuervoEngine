@@ -1,0 +1,323 @@
+// A 2D shape cast node that sweeps a shape along target_position to detect colliders.
+class ShapeCast2D extends Node2D {
+    // The shape resource to cast.
+    var shape: Shape2D? = null
+    // Fallback shape type when shape resource is null (1: Box, 2: Circle, 3: Capsule, 4: Segment).
+    @export var shape_type = 1
+    // Box dimensions (width, height) in pixels.
+    @export var size = vec2(32.0, 32.0)
+    // Circle or capsule radius in pixels.
+    @export var radius = 16.0
+    // Destination endpoint vector of the shape sweep relative to this node.
+    @export var target_position = vec2(0.0, 50.0)
+    // Physics layers this sweep scans for.
+    @export var collision_mask = 1
+    // When true, updates automatically each tick.
+    @export var enabled = true
+    // When true, ignores the parent physics body.
+    @export var exclude_parent = true
+    // When true, forces debug drawing regardless of global debug flag.
+    @export var debug_draw = false
+
+    // True if the shape cast detected a collision.
+    var colliding = false
+    // The hit collider node if any.
+    var collider: Node2D? = null
+    // World point of contact.
+    var collision_point = vec2(0.0, 0.0)
+    // Surface normal at contact point.
+    var collision_normal = vec2(0.0, 0.0)
+    // Fraction of sweep motion where collision occurred.
+    var fraction = 0.0
+
+    // Engine-internal per-tick update hook that runs shape cast before script update().
+    fn update_tree(dt: float) {
+        if !freed && can_process() && enabled {
+            force_shapecast_update()
+        }
+        super.update_tree(dt)
+    }
+
+    // Updates shape cast query each tick while enabled.
+    fn update(dt: float) {
+        if enabled {
+            force_shapecast_update()
+        }
+    }
+
+    // Returns true if a collision is detected.
+    fn is_colliding() -> bool {
+        return colliding
+    }
+
+    // Returns the collider node that was hit, or null.
+    fn get_collider() -> Node2D? {
+        return collider
+    }
+
+    // Returns the world point of the collision.
+    fn get_collision_point() -> vec2 {
+        return collision_point
+    }
+
+    // Returns the surface normal of the collision.
+    fn get_collision_normal() -> vec2 {
+        return collision_normal
+    }
+
+    // Internal callback from native shape cast query.
+    fn _apply_shapecast_result(hit: bool, pt: vec2, norm: vec2, frac: float, col: Node2D?) {
+        colliding = hit
+        collision_point = pt
+        collision_normal = norm
+        fraction = frac
+        collider = col
+    }
+
+    // Immediately executes the shape cast query against the physics world.
+    fn force_shapecast_update() {
+        var exclude_handle = 0
+        if exclude_parent && parent is PhysicsBody2D b {
+            exclude_handle = b.body_handle
+        }
+        var st = 1
+        var sz = size
+        var rad = radius
+        if shape is CircleShape2D c {
+            st = 0
+            rad = c.radius
+            sz = vec2(c.radius, c.radius)
+        } else if shape is RectangleShape2D r {
+            st = 1
+            sz = r.size
+        } else if shape is CapsuleShape2D cap {
+            st = 2
+            rad = cap.radius
+            sz = vec2(cap.radius, cap.height)
+        } else if shape is SegmentShape2D s {
+            st = 3
+            sz = s.a
+            rad = 0.0
+        } else if shape_type == 1 {
+            st = 1
+        } else if shape_type == 2 {
+            st = 0
+            sz = vec2(radius, radius)
+        } else if shape_type == 3 {
+            st = 2
+        } else if shape_type == 4 {
+            st = 3
+        }
+        _Physics.shapecast_node(self, st, vec2(0.0, 0.0), 0.0, sz, rad, global_position(), target_position.rotated(global_rotation()), collision_mask, exclude_handle)
+    }
+
+    // Draws the shape cast sweep and collision hit point in editor or when debug shapes are toggled.
+    fn draw(g: Canvas) {
+        if !ready_done && !_Physics.get_editor_debug_shapes() {
+            return
+        }
+        if ready_done && !debug_draw && !_Physics.get_debug_shapes() {
+            return
+        }
+        var from = global_position()
+        var rot = global_rotation()
+        var to = from + target_position.rotated(rot)
+        var col = Color.rgb(0.8, 0.6, 0.1, 0.6)
+        if colliding {
+            col = Color.rgb(0.2, 0.9, 0.3, 0.8)
+        }
+        g.line(from, to, col, width = 1.5)
+        if shape_type == 1 {
+            g.rect(from - size * 0.5, size, fill = col.with_alpha(0.2), stroke = col, width = 1.0, rotation = rot)
+            g.rect(to - size * 0.5, size, fill = col.with_alpha(0.2), stroke = col, width = 1.0, rotation = rot)
+        } else {
+            g.circle(from, radius, fill = col.with_alpha(0.2), stroke = col, width = 1.0)
+            g.circle(to, radius, fill = col.with_alpha(0.2), stroke = col, width = 1.0)
+        }
+        if colliding {
+            g.circle(collision_point, 3.5, fill = Color.rgb(0.2, 0.9, 0.3, 1.0))
+            g.line(collision_point, collision_point + collision_normal * 12.0, Color.rgb(0.2, 0.5, 1.0, 0.9), width = 1.5)
+        }
+    }
+}
+
+// Result structure returned by direct raycast queries through Physics2D.raycast().
+class RayCastResult2D {
+    // True if a collision was found.
+    var hit = false
+    // World point of collision.
+    var point = vec2(0.0, 0.0)
+    // Surface normal of collision.
+    var normal = vec2(0.0, 0.0)
+    // Fraction of the total ray length where the collision occurred.
+    var fraction = 0.0
+    // The hit collider node if any.
+    var collider: Node2D? = null
+
+    // Internal setter from native query.
+    fn _set_result(h: bool, pt: vec2, n: vec2, f: float, col: Node2D?) {
+        hit = h
+        point = pt
+        normal = n
+        fraction = f
+        collider = col
+    }
+}
+
+// Result structure returned by direct shape cast queries through Physics2D.shapecast().
+class ShapeCastResult2D {
+    // True if a collision was found.
+    var hit = false
+    // World point of collision.
+    var point = vec2(0.0, 0.0)
+    // Surface normal of collision.
+    var normal = vec2(0.0, 0.0)
+    // Fraction of the total sweep length where the collision occurred.
+    var fraction = 0.0
+    // The hit collider node if any.
+    var collider: Node2D? = null
+
+    // Internal setter from native query.
+    fn _set_result(h: bool, pt: vec2, n: vec2, f: float, col: Node2D?) {
+        hit = h
+        point = pt
+        normal = n
+        fraction = f
+        collider = col
+    }
+}
+
+// Static query and configuration interface for the 2D physics world.
+class Physics2D {
+    // Casts a ray from `from` to `to`, testing against shapes on `mask` layers.
+    static fn raycast(from: vec2, to: vec2, mask: int = 1) -> RayCastResult2D {
+        var res = RayCastResult2D()
+        _Physics.raycast_query(res, from, to - from, mask)
+        return res
+    }
+
+    // Casts a shape from `from` to `to`, testing against colliders on `mask` layers.
+    static fn shapecast(from: vec2, to: vec2, mask: int = 1, shape: Shape2D? = null) -> ShapeCastResult2D {
+        var res = ShapeCastResult2D()
+        var st = 1
+        var sz = vec2(32.0, 32.0)
+        var rad = 16.0
+        if shape is CircleShape2D c {
+            st = 0
+            rad = c.radius
+            sz = vec2(c.radius, c.radius)
+        } else if shape is RectangleShape2D r {
+            st = 1
+            sz = r.size
+        } else if shape is CapsuleShape2D cap {
+            st = 2
+            rad = cap.radius
+            sz = vec2(cap.radius, cap.height)
+        }
+        _Physics.shapecast_query(res, st, vec2(0.0, 0.0), 0.0, sz, rad, from, to - from, mask)
+        return res
+    }
+
+    // Queries whether a point intersects with any collider on `mask` layers, returning the collider node.
+    static fn intersect_point(point: vec2, mask: int = 1) -> Node2D? {
+        return _Physics.point_query(point, mask)
+    }
+
+    // Applies a radial explosion in the physics world with explosive impulse and falloff.
+    static fn explode(center: vec2, radius: float = 100.0, falloff: float = 50.0, impulse: float = 100.0, mask: int = 1) {
+        _Physics.explode(center, radius, falloff, impulse, mask)
+    }
+
+    // Gets the global 2D physics gravity vector.
+    static fn get_gravity() -> vec2 {
+        return _Physics.get_gravity()
+    }
+
+    // Sets the global 2D physics gravity vector.
+    static fn set_gravity(g: vec2) {
+        _Physics.set_gravity(g)
+    }
+
+    // Toggles runtime debug shape rendering on or off, returning the new state.
+    static fn toggle_debug() -> bool {
+        var s = !_Physics.get_debug_shapes()
+        _Physics.set_debug_shapes(s)
+        return s
+    }
+
+    // Sets runtime debug shape rendering explicitly.
+    static fn set_debug(enabled: bool) {
+        _Physics.set_debug_shapes(enabled)
+    }
+
+    // Returns whether runtime debug shape rendering is enabled.
+    static fn is_debug() -> bool {
+        return _Physics.get_debug_shapes()
+    }
+}
+
+// Native 2D physics interface implemented in C++ (cuervo/script/physics_bindings.cpp).
+class _Physics {
+    @native static fn set_debug_shapes(enabled: bool) {}
+    @native static fn get_debug_shapes() -> bool {}
+    @native static fn set_editor_debug_shapes(enabled: bool) {}
+    @native static fn get_editor_debug_shapes() -> bool {}
+    @native static fn body_create(kind: int, pos: vec2, rot: float, layer: int, mask: int, owner: Node2D) -> int {}
+    @native static fn body_destroy(handle: int) {}
+    @native static fn body_set_transform(handle: int, pos: vec2, rot: float) {}
+    @native static fn body_get_position(handle: int) -> vec2 {}
+    @native static fn body_get_rotation(handle: int) -> float {}
+    @native static fn body_set_linear_velocity(handle: int, vel: vec2) {}
+    @native static fn body_get_linear_velocity(handle: int) -> vec2 {}
+    @native static fn body_set_angular_velocity(handle: int, vel: float) {}
+    @native static fn body_get_angular_velocity(handle: int) -> float {}
+    @native static fn body_apply_force(handle: int, force: vec2) {}
+    @native static fn body_apply_impulse(handle: int, impulse: vec2) {}
+    @native static fn body_apply_force_at_point(handle: int, force: vec2, point: vec2) {}
+    @native static fn body_apply_impulse_at_point(handle: int, impulse: vec2, point: vec2) {}
+    @native static fn body_apply_torque(handle: int, torque: float) {}
+    @native static fn body_apply_angular_impulse(handle: int, impulse: float) {}
+    @native static fn body_set_mass(handle: int, mass: float) {}
+    @native static fn body_set_gravity_scale(handle: int, scale: float) {}
+    @native static fn body_set_motion_locks(handle: int, lock_rotation: bool) {}
+    @native static fn body_set_damp(handle: int, linear_damp: float, angular_damp: float) {}
+    @native static fn body_set_bullet(handle: int, bullet: bool) {}
+    @native static fn body_is_bullet(handle: int) -> bool {}
+    @native static fn body_set_can_sleep(handle: int, can_sleep: bool) {}
+    @native static fn body_is_can_sleep(handle: int) -> bool {}
+    @native static fn body_set_awake(handle: int, awake: bool) {}
+    @native static fn body_is_awake(handle: int) -> bool {}
+    @native static fn body_set_constant_velocity(handle: int, vel: vec2) {}
+
+    @native static fn shape_create(body_handle: int, kind: int, offset: vec2, rot: float, size: vec2, pt_b: vec2, radius: float, is_sensor: bool, layer: int, mask: int, owner: Node2D) -> int {}
+    @native static fn shape_create_polygon(body_handle: int, offset: vec2, rot: float, points: List<vec2>, is_sensor: bool, layer: int, mask: int, owner: Node2D) -> int {}
+    @native static fn shape_create_chain(body_handle: int, offset: vec2, rot: float, points: List<vec2>, is_loop: bool, is_sensor: bool, layer: int, mask: int, owner: Node2D) -> int {}
+    @native static fn shape_destroy(handle: int) {}
+    @native static fn shape_set_filter(handle: int, layer: int, mask: int) {}
+    @native static fn shape_set_disabled(handle: int, disabled: bool) {}
+
+    @native static fn joint_create_pin(body_a: int, body_b: int, anchor: vec2, softness: float, limit_enabled: bool, lower_limit: float, upper_limit: float, motor_enabled: bool, motor_speed: float, max_motor_torque: float, collide_connected: bool, owner: Node2D) -> int {}
+    @native static fn joint_create_distance(body_a: int, body_b: int, anchor_a: vec2, anchor_b: vec2, length: float, min_length: float, max_length: float, stiffness: float, damping: float, collide_connected: bool, owner: Node2D) -> int {}
+    @native static fn joint_create_prismatic(body_a: int, body_b: int, anchor: vec2, axis: vec2, enable_spring: bool, hertz: float, damping: float, target_trans: float, enable_limit: bool, lower: float, upper: float, enable_motor: bool, max_force: float, speed: float, collide_connected: bool, owner: Node2D) -> int {}
+    @native static fn joint_create_weld(body_a: int, body_b: int, anchor: vec2, linear_hertz: float, angular_hertz: float, linear_damping: float, angular_damping: float, collide_connected: bool, owner: Node2D) -> int {}
+    @native static fn joint_create_wheel(body_a: int, body_b: int, anchor: vec2, axis: vec2, enable_spring: bool, hertz: float, damping: float, enable_limit: bool, lower: float, upper: float, enable_motor: bool, max_torque: float, speed: float, collide_connected: bool, owner: Node2D) -> int {}
+    @native static fn joint_create_motor(body_a: int, body_b: int, linear_offset: vec2, angular_offset: float, max_force: float, max_torque: float, linear_hertz: float, linear_damping: float, max_spring_force: float, angular_hertz: float, angular_damping: float, max_spring_torque: float, collide_connected: bool, owner: Node2D) -> int {}
+    @native static fn joint_create_mover(body_a: int, body_b: int, linear_vel: vec2, max_force: vec2, collide_connected: bool, owner: Node2D) -> int {}
+    @native static fn joint_create_pogo(body_a: int, body_b: int, anchor: vec2, normal: vec2, hertz: float, damping: float, rest_length: float, max_tension: float, max_compression: float, collide_connected: bool, owner: Node2D) -> int {}
+    @native static fn joint_create_filter(body_a: int, body_b: int, owner: Node2D) -> int {}
+    @native static fn joint_destroy(handle: int) {}
+    @native static fn joint_set_motor_speed(handle: int, speed: float) {}
+    @native static fn joint_set_motor_enabled(handle: int, enabled: bool) {}
+    @native static fn joint_get_reaction_force(handle: int) -> vec2 {}
+    @native static fn joint_get_reaction_torque(handle: int) -> float {}
+
+    @native static fn move_and_slide(body: CharacterBody2D, dt: float) -> bool {}
+    @native static fn raycast_node(node: RayCast2D, from: vec2, translation: vec2, mask: int, exclude_body: int) {}
+    @native static fn raycast_query(result: RayCastResult2D, from: vec2, translation: vec2, mask: int) {}
+    @native static fn shapecast_node(node: ShapeCast2D, kind: int, offset: vec2, rot: float, size: vec2, radius: float, from: vec2, translation: vec2, mask: int, exclude_body: int) {}
+    @native static fn shapecast_query(result: ShapeCastResult2D, kind: int, offset: vec2, rot: float, size: vec2, radius: float, from: vec2, translation: vec2, mask: int) {}
+    @native static fn point_query(point: vec2, mask: int) -> Node2D? {}
+    @native static fn explode(center: vec2, radius: float, falloff: float, impulse: float, mask: int) {}
+    @native static fn get_gravity() -> vec2 {}
+    @native static fn set_gravity(g: vec2) {}
+}

@@ -1,0 +1,807 @@
+// Multi-scene physics showcase for Cuervo's 2D Box2D integration:
+//   [1] Platformer: CharacterBody2D (move_and_slide), StaticBody2D, RigidBody2D Crate, Area2D Coin, RayCast2D
+//   [2] Joints: PinJoint2D Bridge, DistanceJoint2D Pendulum, DampedSpringJoint2D Trampoline,
+//               PrismaticJoint2D Elevator, WeldJoint2D Cross, PogoJoint2D Hopper, MotorJoint2D, FilterJoint2D
+//   [3] Vehicles: WheelJoint2D Buggy with Suspension & Motor, Towed Trailer, Chain Terrain
+//   [4] Sandbox: AnimatableBody2D Moving Platforms, CollisionPolygon2D Hulls, ShapeCast2D Scanner,
+//                CCD Bullet, Physics2D.explode & Physics2D.intersect_point
+
+var coins_collected = 0
+var crates_pushed = 0
+var explosions_count = 0
+
+// Pushable rigid body crate.
+class Crate extends RigidBody2D {
+    fn ready() {
+        lock_rotation = true
+        _Physics.body_set_motion_locks(body_handle, true)
+    }
+
+    fn draw(g: Canvas) {
+        var p = global_position()
+        var sz = vec2(36.0, 36.0)
+        if find("Shape") is CollisionShape2D s {
+            sz = s.size
+        }
+        var hs = sz * 0.5
+        g.rect(p - hs, sz,
+               fill = Color { r = 0.85, g = 0.55, b = 0.2, a = 1.0 },
+               stroke = Color { r = 0.45, g = 0.28, b = 0.08, a = 1.0 }, width = 2.0,
+               rotation = rotation)
+        var inset = hs - vec2(2.0, 2.0)
+        g.line(p - inset.rotated(rotation), p + inset.rotated(rotation),
+               color = Color { r = 0.45, g = 0.28, b = 0.08, a = 1.0 }, width = 1.5)
+        var diag2 = vec2(inset.x, -inset.y)
+        g.line(p - diag2.rotated(rotation), p + diag2.rotated(rotation),
+               color = Color { r = 0.45, g = 0.28, b = 0.08, a = 1.0 }, width = 1.5)
+    }
+}
+
+// Collectible coin sensor area.
+class Coin extends Area2D {
+    var collected = false
+
+    fn ready() {
+        super.ready()
+        body_entered.connect(fn(body: Node2D) {
+            if !collected && body is Player {
+                collected = true
+                coins_collected = coins_collected + 1
+                queue_free()
+            }
+        })
+    }
+
+    fn draw(g: Canvas) {
+        if !collected {
+            var p = global_position()
+            g.circle(p, 14.0,
+                     fill = Color { r = 1.0, g = 0.85, b = 0.1, a = 1.0 },
+                     stroke = Color { r = 0.85, g = 0.6, b = 0.0, a = 1.0 }, width = 2.5)
+            g.circle(p, 7.0,
+                     fill = Color { r = 1.0, g = 0.95, b = 0.5, a = 1.0 })
+        }
+    }
+}
+
+// Controllable character body using move_and_slide.
+class Player extends CharacterBody2D {
+    var speed = 300.0
+    var jump_velocity = -575.0
+    var gravity = 980.0
+    var facing = 1.0
+
+    fn update(dt: float) {
+        if !is_on_floor() {
+            velocity.y = velocity.y + gravity * dt
+        }
+
+        if Input.pressed(#jump) && is_on_floor() {
+            velocity.y = jump_velocity
+        }
+
+        var dir = 0.0
+        if Input.held(#move_right) {
+            dir = dir + 1.0
+        }
+        if Input.held(#move_left) {
+            dir = dir - 1.0
+        }
+
+        if dir != 0.0 {
+            velocity.x = dir * speed
+            facing = dir
+        } else {
+            velocity.x = 0.0
+        }
+
+        move_and_slide()
+    }
+
+    fn draw(g: Canvas) {
+        var p = global_position()
+        g.rect(p - vec2(16.0, 28.0), vec2(32.0, 56.0),
+               fill = Color { r = 0.2, g = 0.7, b = 1.0, a = 1.0 },
+               stroke = Color { r = 0.9, g = 0.95, b = 1.0, a = 1.0 }, width = 2.0)
+        var eye_x = p.x + facing * 6.0
+        g.circle(vec2(eye_x, p.y - 12.0), 3.5,
+                 fill = Color { r = 0.05, g = 0.08, b = 0.12, a = 1.0 })
+    }
+}
+
+// Bridge plank visual node for Scene 2.
+class BridgePlank extends RigidBody2D {
+    fn draw(g: Canvas) {
+        var p = global_position()
+        var sz = vec2(58.0, 12.0)
+        if find("Shape") is CollisionShape2D s {
+            sz = s.size
+        }
+        g.rect(p - sz * 0.5, sz,
+               fill = Color { r = 0.65, g = 0.42, b = 0.2, a = 1.0 },
+               stroke = Color { r = 0.38, g = 0.22, b = 0.08, a = 1.0 }, width = 1.5,
+               rotation = rotation)
+    }
+}
+
+// Wrecking ball pendulum in Scene 2.
+class PendulumBall extends RigidBody2D {
+    fn draw(g: Canvas) {
+        var p = global_position()
+        g.line(vec2(680.0, 100.0), p,
+               color = Color { r = 0.6, g = 0.65, b = 0.75, a = 0.9 }, width = 3.0)
+        g.circle(p, 24.0,
+                 fill = Color { r = 0.45, g = 0.5, b = 0.6, a = 1.0 },
+                 stroke = Color { r = 0.75, g = 0.8, b = 0.9, a = 1.0 }, width = 2.0)
+        var hl = p + vec2(-6.0, -6.0).rotated(rotation)
+        g.circle(hl, 5.0,
+                 fill = Color { r = 0.85, g = 0.9, b = 0.95, a = 0.6 })
+    }
+}
+
+// Trampoline pad on a damped spring + vertical guide in Scene 2.
+class TrampolinePad extends RigidBody2D {
+    var base_x = 880.0
+    var base_y = 650.0
+    var timer = 0.0
+
+    fn ready() {
+        base_x = position.x
+    }
+
+    fn update(dt: float) {
+        timer += dt
+        if abs(position.x - base_x) > 0.5 {
+            position.x = base_x
+            _Physics.body_set_transform(body_handle, global_position(), 0.0)
+        }
+    }
+
+    fn draw(g: Canvas) {
+        var p = global_position()
+        // Draw spring coils between SpringBase (base_x, 650) and pad
+        var top_y = p.y + 8.0
+        var bot_y = base_y - 10.0
+        if bot_y > top_y {
+            var mid_y = (top_y + bot_y) * 0.5
+            g.line(vec2(base_x - 20.0, bot_y), vec2(base_x + 20.0, mid_y),
+                   color = Color { r = 0.7, g = 0.8, b = 0.9, a = 0.85 }, width = 2.5)
+            g.line(vec2(base_x + 20.0, mid_y), vec2(base_x - 20.0, top_y),
+                   color = Color { r = 0.7, g = 0.8, b = 0.9, a = 0.85 }, width = 2.5)
+        }
+        g.rect(vec2(base_x - 50.0, base_y - 10.0), vec2(100.0, 20.0),
+               fill = Color { r = 0.35, g = 0.4, b = 0.5, a = 1.0 },
+               stroke = Color { r = 0.9, g = 0.8, b = 0.2, a = 1.0 }, width = 2.0)
+        g.rect(p - vec2(45.0, 8.0), vec2(90.0, 16.0),
+               fill = Color { r = 0.2, g = 0.85, b = 0.45, a = 1.0 },
+               stroke = Color { r = 0.9, g = 1.0, b = 0.9, a = 1.0 }, width = 2.0,
+               rotation = rotation)
+    }
+}
+
+// Motorized elevator platform in Scene 2.
+class ElevatorCar extends RigidBody2D {
+    var timer = 0.0
+    var direction = -1.0
+    var joint: PrismaticJoint2D? = null
+
+    fn ready() {
+        if parent != null && parent.find("ElevatorJoint") is PrismaticJoint2D j {
+            joint = j
+        }
+    }
+
+    fn update(dt: float) {
+        timer = timer + dt
+        if position.y <= 314.0 && direction < 0.0 {
+            direction = 1.0
+            timer = 0.0
+        } else if position.y >= 526.0 && direction > 0.0 {
+            direction = -1.0
+            timer = 0.0
+        } else if timer > 3.0 {
+            direction = -direction
+            timer = 0.0
+        }
+        if joint != null {
+            var spd = 80.0
+            if direction < 0.0 {
+                spd = -80.0
+            }
+            joint.set_motor_speed(spd)
+            joint.set_motor_enabled(true)
+        }
+    }
+
+    fn draw(g: Canvas) {
+        var p = global_position()
+        g.rect(p - vec2(45.0, 9.0), vec2(90.0, 18.0),
+               fill = Color { r = 0.3, g = 0.6, b = 0.95, a = 1.0 },
+               stroke = Color { r = 0.85, g = 0.92, b = 1.0, a = 1.0 }, width = 2.0,
+               rotation = rotation)
+    }
+}
+
+// Welded cross bar in Scene 2.
+class WeldedCross extends RigidBody2D {
+    fn draw(g: Canvas) {
+        var p = global_position()
+        var sz = vec2(60.0, 14.0)
+        if name == "WeldV" {
+            sz = vec2(14.0, 60.0)
+        }
+        g.rect(p - sz * 0.5, sz,
+               fill = Color { r = 0.85, g = 0.35, b = 0.35, a = 1.0 },
+               stroke = Color { r = 1.0, g = 0.75, b = 0.75, a = 1.0 }, width = 1.5,
+               rotation = rotation)
+    }
+}
+
+// Pogo stick body in Scene 2.
+class PogoBody extends RigidBody2D {
+    var base_x = 540.0
+    var hop_timer = 0.0
+
+    fn ready() {
+        base_x = position.x
+    }
+
+    fn update(dt: float) {
+        hop_timer += dt
+        if abs(position.x - base_x) > 0.5 {
+            position.x = base_x
+            _Physics.body_set_transform(body_handle, global_position(), 0.0)
+        }
+        if hop_timer > 1.6 {
+            hop_timer = 0.0
+            set_linear_velocity(vec2(0.0, -320.0))
+        }
+    }
+
+    fn draw(g: Canvas) {
+        var p = global_position()
+        if parent != null && parent.find("PogoLeg") is Node2D leg {
+            g.line(p, leg.global_position(),
+                   color = Color { r = 0.95, g = 0.85, b = 0.3, a = 0.9 }, width = 3.0)
+        }
+        g.circle(p, 18.0,
+                 fill = Color { r = 0.9, g = 0.5, b = 0.15, a = 1.0 },
+                 stroke = Color { r = 1.0, g = 0.85, b = 0.6, a = 1.0 }, width = 2.0)
+    }
+}
+
+class PogoLeg extends RigidBody2D {
+    var base_x = 540.0
+
+    fn ready() {
+        base_x = position.x
+    }
+
+    fn update(dt: float) {
+        if abs(position.x - base_x) > 0.5 {
+            position.x = base_x
+            _Physics.body_set_transform(body_handle, global_position(), 0.0)
+        }
+    }
+
+    fn draw(g: Canvas) {
+        var p = global_position()
+        g.rect(p - vec2(5.0, 16.0), vec2(10.0, 32.0),
+               fill = Color { r = 0.5, g = 0.55, b = 0.6, a = 1.0 },
+               stroke = Color { r = 0.8, g = 0.85, b = 0.9, a = 1.0 }, width = 1.5,
+               rotation = rotation)
+    }
+}
+
+// MotorJoint2D target follower in Scene 2.
+class MotorRotor extends RigidBody2D {
+    var joint: MotorJoint2D? = null
+
+    fn ready() {
+        if parent != null && parent.find("MotorJoint") is MotorJoint2D j {
+            joint = j
+            joint.set_motor_speed(2.5)
+        }
+    }
+
+    fn update(dt: float) {
+        if joint != null {
+            joint.set_motor_speed(2.5)
+        }
+    }
+
+    fn draw(g: Canvas) {
+        var p = global_position()
+        g.rect(p - vec2(35.0, 8.0), vec2(70.0, 16.0),
+               fill = Color { r = 0.65, g = 0.3, b = 0.85, a = 1.0 },
+               stroke = Color { r = 0.9, g = 0.75, b = 1.0, a = 1.0 }, width = 2.0,
+               rotation = rotation)
+        g.circle(p, 5.0, fill = Color { r = 0.95, g = 0.9, b = 1.0, a = 1.0 })
+    }
+}
+
+// FilterJoint2D overlapping bodies in Scene 2.
+class FilterGhost extends RigidBody2D {
+    var timer = 0.0
+    var phase = 0.0
+
+    fn ready() {
+        if name == "GhostB" {
+            phase = 3.14159
+        }
+    }
+
+    fn update(dt: float) {
+        timer += dt
+        set_linear_velocity(vec2(cos(timer * 2.2 + phase) * 75.0, get_linear_velocity().y))
+    }
+
+    fn draw(g: Canvas) {
+        var p = global_position()
+        var col = Color { r = 0.3, g = 0.85, b = 0.85, a = 0.65 }
+        if name == "GhostB" {
+            col = Color { r = 0.95, g = 0.45, b = 0.75, a = 0.65 }
+        }
+        g.rect(p - vec2(17.0, 17.0), vec2(34.0, 34.0),
+               fill = col,
+               stroke = Color { r = 0.85, g = 1.0, b = 1.0, a = 0.9 }, width = 1.5,
+               rotation = rotation)
+    }
+}
+
+// Vehicle chassis in Scene 3.
+class ChassisBody extends RigidBody2D {
+    fn draw(g: Canvas) {
+        var p = global_position()
+        // Main body
+        g.rect(p - vec2(55.0, 13.0), vec2(110.0, 26.0),
+               fill = Color { r = 0.2, g = 0.7, b = 0.35, a = 1.0 },
+               stroke = Color { r = 0.9, g = 0.95, b = 0.9, a = 1.0 }, width = 2.0,
+               rotation = rotation)
+        // Cabin rotated around chassis center
+        var cab_center = p + vec2(7.5, -19.0).rotated(rotation)
+        g.rect(cab_center - vec2(22.5, 9.0), vec2(45.0, 18.0),
+               fill = Color { r = 0.3, g = 0.85, b = 0.95, a = 0.75 },
+               stroke = Color { r = 0.9, g = 0.95, b = 0.9, a = 1.5 }, width = 1.5,
+               rotation = rotation)
+    }
+}
+
+// Vehicle wheel in Scene 3.
+class WheelBody extends RigidBody2D {
+    var wheel_radius = 18.0
+
+    fn ready() {
+        if find("Shape") is CollisionShape2D s {
+            wheel_radius = s.radius
+        }
+    }
+
+    fn draw(g: Canvas) {
+        var p = global_position()
+        g.circle(p, wheel_radius,
+                 fill = Color { r = 0.2, g = 0.22, b = 0.25, a = 1.0 },
+                 stroke = Color { r = 0.75, g = 0.8, b = 0.85, a = 1.0 }, width = 2.5)
+        g.circle(p, 6.0, fill = Color { r = 0.6, g = 0.65, b = 0.7, a = 1.0 })
+        var spoke = vec2(cos(rotation), sin(rotation)) * (wheel_radius - 2.0)
+        g.line(p - spoke, p + spoke,
+               color = Color { r = 0.85, g = 0.9, b = 0.95, a = 0.9 }, width = 2.0)
+    }
+}
+
+// Towed trailer in Scene 3.
+class TrailerBody extends RigidBody2D {
+    fn draw(g: Canvas) {
+        var p = global_position()
+        if parent != null && parent.find("Chassis") is Node2D ch {
+            var hitch_a = ch.global_position() + vec2(-55.0, 2.0).rotated(ch.global_rotation())
+            var hitch_b = p + vec2(35.0, 0.0).rotated(rotation)
+            g.line(hitch_a, hitch_b,
+                   color = Color { r = 0.7, g = 0.75, b = 0.8, a = 0.9 }, width = 3.0)
+        }
+        g.rect(p - vec2(35.0, 8.0), vec2(70.0, 16.0),
+               fill = Color { r = 0.55, g = 0.4, b = 0.25, a = 1.0 },
+               stroke = Color { r = 0.85, g = 0.7, b = 0.5, a = 1.0 }, width = 2.0,
+               rotation = rotation)
+    }
+}
+
+// Boost zone sensor in Scene 3.
+class BoostPad extends Area2D {
+    var active_flash = 0.0
+
+    fn ready() {
+        super.ready()
+        body_entered.connect(fn(body: Node2D) {
+            if body is ChassisBody cb {
+                cb.apply_impulse(vec2(6500.0, -1500.0))
+                active_flash = 0.5
+            }
+        })
+    }
+
+    fn update(dt: float) {
+        if active_flash > 0.0 {
+            active_flash = active_flash - dt
+        }
+    }
+
+    fn draw(g: Canvas) {
+        var p = global_position()
+        var col = Color { r = 0.2, g = 0.9, b = 0.5, a = 0.35 }
+        if active_flash > 0.0 {
+            col = Color { r = 1.0, g = 0.9, b = 0.2, a = 0.65 }
+        }
+        g.rect(p - vec2(45.0, 25.0), vec2(90.0, 50.0),
+               fill = col,
+               stroke = Color { r = 0.3, g = 1.0, b = 0.6, a = 0.85 }, width = 2.0)
+        g.text(p - vec2(26.0, 7.0), "BOOST >>", 14.0,
+               color = Color { r = 0.9, g = 1.0, b = 0.9, a = 0.95 })
+    }
+}
+
+// Animatable horizontal moving platform in Scene 4.
+class MovingPlatformH extends AnimatableBody2D {
+    var timer = 0.0
+
+    fn update(dt: float) {
+        timer += dt
+        position.x = 400.0 + sin(timer * 1.8) * 96.0
+    }
+
+    fn draw(g: Canvas) {
+        var p = global_position()
+        g.rect(p - vec2(80.0, 12.0), vec2(160.0, 24.0),
+               fill = Color { r = 0.3, g = 0.45, b = 0.65, a = 1.0 },
+               stroke = Color { r = 0.95, g = 0.8, b = 0.2, a = 1.0 }, width = 2.0)
+        g.rect(p - vec2(70.0, 4.0), vec2(140.0, 8.0),
+               fill = Color { r = 0.95, g = 0.8, b = 0.2, a = 0.6 })
+    }
+}
+
+// Animatable vertical moving platform in Scene 4.
+class MovingPlatformV extends AnimatableBody2D {
+    var timer = 0.0
+
+    fn update(dt: float) {
+        timer += dt
+        position.y = 420.0 + sin(timer * 1.4) * 120.0
+    }
+
+    fn draw(g: Canvas) {
+        var p = global_position()
+        g.rect(p - vec2(70.0, 12.0), vec2(140.0, 24.0),
+               fill = Color { r = 0.3, g = 0.45, b = 0.65, a = 1.0 },
+               stroke = Color { r = 0.95, g = 0.8, b = 0.2, a = 1.0 }, width = 2.0)
+        g.rect(p - vec2(60.0, 4.0), vec2(120.0, 8.0),
+               fill = Color { r = 0.95, g = 0.8, b = 0.2, a = 0.6 })
+    }
+}
+
+// Convex polygon boulder in Scene 4.
+class PolygonBoulder extends RigidBody2D {
+    fn draw(g: Canvas) {
+        var p = global_position()
+        if find("Poly") is CollisionPolygon2D cp && cp.polygon.len() >= 3 {
+            g.polygon(cp.polygon,
+                      fill = Color { r = 0.5, g = 0.55, b = 0.6, a = 1.0 },
+                      stroke = Color { r = 0.8, g = 0.85, b = 0.9, a = 1.0 },
+                      width = 2.0, pos = p, rotation = rotation)
+        } else {
+            g.circle(p, 25.0, fill = Color { r = 0.5, g = 0.55, b = 0.6, a = 1.0 },
+                     stroke = Color { r = 0.8, g = 0.85, b = 0.9, a = 1.0 }, width = 2.0)
+        }
+        g.rect(p - vec2(8.0, 8.0), vec2(16.0, 16.0),
+               fill = Color { r = 0.38, g = 0.42, b = 0.48, a = 0.85 },
+               rotation = rotation)
+    }
+}
+
+// Sweeping hazard scanner with ShapeCast2D in Scene 4.
+class SweepScanner extends ShapeCast2D {
+    var alert = false
+    var timer = 0.0
+
+    fn update(dt: float) {
+        timer += dt
+        position.x = 580.0 + sin(timer * 1.4) * 240.0
+        force_shapecast_update()
+        alert = is_colliding()
+    }
+
+    fn draw(g: Canvas) {
+        var p = global_position()
+        var beam_color = Color { r = 0.2, g = 0.9, b = 0.7, a = 0.6 }
+        if alert {
+            beam_color = Color { r = 1.0, g = 0.2, b = 0.2, a = 0.9 }
+        }
+        var end_pt = p + target_position * fraction
+        if !alert {
+            end_pt = p + target_position
+        }
+        g.line(p, end_pt, color = beam_color, width = 3.0)
+        g.circle(end_pt, radius,
+                 fill = beam_color.with_alpha(0.25),
+                 stroke = beam_color, width = 2.0)
+        g.rect(p - vec2(18.0, 10.0), vec2(36.0, 20.0),
+               fill = Color { r = 0.2, g = 0.2, b = 0.3, a = 1.0 },
+               stroke = beam_color, width = 2.0)
+    }
+}
+
+// Fast continuous collision detection projectile in Scene 4.
+class CcdBullet extends RigidBody2D {
+    var launched = false
+
+    fn ready() {
+        super.ready()
+        set_bullet(true)
+    }
+
+    fn update(dt: float) {
+        if !launched {
+            launched = true
+            set_bullet(true)
+            set_linear_velocity(vec2(1150.0, -240.0))
+        }
+    }
+
+    fn draw(g: Canvas) {
+        var p = global_position()
+        g.circle(p, 12.0, fill = Color { r = 1.0, g = 0.3, b = 0.1, a = 1.0 },
+                 stroke = Color { r = 1.0, g = 0.9, b = 0.2, a = 1.0 }, width = 2.0)
+    }
+}
+
+// Main demo controller.
+class Demo extends Node {
+    var player: Player? = null
+    var crate: Crate? = null
+    var current_level: Node? = null
+    var active_scene = 1
+    var chassis: ChassisBody? = null
+    var front_suspension: WheelJoint2D? = null
+    var rear_suspension: WheelJoint2D? = null
+    var hovered_name = "None"
+
+    fn ready() {
+        load_scene(1)
+    }
+
+    fn load_scene(idx: int) {
+        active_scene = idx
+        if current_level != null {
+            current_level.queue_free()
+            current_level = null
+            Scene.flush()
+        }
+        player = null
+        crate = null
+        chassis = null
+        front_suspension = null
+        rear_suspension = null
+        hovered_name = "None"
+
+        var path = "scenes/level.scene"
+        if idx == 2 {
+            path = "scenes/joints.scene"
+        } else if idx == 3 {
+            path = "scenes/vehicles.scene"
+        } else if idx == 4 {
+            path = "scenes/sandbox.scene"
+        }
+
+        current_level = Scene.load(path)
+        add_child(current_level)
+
+        if current_level.find("Player") is Player p {
+            player = p
+        }
+        if current_level.find("Crate") is Crate c {
+            crate = c
+        }
+        if current_level.find("Chassis") is ChassisBody cb {
+            chassis = cb
+        }
+        if current_level.find("FrontSuspension") is WheelJoint2D fj {
+            front_suspension = fj
+        }
+        if current_level.find("RearSuspension") is WheelJoint2D rj {
+            rear_suspension = rj
+        }
+    }
+
+    fn update(dt: float) {
+        // Scene switching inputs
+        if Input.pressed(#scene_1) {
+            load_scene(1)
+        }
+        if Input.pressed(#scene_2) {
+            load_scene(2)
+        }
+        if Input.pressed(#scene_3) {
+            load_scene(3)
+        }
+        if Input.pressed(#scene_4) {
+            load_scene(4)
+        }
+        if Input.pressed(#next_scene) {
+            var nxt = active_scene + 1
+            if nxt > 4 {
+                nxt = 1
+            }
+            load_scene(nxt)
+        }
+        if Input.pressed(#reset) {
+            load_scene(active_scene)
+        }
+        if Input.pressed(#toggle_debug) {
+            Physics2D.toggle_debug()
+        }
+
+        // Scene 1 crate push detection
+        if active_scene == 1 && crate != null && crate.global_position().x > 320.0 {
+            crates_pushed = 1
+        }
+
+        // Scene 3 vehicle motor drive control
+        if active_scene == 3 && rear_suspension != null {
+            var throttle = 0.0
+            var drive_dir = 0.0
+            if Input.held(#move_right) {
+                throttle += 38.0
+                drive_dir += 1.0
+            }
+            if Input.held(#move_left) {
+                throttle -= 38.0
+                drive_dir -= 1.0
+            }
+            rear_suspension.set_motor_speed(throttle)
+            rear_suspension.set_motor_enabled(true)
+            if front_suspension != null {
+                front_suspension.set_motor_speed(throttle)
+                front_suspension.set_motor_enabled(true)
+            }
+            if chassis != null && drive_dir != 0.0 {
+                var ang = chassis.global_rotation()
+                chassis.apply_force(vec2(cos(ang), sin(ang)) * (drive_dir * 18000.0))
+            }
+        }
+
+        // Scene 4 interactive explosion & point picker
+        if active_scene == 4 {
+            var ptr = Input.pointer()
+            var picked = Physics2D.intersect_point(ptr, 1)
+            if picked != null {
+                hovered_name = picked.name
+            } else {
+                hovered_name = "None"
+            }
+            if Input.pressed(#explode) || Input.pressed(#click) {
+                Physics2D.explode(ptr, 260.0, 80.0, 25000.0, 1)
+                explosions_count += 1
+            }
+        }
+    }
+
+    fn draw(g: Canvas) {
+        // Draw static boundaries / platforms for the active scene
+        if active_scene == 1 {
+            g.rect(vec2(0.0, 660.0), vec2(1280.0, 40.0),
+                   fill = Color { r = 0.2, g = 0.25, b = 0.35, a = 1.0 })
+            g.rect(vec2(0.0, 0.0), vec2(40.0, 720.0),
+                   fill = Color { r = 0.2, g = 0.25, b = 0.35, a = 1.0 })
+            g.rect(vec2(1240.0, 0.0), vec2(40.0, 720.0),
+                   fill = Color { r = 0.2, g = 0.25, b = 0.35, a = 1.0 })
+            g.rect(vec2(250.0, 505.0), vec2(300.0, 30.0),
+                   fill = Color { r = 0.25, g = 0.32, b = 0.45, a = 1.0 })
+            g.rect(vec2(700.0, 365.0), vec2(300.0, 30.0),
+                   fill = Color { r = 0.25, g = 0.32, b = 0.45, a = 1.0 })
+        } else if active_scene == 2 {
+            g.rect(vec2(0.0, 660.0), vec2(1280.0, 40.0),
+                   fill = Color { r = 0.2, g = 0.25, b = 0.35, a = 1.0 })
+            g.rect(vec2(0.0, 0.0), vec2(40.0, 720.0),
+                   fill = Color { r = 0.2, g = 0.25, b = 0.35, a = 1.0 })
+            g.rect(vec2(1240.0, 0.0), vec2(40.0, 720.0),
+                   fill = Color { r = 0.2, g = 0.25, b = 0.35, a = 1.0 })
+            // Bridge anchors
+            g.rect(vec2(68.0, 408.0), vec2(24.0, 24.0),
+                   fill = Color { r = 0.45, g = 0.5, b = 0.6, a = 1.0 })
+            g.rect(vec2(468.0, 408.0), vec2(24.0, 24.0),
+                   fill = Color { r = 0.45, g = 0.5, b = 0.6, a = 1.0 })
+            // Pendulum mount & Motor mount
+            g.rect(vec2(670.0, 90.0), vec2(20.0, 20.0),
+                   fill = Color { r = 0.45, g = 0.5, b = 0.6, a = 1.0 })
+            g.rect(vec2(870.0, 250.0), vec2(20.0, 20.0),
+                   fill = Color { r = 0.45, g = 0.5, b = 0.6, a = 1.0 })
+            // Elevator shaft guide
+            g.rect(vec2(1108.0, 290.0), vec2(24.0, 260.0),
+                   fill = Color { r = 0.25, g = 0.3, b = 0.4, a = 1.0 })
+        } else if active_scene == 3 {
+            g.rect(vec2(0.0, 670.0), vec2(1280.0, 50.0),
+                   fill = Color { r = 0.18, g = 0.22, b = 0.3, a = 1.0 })
+            g.rect(vec2(0.0, 0.0), vec2(40.0, 720.0),
+                   fill = Color { r = 0.18, g = 0.22, b = 0.3, a = 1.0 })
+            g.rect(vec2(1240.0, 0.0), vec2(40.0, 720.0),
+                   fill = Color { r = 0.18, g = 0.22, b = 0.3, a = 1.0 })
+            // Draw hills terrain profile matching vehicles.txt
+            g.line(vec2(40.0, 640.0), vec2(220.0, 640.0), color = Color { r = 0.3, g = 0.65, b = 0.4, a = 1.0 }, width = 6.0)
+            g.line(vec2(220.0, 640.0), vec2(380.0, 575.0), color = Color { r = 0.3, g = 0.65, b = 0.4, a = 1.0 }, width = 6.0)
+            g.line(vec2(380.0, 575.0), vec2(520.0, 610.0), color = Color { r = 0.3, g = 0.65, b = 0.4, a = 1.0 }, width = 6.0)
+            g.line(vec2(520.0, 610.0), vec2(700.0, 515.0), color = Color { r = 0.3, g = 0.65, b = 0.4, a = 1.0 }, width = 6.0)
+            g.line(vec2(700.0, 515.0), vec2(880.0, 560.0), color = Color { r = 0.3, g = 0.65, b = 0.4, a = 1.0 }, width = 6.0)
+            g.line(vec2(880.0, 560.0), vec2(1060.0, 495.0), color = Color { r = 0.3, g = 0.65, b = 0.4, a = 1.0 }, width = 6.0)
+            g.line(vec2(1060.0, 495.0), vec2(1240.0, 600.0), color = Color { r = 0.3, g = 0.65, b = 0.4, a = 1.0 }, width = 6.0)
+        } else if active_scene == 4 {
+            g.rect(vec2(0.0, 660.0), vec2(1280.0, 40.0),
+                   fill = Color { r = 0.2, g = 0.25, b = 0.35, a = 1.0 })
+            g.rect(vec2(0.0, 0.0), vec2(40.0, 720.0),
+                   fill = Color { r = 0.2, g = 0.25, b = 0.35, a = 1.0 })
+            g.rect(vec2(1240.0, 0.0), vec2(40.0, 720.0),
+                   fill = Color { r = 0.2, g = 0.25, b = 0.35, a = 1.0 })
+            // Wedge ramp
+            var ramp_pts = [vec2(120.0, 660.0), vec2(240.0, 600.0), vec2(240.0, 660.0)]
+            g.polygon(ramp_pts,
+                      fill = Color { r = 0.25, g = 0.32, b = 0.42, a = 1.0 },
+                      stroke = Color { r = 0.4, g = 0.5, b = 0.6, a = 1.0 }, width = 3.0)
+            // Cursor target reticle
+            var ptr = Input.pointer()
+            var ret_col = Color { r = 1.0, g = 0.4, b = 0.2, a = 0.85 }
+            if hovered_name != "None" {
+                ret_col = Color { r = 0.2, g = 1.0, b = 0.4, a = 0.95 }
+            }
+            g.circle(ptr, 10.0, stroke = ret_col, width = 1.5)
+            g.line(ptr - vec2(14.0, 0.0), ptr + vec2(14.0, 0.0), color = ret_col, width = 1.0)
+            g.line(ptr - vec2(0.0, 14.0), ptr + vec2(0.0, 14.0), color = ret_col, width = 1.0)
+        }
+
+        // Top navigation bar for scene selection
+        g.rect(vec2(0.0, 0.0), vec2(1280.0, 50.0), fill = Color { r = 0.08, g = 0.1, b = 0.16, a = 0.9 })
+        g.text(vec2(20.0, 14.0), "Cuervo Box2D Demos [Tab / 1-4 | R Reset]:", 18.0, color = Color { r = 0.7, g = 0.75, b = 0.85, a = 1.0 })
+
+        var s1_col = Color { r = 0.5, g = 0.55, b = 0.65, a = 1.0 }
+        if active_scene == 1 {
+            s1_col = Color { r = 0.2, g = 0.8, b = 1.0, a = 1.0 }
+        }
+        var s2_col = Color { r = 0.5, g = 0.55, b = 0.65, a = 1.0 }
+        if active_scene == 2 {
+            s2_col = Color { r = 0.2, g = 0.8, b = 1.0, a = 1.0 }
+        }
+        var s3_col = Color { r = 0.5, g = 0.55, b = 0.65, a = 1.0 }
+        if active_scene == 3 {
+            s3_col = Color { r = 0.2, g = 0.8, b = 1.0, a = 1.0 }
+        }
+        var s4_col = Color { r = 0.5, g = 0.55, b = 0.65, a = 1.0 }
+        if active_scene == 4 {
+            s4_col = Color { r = 0.2, g = 0.8, b = 1.0, a = 1.0 }
+        }
+
+        g.text(vec2(380.0, 14.0), "[1] Platformer", 18.0, color = s1_col)
+        g.text(vec2(525.0, 14.0), "[2] Joints", 18.0, color = s2_col)
+        g.text(vec2(640.0, 14.0), "[3] Vehicles", 18.0, color = s3_col)
+        g.text(vec2(775.0, 14.0), "[4] Sandbox", 18.0, color = s4_col)
+
+        var dbg_str = "[F3] Shapes: OFF"
+        var dbg_col = Color { r = 0.5, g = 0.55, b = 0.65, a = 1.0 }
+        if Physics2D.is_debug() {
+            dbg_str = "[F3] Shapes: ON"
+            dbg_col = Color { r = 0.3, g = 0.9, b = 0.4, a = 1.0 }
+        }
+        g.text(vec2(915.0, 14.0), dbg_str, 18.0, color = dbg_col)
+
+        // Scene status sub-header
+        if active_scene == 1 {
+            g.text(vec2(20.0, 58.0), "CharacterBody2D Platformer | Coins: {coins_collected}  Crates Pushed: {crates_pushed}", 16.0,
+                   color = Color { r = 0.85, g = 0.9, b = 0.95, a = 0.9 })
+        } else if active_scene == 2 {
+            g.text(vec2(20.0, 58.0), "Joints: Suspension Bridge (Pin), Pendulum (Distance), Trampoline (Spring), Elevator (Prismatic), Cross (Weld), Pogo & Motor", 16.0,
+                   color = Color { r = 0.85, g = 0.9, b = 0.95, a = 0.9 })
+        } else if active_scene == 3 {
+            g.text(vec2(20.0, 58.0), "Vehicles: WheelJoint2D Buggy with Suspension & Motor (A/D to Drive), Towed Trailer, Rolling Chain Terrain", 16.0,
+                   color = Color { r = 0.85, g = 0.9, b = 0.95, a = 0.9 })
+        } else if active_scene == 4 {
+            g.text(vec2(20.0, 58.0), "Sandbox: Platforms, Polygon Hulls, ShapeCast2D Scanner, Hover: {hovered_name}, Click/E/Space to Explode ({explosions_count})", 16.0,
+                   color = Color { r = 0.85, g = 0.9, b = 0.95, a = 0.9 })
+        }
+    }
+}

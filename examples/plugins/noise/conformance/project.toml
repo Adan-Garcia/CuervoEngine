@@ -1,0 +1,13 @@
+# The noise plugin's conformance project (docs/PLUGINS.md "Determinism"):
+# `cuervo-tools plugin verify` packs it, runs it headless and compares its state
+# hash with the one recorded when the plugin was published.
+name = "noise_conformance"
+main = "Conformance"
+virtual_size = [640, 360]
+tick_rate = 60
+seed = 1
+render_tier = "compatible"
+
+[dependencies.noise]
+path = ".."
+version = "1.0.0"

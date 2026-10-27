@@ -77,6 +77,21 @@ private:
     std::string after_;
 };
 
+class ChangeTypeCommand final : public Command {
+public:
+    ChangeTypeCommand(NodeId node, std::string before, std::string after);
+    void apply(SceneModel& model) override;
+    void revert(SceneModel& model) override;
+    std::string label() const override;
+    NodeId focus_after_apply() const override { return node_; }
+    NodeId focus_after_revert() const override { return node_; }
+
+private:
+    NodeId node_;
+    std::string before_;
+    std::string after_;
+};
+
 // Adds a subtree (a new node, or a duplicate) as child `index` of `parent`.
 class InsertCommand final : public Command {
 public:

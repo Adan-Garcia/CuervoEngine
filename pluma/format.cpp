@@ -561,8 +561,24 @@ public:
 
     void module(const Module& m) {
         const Decl* prev = nullptr;
+        std::size_t next_import = 0;
+        // Imports print at their place among the declarations, a blank line
+        // after the last one of a run (LANGUAGE.md 9.26).
+        auto imports_before = [&](std::uint32_t limit) {
+            bool any = false;
+            while (next_import < m.imports.size() && m.imports[next_import]->span.begin < limit) {
+                const ImportDecl* im = m.imports[next_import++];
+                if (!any && (prev != nullptr || !out_.empty()) && !ended_with_blank_line()) out_ += '\n';
+                emit_comments_before(im->span.begin, prev == nullptr && !any && out_.empty());
+                import_decl(*im);
+                any = true;
+            }
+            if (any && limit != UINT32_MAX) out_ += '\n';
+            return any;
+        };
         for (const Decl* d : m.decls) {
             std::uint32_t anchor = decl_start(d);
+            if (imports_before(anchor)) prev = nullptr;
             // The separator goes before the item's leading comments, so a doc
             // comment stays attached to what it documents.
             if (prev != nullptr) {
@@ -570,14 +586,42 @@ public:
                 bool user_blank = first_line_from(anchor) > line_of(prev->span.end) + 1;
                 if ((big || user_blank) && !ended_with_blank_line()) out_ += '\n';
             }
-            emit_comments_before(anchor, prev == nullptr);
+            emit_comments_before(anchor, prev == nullptr && out_.empty());
             decl(d);
             prev = d;
         }
+        imports_before(UINT32_MAX);
         emit_remaining_comments();
     }
 
+    void import_decl(const ImportDecl& im) {
+        line_start();
+        out_ += "import ";
+        out_ += im.package.name;
+        if (im.has_items) {
+            out_ += ".{";
+            for (std::size_t i = 0; i < im.items.size(); ++i) {
+                if (i > 0) out_ += ", ";
+                out_ += im.items[i].name.name;
+                if (!im.items[i].alias.empty()) {
+                    out_ += " as ";
+                    out_ += im.items[i].alias.name;
+                }
+            }
+            out_ += '}';
+        } else if (!im.alias.empty()) {
+            out_ += " as ";
+            out_ += im.alias.name;
+        }
+        end_line_at(im.span.end);
+    }
+
     void script(const Script& s) {
+        for (const ImportDecl* im : s.imports) {
+            emit_comments_before(im->span.begin, out_.empty());
+            import_decl(*im);
+        }
+        if (!s.imports.empty() && !s.stmts.empty()) out_ += '\n';
         const auto& stmts = s.stmts;
         for (std::size_t i = 0; i < stmts.size(); ++i) {
             const Stmt* st = stmts[i];
@@ -1155,6 +1199,10 @@ private:
             case TypeKind::Error: out_ += "<error>"; break;
             case TypeKind::Named: {
                 auto n = as<NamedType>(t);
+                if (!n->qualifier.empty()) {
+                    out_ += n->qualifier.name;
+                    out_ += '.';
+                }
                 out_ += n->name.name;
                 if (!n->args.empty()) {
                     out_ += '<';

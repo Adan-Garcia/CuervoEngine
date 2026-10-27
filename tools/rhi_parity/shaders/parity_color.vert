@@ -19,6 +19,10 @@ layout(location = 0) out vec4 v_color;
 void main() {
     vec2 p = a_position * params.offset_scale.zw + params.offset_scale.xy;
     gl_Position = vec4(p.x / 128.0 - 1.0, 1.0 - p.y / 128.0, 0.0, 1.0);
-    gl_PointSize = 6.0; // PointList: honored by Vulkan, GLES and (with GL_PROGRAM_POINT_SIZE) GL 3.3
+#ifndef CUERVO_WEBGPU // WGSL has no point size (and needs none: points are 1 px)
+    // Compatible-tier points are 1 px on every backend (rhi::Feature::PointsAndLines,
+    // DESIGN.md 4.4 "Clarified (Milestone 10.2)"); Vulkan still needs it written.
+    gl_PointSize = 1.0;
+#endif
     v_color = a_color * params.tint;
 }

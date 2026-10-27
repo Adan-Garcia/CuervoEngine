@@ -1,4 +1,5 @@
 #include "tools/cuervo_tools/export.hpp"
+#include "tools/cuervo_tools/registry.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -13,6 +14,7 @@
 #include "cuervo/render/font_import.hpp"
 #include "cuervo/script/features.hpp"
 #include "cuervo/script/game_session.hpp"
+#include "cuervo/script/plugin_host.hpp"
 #include "cuervo/script/project.hpp"
 #include "cuervo/script/script_host.hpp"
 #include "cuervo/script/tier_check.hpp"
@@ -156,6 +158,37 @@ std::optional<std::vector<std::byte>> pack_project(const fs::path& project, cons
                                             report->count(script::Severity::Warning)));
     }
 
+    // Packages and plugins (LANGUAGE.md 9.26, docs/PLUGINS.md). Plugin
+    // importers convert their sources in step 3 like the engine's own; the
+    // plugins load on this machine, whatever the target platform.
+    std::vector<script::ResolvedPackage> packages;
+    std::shared_ptr<script::PluginSet> plugins;
+    {
+        auto dev_vfs = assets::Vfs::dev(project);
+        auto with_deps = script::load_project(*dev_vfs, error);
+        if (!with_deps) return std::nullopt;
+        if (!script::resolve_packages(*with_deps, *dev_vfs, packages, error)) return std::nullopt;
+        bool any_plugin = false;
+        for (const script::ResolvedPackage& pkg : packages) {
+            if (!pkg.manifest.plugin.present) continue;
+            any_plugin = true;
+            if (options.platform == assets::PackPlatform::Web) {
+                error = std::format("plugin '{}': native plugins are not available on the web yet (docs/PLUGINS.md)",
+                                    pkg.manifest.name);
+                return std::nullopt;
+            }
+        }
+        if (any_plugin) {
+            plugins = script::PluginSet::load(packages, error);
+            if (!plugins && options.scripts == assets::ScriptForm::Native) return std::nullopt;
+            if (!plugins) {
+                // A source pack runs the plugins on the player; only their importers are lost.
+                summary.notes.push_back(std::format("plugins: importers not run ({})", error));
+                error.clear();
+            }
+        }
+    }
+
     // 2. collect (sorted, so the import log reads the same every time)
     std::vector<std::string> files;
     std::error_code ec;
@@ -209,6 +242,13 @@ std::optional<std::vector<std::byte>> pack_project(const fs::path& project, cons
             data = vector::serialize_imported_vector(*vec);
             ++summary.imported;
             summary.notes.push_back(std::format("import: {} -> {}", rel, path));
+        } else if (const script::PluginImporter* imp = plugins ? plugins->importer_for(rel) : nullptr) {
+            std::vector<std::byte> out;
+            if (!script::PluginSet::run_importer(*imp, rel, data, out, error)) return std::nullopt;
+            path = rel.substr(0, rel.size() - imp->extension.size()) + imp->output_extension;
+            data = std::move(out);
+            ++summary.imported;
+            summary.notes.push_back(std::format("import: {} -> {} (plugin {})", rel, path, imp->plugin));
         }
         if (pack.contains(path)) {
             // e.g. both font.ttf and font.efont: the hand-made engine file wins.
@@ -219,6 +259,49 @@ std::optional<std::vector<std::byte>> pack_project(const fs::path& project, cons
         if (!pack.add(path, std::move(data), error)) return std::nullopt;
     }
 
+    // 3b. packages from other directories (`path` dependencies, LANGUAGE.md
+    // 9.26) go under packages/<name>/, where a packed game finds them, with
+    // a plugin's library for the target (milestone 10.5c, docs/PLUGINS.md).
+    // Vendored packages are already inside the project.
+    {
+        for (const script::ResolvedPackage& pkg : packages) {
+            const script::PluginSpec& plugin = pkg.manifest.plugin;
+            if (!pkg.prefix.empty()) continue; // vendored
+            const std::string dest = std::format("packages/{}/", pkg.manifest.name);
+            std::vector<std::string> entries{"package.toml"};
+            for (const std::string& f : pkg.vfs->list("scripts", ".plm")) entries.push_back(f);
+            for (const std::string& f : {std::string("LICENSE"), std::string("LICENSE.md")}) {
+                if (pkg.vfs->exists(f)) entries.push_back(f);
+            }
+            if (plugin.present) {
+                const std::string& lib = options.platform == assets::PackPlatform::Windows ? plugin.lib_windows
+                                                                                           : plugin.lib_linux;
+                if (!lib.empty()) {
+                    entries.push_back(lib);
+                } else if (!plugin.dotnet.empty()) {
+                    // A .NET assembly ships with its directory (deps, runtimeconfig, bindings).
+                    const std::string dir = fs::path(plugin.dotnet).parent_path().generic_string();
+                    for (const std::string& f : pkg.vfs->list(dir)) {
+                        if (!f.ends_with(".pdb")) entries.push_back(f);
+                    }
+                }
+            }
+            for (const std::string& rel : entries) {
+                if (options.scripts == assets::ScriptForm::Native && rel.ends_with(".plm")) continue;
+                std::vector<std::byte> data;
+                const fs::path src = pkg.dir / platform::path_from_utf8(rel);
+                if (!read_bytes(src, data)) {
+                    error = std::format("can't read '{}'", platform::utf8(src));
+                    return std::nullopt;
+                }
+                if (pack.contains(dest + rel)) continue; // a vendored copy wins
+                if (!pack.add(dest + rel, std::move(data), error)) return std::nullopt;
+            }
+            summary.notes.push_back(std::format("package: {} {} ({}) -> {}", pkg.manifest.name, pkg.manifest.version,
+                                                platform::utf8(pkg.dir), dest));
+        }
+    }
+
     // 4. scripts: ScriptForm::Source (the .plm files collected above) or
     // ScriptForm::Native (ahead-of-time C compilation into .cuervo/scripts.so,
     // DESIGN.md 5.12).
@@ -227,7 +310,16 @@ std::optional<std::vector<std::byte>> pack_project(const fs::path& project, cons
         auto dev_vfs = assets::Vfs::dev(project);
         std::vector<pluma::SourceFile::Part> sources;
         if (!script::read_scripts(*dev_vfs, sources, nullptr, error)) return std::nullopt;
-        auto so = script::compile_aot_scripts(sources, error);
+        // Plugins: their natives for the checker, and the static libraries
+        // linked into the module (DESIGN.md 4.18).
+        auto statics = script::static_plugins(packages, error);
+        if (!statics) return std::nullopt;
+        if (!plugins) plugins = std::make_shared<script::PluginSet>();
+        for (const script::StaticPlugin& p : *statics) {
+            summary.notes.push_back(std::format("aot: links plugin {} {} ({})", p.name, p.version,
+                                                platform::utf8(p.library)));
+        }
+        auto so = script::compile_aot_scripts(sources, error, 2, plugins, *statics);
         if (!so) return std::nullopt;
         ++summary.imported;
         summary.notes.push_back(
@@ -391,7 +483,9 @@ bool script_surface_matches(const script::FeatureSet& f) {
     constexpr bool ui = CUERVO_FEATURE_UI != 0;
     constexpr bool particles = CUERVO_FEATURE_PARTICLES != 0;
     constexpr bool collision = CUERVO_FEATURE_COLLISION != 0;
-    return f.audio == audio && f.ui == ui && f.particles == particles && f.collision == collision;
+    constexpr bool physics = CUERVO_FEATURE_PHYSICS != 0;
+    return f.audio == audio && f.ui == ui && f.particles == particles && f.collision == collision &&
+           f.physics == physics;
 }
 
 std::optional<std::uint64_t> run_player_headless(const fs::path& launcher, const std::vector<std::string>& args,
@@ -406,13 +500,14 @@ std::optional<std::uint64_t> run_player_headless(const fs::path& launcher, const
         return std::nullopt;
     }
     // Headless the way CI runs the shmup export (tests/export_shmup.cmake):
-    // offscreen SDL works for GL only, and a private user directory keeps
-    // real saves out. `--screenshot` simulates exactly verify_tick ticks.
-    const std::vector<std::pair<std::string, std::string>> env = {
-        {"SDL_VIDEO_DRIVER", "offscreen"},
+    // offscreen SDL works for GL only (and not on Windows, which has no EGL
+    // for it: a window opens there), and a private user directory keeps real
+    // saves out. `--screenshot` simulates exactly verify_tick ticks.
+    std::vector<std::pair<std::string, std::string>> env = {
         {"CUERVO_USER_DIR", platform::utf8(work / "user")},
         {"CUERVO_SCREENSHOT_TICK", std::to_string(verify_tick)},
     };
+    if constexpr (platform::os != platform::Os::Windows) env.emplace_back("SDL_VIDEO_DRIVER", "offscreen");
     std::vector<std::string> argv = {platform::utf8(fs::absolute(launcher, ec))};
     argv.insert(argv.end(), args.begin(), args.end());
     for (const char* a : {"--backend", "gl", "--no-audio", "--screenshot"}) argv.emplace_back(a);
@@ -455,8 +550,12 @@ std::optional<std::uint64_t> run_web_player_headless(const fs::path& page_dir, c
     fs::remove_all(work, ec);
     fs::create_directories(work, ec);
     const fs::path script = t.source_dir / "tools" / "web" / "smoke_test.mjs";
+    // --seconds sets the smoke test's own timeout (seconds + 60): SwiftShader
+    // needs about 66 s for examples/bench's 240 ticks, so allow what
+    // run_process allows.
     const std::vector<std::string> argv = {"node", platform::utf8(script), "--dir", platform::utf8(fs::absolute(page_dir, ec)),
-                                           "--args", "--screenshot /tmp/verify.ppm", "--expect", "state hash"};
+                                           "--seconds", "240", "--args", "--screenshot /tmp/verify.ppm",
+                                           "--expect", "state hash"};
     auto run = run_process(argv, work, web_build_environment(t.emsdk), work / "verify.log", std::chrono::seconds(300),
                            error);
     fs::remove_all(work, ec);
@@ -537,27 +636,26 @@ std::optional<std::uint64_t> dev_run_hash(const fs::path& project, const fs::pat
 }
 
 // The pack run must be clean, and its state hash must equal a reference: the
-// full engine in this process when the hashes are comparable
-// (script_surface_matches), else the same player's dev run of the project,
-// as tests/export_shmup.cmake compares the full player's export with the dev run.
-bool verify_stripped(const fs::path& project, const fs::path& pak, const fs::path& exe,
-                     const script::FeatureSet& features, ShippedPlayer& player, std::vector<std::string>& notes,
-                     std::string& error) {
+// full engine in this process (a stripped player's hash doesn't depend on its
+// features, ScriptHost::state_hash), else, when this engine can't run the
+// pack, the same player's dev run of the project, as tests/export_shmup.cmake
+// compares the full player's export with the dev run.
+bool verify_stripped(const fs::path& project, const fs::path& pak, const fs::path& exe, ShippedPlayer& player,
+                     std::vector<std::string>& notes, std::string& error) {
     auto hash = run_player_headless(exe, {}, true, error);
     if (!hash) return false;
     player.state_hash = hash;
     std::string why_none;
-    if (script_surface_matches(features)) {
-        std::string ref_error;
-        player.reference_hash = reference_state_hash(pak, ref_error);
-        if (player.reference_hash) player.reference = "full engine";
-        else why_none = "the full engine can't run it here: " + ref_error;
+    std::string ref_error;
+    player.reference_hash = reference_state_hash(pak, ref_error);
+    if (player.reference_hash) {
+        player.reference = "full engine";
     } else if (!needs_import(project)) {
         player.reference_hash = dev_run_hash(project, pak, exe, error);
         if (!player.reference_hash) return false;
         player.reference = "dev run";
     } else {
-        why_none = "its hash covers other features than this engine's, and the project needs importers for a dev run";
+        why_none = "the full engine can't run it here (" + ref_error + "), and the project needs importers for a dev run";
     }
     if (player.reference_hash && *player.reference_hash != *hash) {
         error = std::format("the stripped player reaches state hash {:016x} at tick {} on the exported game, the {} "
@@ -577,6 +675,40 @@ bool verify_stripped(const fs::path& project, const fs::path& pak, const fs::pat
     return true;
 }
 
+// A player built against the MSVC runtime imports the Visual C++ runtime DLLs,
+// which a player's machine may lack; Microsoft allows shipping them next to the
+// program (app-local). They come from beside the player (the export templates
+// carry them) or, on a Windows host, from the system directory. An import name
+// is plain ASCII in the PE import table, so a byte search finds it.
+bool copy_msvc_runtime(const fs::path& player, const fs::path& out_dir, std::vector<fs::path>& written,
+                       std::vector<std::string>& notes, std::string& error) {
+    std::ifstream in(player, std::ios::binary);
+    std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    std::transform(bytes.begin(), bytes.end(), bytes.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::error_code ec;
+    for (const char* dll : {"vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll"}) {
+        if (bytes.find(dll) == std::string::npos) continue;
+        fs::path from = player.parent_path() / dll;
+        if (!fs::is_regular_file(from, ec)) {
+            from.clear();
+            if (auto root = platform::env("SystemRoot"); root && !root->empty()) {
+                const fs::path sys = platform::path_from_utf8(*root) / "System32" / dll;
+                if (fs::is_regular_file(sys, ec)) from = sys;
+            }
+        }
+        if (from.empty()) {
+            notes.push_back(std::format("player: it needs {} (the Visual C++ runtime) and none was found to ship; "
+                                        "machines without the runtime installed can't start the game",
+                                        dll));
+            continue;
+        }
+        if (!copy_file(from, out_dir / dll, false, error)) return false;
+        written.push_back(out_dir / dll);
+    }
+    return true;
+}
+
 } // namespace
 
 bool export_project(const fs::path& project, const ExportOptions& options, ExportSummary& summary,
@@ -584,18 +716,6 @@ bool export_project(const fs::path& project, const ExportOptions& options, Expor
     const assets::PackPlatform target = options.pack.platform;
     if (target == assets::PackPlatform::Any) {
         error = "export needs a platform (linux, web or windows)";
-        return false;
-    }
-    if (options.runtime.empty() && options.engine == EngineChoice::Stripped && target == assets::PackPlatform::Windows) {
-        // Windows players need a Windows host; none is set up yet.
-        error = "--engine stripped is not supported for windows yet (Linux and web only; docs/EXPORT.md "
-                "\"Stripped players\"). Use --engine full or --runtime <path>.";
-        return false;
-    }
-    if (target == assets::PackPlatform::Windows && options.runtime.empty()) {
-        error = "exporting for Windows is not supported yet: no Windows build of the runtime exists or has been "
-                "tested (docs/WINDOWS.md). Pass --runtime <cuervo.exe> from a Windows build to assemble one anyway "
-                "(untested).";
         return false;
     }
 
@@ -612,8 +732,6 @@ bool export_project(const fs::path& project, const ExportOptions& options, Expor
         player.source = options.full_runtime;
     } else if (options.engine == EngineChoice::Stripped) {
         player.kind = ShippedPlayer::Kind::Stripped;
-    } else if (target == assets::PackPlatform::Windows) {
-        why_full = "stripped players aren't built for windows yet, shipping the full runtime";
     } else if (std::string missing = options.toolchain.missing(target); !missing.empty()) {
         why_full = "no toolchain to build a stripped player (" + missing + "), shipping the full player";
     } else {
@@ -625,7 +743,11 @@ bool export_project(const fs::path& project, const ExportOptions& options, Expor
     }
     if (player.kind != ShippedPlayer::Kind::Stripped) {
         if (player.source.empty()) {
-            error = "no runtime to ship (--runtime)";
+            error = target == assets::PackPlatform::Windows
+                        ? "no Windows player to ship: export from a Windows build or a prebuilt package (its "
+                          "templates/windows/cuervo-player.exe), or pass --runtime <cuervo-player.exe> "
+                          "(docs/EXPORT.md \"Windows\")"
+                        : "no runtime to ship (--runtime)";
             return false;
         }
         if (!check_runtime(target, player.source, error)) return false;
@@ -647,7 +769,7 @@ bool export_project(const fs::path& project, const ExportOptions& options, Expor
         // The AOT module carries this engine's prelude (script_surface_matches);
         // a player without some of it would run a module built for another engine.
         std::vector<std::string> missing;
-        for (const char* f : {"audio", "collision", "particles", "ui"}) {
+        for (const char* f : {"audio", "collision", "particles", "physics", "ui"}) {
             if (!features.enabled(f)) missing.emplace_back(f);
         }
         const std::string why = std::format(
@@ -697,6 +819,8 @@ bool export_project(const fs::path& project, const ExportOptions& options, Expor
         !copy_third_party_notices(options.notices_root, options.out_dir, summary.outputs, error)) {
         return false;
     }
+    // The packages' licenses next to the engine's (milestone 10.5d).
+    if (!write_package_notices(project, options.out_dir, summary.outputs, error)) return false;
 
     const std::string name = options.name.empty() ? launcher_name(summary.pack.game) : options.name;
     if (target == assets::PackPlatform::Web) {
@@ -709,8 +833,8 @@ bool export_project(const fs::path& project, const ExportOptions& options, Expor
         summary.launcher = options.out_dir / "index.html";
         if (player.kind == ShippedPlayer::Kind::Stripped && options.verify) {
             // The same check as a native player, in a browser: the page must
-            // run this pack, and match the full engine when it has the same
-            // script surface (the sim is the same code on every platform).
+            // run this pack and match the full engine (the sim is the same
+            // code on every platform, the hash the same for every feature set).
             if (options.progress) options.progress("verifying the stripped web player in headless Chrome");
             auto hash = run_web_player_headless(options.out_dir, options.toolchain, error);
             if (!hash) {
@@ -718,7 +842,7 @@ bool export_project(const fs::path& project, const ExportOptions& options, Expor
                 return false;
             }
             player.state_hash = hash;
-            if (script_surface_matches(features)) {
+            {
                 std::string ref_error;
                 player.reference_hash = reference_state_hash(pak, ref_error);
                 if (player.reference_hash) player.reference = "full engine";
@@ -748,13 +872,17 @@ bool export_project(const fs::path& project, const ExportOptions& options, Expor
     if (!copy_file(player.source, exe, true, error)) return false;
     summary.outputs.push_back(exe);
     summary.launcher = exe;
+    if (target == assets::PackPlatform::Windows &&
+        !copy_msvc_runtime(player.source, options.out_dir, summary.outputs, summary.pack.notes, error)) {
+        return false;
+    }
 
     // A built player is checked before it ships: it must run this pack to the
     // state the full engine reaches, so a feature the detection missed fails
     // the export instead of the player (DESIGN.md 4.11 "Clarified (Milestone 7.5)").
     if (player.kind == ShippedPlayer::Kind::Stripped && options.verify) {
         if (options.progress) options.progress("verifying the stripped player on the exported game");
-        if (!verify_stripped(project, pak, exe, features, player, summary.pack.notes, error)) {
+        if (!verify_stripped(project, pak, exe, player, summary.pack.notes, error)) {
             // Don't leave a player that can't run the game in the output.
             fs::remove(exe, ec);
             return false;
@@ -766,8 +894,10 @@ bool export_project(const fs::path& project, const ExportOptions& options, Expor
 bool copy_third_party_notices(const fs::path& root, const fs::path& out_dir, std::vector<fs::path>& written,
                               std::string& error) {
     const fs::path notices = root / "THIRD_PARTY_NOTICES.md";
-    const fs::path texts = root / "third_party" / "licenses";
     std::error_code ec;
+    // A source checkout keeps the texts in third_party/licenses/, a prebuilt package in licenses/.
+    fs::path texts = root / "third_party" / "licenses";
+    if (!fs::is_directory(texts, ec)) texts = root / "licenses";
     if (!fs::is_regular_file(notices, ec) || !fs::is_directory(texts, ec)) {
         error = std::format("third-party notices not found under '{}' (THIRD_PARTY_NOTICES.md, third_party/licenses/)",
                             platform::utf8(root));

@@ -1,0 +1,147 @@
+node Node2D "Level" {
+    position: vec2 = (0.0, 0.0)
+
+    // --- Static Boundaries & Rolling Hill Chain Terrain ---
+    node StaticBody2D "Floor" {
+        position: vec2 = (640.0, 695.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (1280.0, 50.0)
+        }
+    }
+    node StaticBody2D "WallLeft" {
+        position: vec2 = (20.0, 360.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (40.0, 720.0)
+        }
+    }
+    node StaticBody2D "WallRight" {
+        position: vec2 = (1260.0, 360.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (40.0, 720.0)
+        }
+    }
+    node StaticBody2D "Hills" {
+        position: vec2 = (0.0, 0.0)
+        node CollisionPolygon2D "ChainTerrain" {
+            build_mode: int = 1
+            polygon: List<vec2> = [(40.0, 640.0), (220.0, 640.0), (380.0, 575.0), (520.0, 610.0), (700.0, 515.0), (880.0, 560.0), (1060.0, 495.0), (1240.0, 600.0)]
+        }
+    }
+
+    // --- Off-Road Buggy Vehicle (Chassis + 2 WheelJoint2D Suspensions) ---
+    node ChassisBody "Chassis" {
+        position: vec2 = (260.0, 575.0)
+        mass: float = 25.0
+        angular_damp: float = 1.5
+        can_sleep: bool = false
+        node CollisionShape2D "BodyShape" {
+            shape_type: int = 1
+            size: vec2 = (110.0, 26.0)
+        }
+    }
+    node WheelBody "FrontWheel" {
+        position: vec2 = (305.0, 602.0)
+        mass: float = 8.0
+        can_sleep: bool = false
+        node CollisionShape2D "Shape" {
+            shape_type: int = 2
+            radius: float = 18.0
+        }
+    }
+    node WheelBody "RearWheel" {
+        position: vec2 = (215.0, 602.0)
+        mass: float = 8.0
+        can_sleep: bool = false
+        node CollisionShape2D "Shape" {
+            shape_type: int = 2
+            radius: float = 18.0
+        }
+    }
+    node WheelJoint2D "FrontSuspension" {
+        position: vec2 = (305.0, 602.0)
+        node_a: str = "Level/Chassis"
+        node_b: str = "Level/FrontWheel"
+        axis: vec2 = (0.0, 1.0)
+        suspension_stiffness: float = 8.0
+        suspension_damping: float = 0.7
+        enable_limit: bool = true
+        lower_translation: float = -18.0
+        upper_translation: float = 18.0
+        motor_enabled: bool = true
+        motor_speed: float = 0.0
+        motor_max_torque: float = 2500000.0
+    }
+    node WheelJoint2D "RearSuspension" {
+        position: vec2 = (215.0, 602.0)
+        node_a: str = "Level/Chassis"
+        node_b: str = "Level/RearWheel"
+        axis: vec2 = (0.0, 1.0)
+        suspension_stiffness: float = 8.0
+        suspension_damping: float = 0.7
+        enable_limit: bool = true
+        lower_translation: float = -18.0
+        upper_translation: float = 18.0
+        motor_enabled: bool = true
+        motor_speed: float = 0.0
+        motor_max_torque: float = 2500000.0
+    }
+
+    // --- Towed Trailer (PinJoint2D Hitch + WheelJoint2D Axle) ---
+    node TrailerBody "Trailer" {
+        position: vec2 = (125.0, 580.0)
+        mass: float = 12.0
+        angular_damp: float = 1.5
+        can_sleep: bool = false
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (70.0, 16.0)
+        }
+    }
+    node WheelBody "TrailerWheel" {
+        position: vec2 = (115.0, 604.0)
+        mass: float = 6.0
+        can_sleep: bool = false
+        node CollisionShape2D "Shape" {
+            shape_type: int = 2
+            radius: float = 16.0
+        }
+    }
+    node WheelJoint2D "TrailerSuspension" {
+        position: vec2 = (115.0, 604.0)
+        node_a: str = "Level/Trailer"
+        node_b: str = "Level/TrailerWheel"
+        axis: vec2 = (0.0, 1.0)
+        suspension_stiffness: float = 8.0
+        suspension_damping: float = 0.7
+        enable_limit: bool = true
+        lower_translation: float = -14.0
+        upper_translation: float = 14.0
+    }
+    node PinJoint2D "TrailerHitch" {
+        position: vec2 = (180.0, 580.0)
+        node_a: str = "Level/Chassis"
+        node_b: str = "Level/Trailer"
+    }
+
+    // --- Cargo crates on the trailer ---
+    node Crate "CargoBox" {
+        position: vec2 = (125.0, 558.0)
+        mass: float = 1.5
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (24.0, 24.0)
+        }
+    }
+
+    // --- Finish Zone Sensor ---
+    node BoostPad "BoostZone" {
+        position: vec2 = (700.0, 485.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (90.0, 50.0)
+        }
+    }
+}

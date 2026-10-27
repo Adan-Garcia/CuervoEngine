@@ -255,3 +255,12 @@ TEST_CASE("formatter: leading comments stay attached; consecutive consts stay to
                       "}\n";
     CHECK(fmt(src) == src);
 }
+
+TEST_CASE("formatter: imports and package-qualified types (LANGUAGE.md 9.26)") {
+    std::string input = "// header\nimport   tween as tw\nimport util.{ A ,b as  c}\nvar p : tw.Point = tw.Point{x=1}\n"
+                        "fn f(m: tw.Mode) -> int { return 1 }\n";
+    std::string expected = "// header\nimport tween as tw\nimport util.{A, b as c}\n\nvar p: tw.Point = tw.Point { x = 1 }\n\n"
+                           "fn f(m: tw.Mode) -> int {\n    return 1\n}\n";
+    CHECK(fmt(input) == expected);
+    CHECK(fmt(expected) == expected);
+}

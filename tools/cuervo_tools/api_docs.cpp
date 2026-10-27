@@ -326,6 +326,8 @@ std::string anchor(std::string_view heading) {
 }
 
 std::string_view file_name(std::string_view path) {
+    if (path.starts_with("cuervo/")) return path.substr(7);
+    if (path.starts_with("pluma/")) return path.substr(6);
     const auto slash = path.rfind('/');
     return slash == std::string_view::npos ? path : path.substr(slash + 1);
 }

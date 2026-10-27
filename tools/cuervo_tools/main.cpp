@@ -11,6 +11,9 @@
 //                [--player-cache <dir>] [--no-verify] [--emsdk <dir>] [--host-build <dir>]
 //   cuervo-tools pack-info <game.pak>                  list a pack's entries and check its hash
 //   cuervo-tools docs [-o <file>] [--check <file>] [--check-coverage]   engine API reference (docs/API.md)
+//   cuervo-tools package new <dir> --name <name> [--version 0.1.0]    a Pluma package (docs/PACKAGES.md)
+//   cuervo-tools package check <dir>                   check a package on its own
+//   cuervo-tools test <project-or-package> [--filter s] run the @test functions (LANGUAGE.md 9.27)
 //
 // `pack` and `export` are the release path (DESIGN.md 4.11, docs/EXPORT.md):
 // the tier check, the importers and a deterministic archive; `export` adds the
@@ -34,6 +37,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -44,14 +48,18 @@
 #include <vector>
 
 #include "cuervo/assets/pack.hpp"
+#include "cuervo/assets/vfs.hpp"
 #include "cuervo/platform/platform.hpp"
 #include "cuervo/scene/scene_file.hpp"
+#include "cuervo/script/project.hpp"
 #include "cuervo/script/script_host.hpp"
 #include "cuervo/script/tier_check.hpp"
 #include "pluma/format.hpp"
 #include "pluma/lsp.hpp"
 #include "tools/cuervo_tools/api_docs.hpp"
 #include "tools/cuervo_tools/export.hpp"
+#include "tools/cuervo_tools/packages.hpp"
+#include "tools/cuervo_tools/registry.hpp"
 
 namespace {
 
@@ -71,7 +79,16 @@ int usage() {
                "  cuervo-tools pack-info <game.pak>\n"
                "  cuervo-tools fmt <file-or-project> [--check] [--write|-w]\n"
                "  cuervo-tools lsp [<project>] [--check-style|--no-check-style]\n"
-               "  cuervo-tools docs [-o <file.md>] [--check <file.md>] [--check-coverage]\n",
+               "  cuervo-tools docs [-o <file.md>] [--check <file.md>] [--check-coverage]\n"
+               "  cuervo-tools package new <dir> --name <name> [--version <x.y.z>]\n"
+               "  cuervo-tools package check <dir>\n"
+               "  cuervo-tools test <project-or-package> [--filter <substring>]\n"
+               "  cuervo-tools plugin verify <package-dir> [--registry <dir>]\n"
+               "  cuervo-tools plugin publish <package-dir> [--registry <dir>]\n"
+               "  cuervo-tools plugin install <name>[@<range>] [--project <dir>] [--registry <dir>]\n"
+               "  cuervo-tools plugin list [--registry <dir>]\n"
+               "  cuervo-tools license report <project>\n"
+               "  (--registry defaults to $CUERVO_REGISTRY)\n",
                stderr);
     return 2;
 }
@@ -112,6 +129,189 @@ int scene_command(int argc, char** argv) {
         return 0;
     }
     return usage();
+}
+
+int package_command(int argc, char** argv) {
+    const std::string_view cmd = argv[2];
+    const std::filesystem::path dir = cuervo::platform::path_from_utf8(argv[3]);
+    std::string error;
+    if (cmd == "new") {
+        std::string name;
+        std::string version = "0.1.0";
+        for (int i = 4; i + 1 < argc; i += 2) {
+            const std::string_view flag = argv[i];
+            if (flag == "--name") {
+                name = argv[i + 1];
+            } else if (flag == "--version") {
+                version = argv[i + 1];
+            } else {
+                return usage();
+            }
+        }
+        if (argc % 2 != 0 || name.empty()) return usage();
+        if (!cuervo::tools::new_package(dir, name, version, error)) return fail(error);
+        std::printf("created package %s %s in %s\n", name.c_str(), version.c_str(), argv[3]);
+        return 0;
+    }
+    if (cmd == "check" && argc == 4) {
+        auto report = cuervo::tools::check_package(dir, error);
+        if (!report) return fail(error);
+        std::printf("package %s %s: %zu script(s) ok", report->name.c_str(), report->version.c_str(), report->files);
+        if (!report->packages.empty()) {
+            std::printf(", with");
+            for (const std::string& p : report->packages) std::printf(" %s", p.c_str());
+        }
+        std::printf("\n");
+        return 0;
+    }
+    return usage();
+}
+
+int test_command(int argc, char** argv) {
+    std::string filter;
+    if (argc == 5 && std::string_view(argv[3]) == "--filter") {
+        filter = argv[4];
+    } else if (argc != 3) {
+        return usage();
+    }
+    std::string error;
+    auto report = cuervo::tools::test_scripts(cuervo::platform::path_from_utf8(argv[2]), filter, error);
+    if (!report) return fail(error);
+    const std::string text = pluma::format_test_report(*report);
+    std::fwrite(text.data(), 1, text.size(), stdout);
+    return report->ok() ? 0 : 1;
+}
+
+// The font conformance projects are packed with, as `pack` uses.
+std::string default_font() {
+    return cuervo::platform::utf8(
+        cuervo::platform::find_asset("fonts/LiberationSans-Regular.ttf", CUERVO_TOOLS_DEFAULT_FONT));
+}
+
+// The full player `export` ships for a platform when no --runtime or
+// CUERVO_EXPORT_RUNTIME names one (docs/EXPORT.md "Players"): this build
+// tree's when it exists (a source checkout), else the export template in a
+// prebuilt package, `<package>/templates/<platform>/` beside `bin/` (the
+// release archives, .github/workflows/release.yml). Empty when there is none.
+std::filesystem::path default_player(cuervo::assets::PackPlatform target) {
+    using cuervo::assets::PackPlatform;
+    std::error_code ec;
+    std::filesystem::path built;
+    const char* file = "";
+    switch (target) {
+        case PackPlatform::Web:
+            built = cuervo::platform::path_from_utf8(CUERVO_TOOLS_WEB_RUNTIME); // a directory
+            break;
+        case PackPlatform::Linux:
+            if (cuervo::assets::host_platform() == PackPlatform::Linux) {
+                built = cuervo::platform::path_from_utf8(CUERVO_TOOLS_RUNTIME);
+            }
+            file = "cuervo";
+            break;
+        case PackPlatform::Windows:
+#if defined(CUERVO_TOOLS_PLAYER)
+            built = cuervo::platform::path_from_utf8(CUERVO_TOOLS_PLAYER); // the GUI-subsystem player
+#endif
+            file = "cuervo-player.exe";
+            break;
+        case PackPlatform::Any: return {};
+    }
+    if (!built.empty() && std::filesystem::exists(built, ec)) return built;
+    const std::filesystem::path templates = cuervo::platform::executable_dir() / ".." / "templates" /
+                                            std::string(cuervo::assets::platform_name(target)) / file;
+    if (std::filesystem::exists(templates, ec)) return templates.lexically_normal();
+    return built;
+}
+
+int plugin_command(int argc, char** argv) {
+    namespace tools = cuervo::tools;
+    using cuervo::platform::path_from_utf8;
+    const std::string_view cmd = argv[2];
+    std::string target;
+    std::string registry;
+    std::string project = ".";
+    for (int i = 3; i < argc; ++i) {
+        const std::string_view a = argv[i];
+        if (a == "--registry" && i + 1 < argc) {
+            registry = argv[++i];
+        } else if (a == "--project" && i + 1 < argc) {
+            project = argv[++i];
+        } else if (!a.starts_with("--") && target.empty()) {
+            target = argv[i];
+        } else {
+            return usage();
+        }
+    }
+    if (registry.empty()) {
+        if (const auto env = cuervo::platform::env("CUERVO_REGISTRY")) registry = *env;
+    }
+    std::string error;
+    if (cmd == "verify" && !target.empty()) {
+        std::optional<tools::Registry> reg;
+        if (!registry.empty()) {
+            reg = tools::Registry::open(path_from_utf8(registry), error);
+            if (!reg) return fail(error);
+        }
+        tools::VerifyOptions o;
+        o.font_path = default_font();
+        // With a registry, compare with the published version of this package.
+        auto vfs = cuervo::assets::Vfs::dev(path_from_utf8(target));
+        auto m = cuervo::script::load_package_manifest(*vfs, "", error);
+        if (!m) return fail(error);
+        if (reg) o.expected = reg->find(m->name, m->version);
+        auto report = tools::verify_package(path_from_utf8(target), o, error);
+        if (!report) return fail(error);
+        const std::string text = tools::format_verify_report(*report);
+        std::fwrite(text.data(), 1, text.size(), stdout);
+        return report->ok() ? 0 : 1;
+    }
+    if (registry.empty() && (cmd == "publish" || cmd == "install" || cmd == "list")) {
+        return fail("no registry: pass --registry <dir> or set CUERVO_REGISTRY");
+    }
+    if (cmd == "publish" && !target.empty()) {
+        tools::PublishResult r;
+        if (!tools::publish_package(path_from_utf8(target), path_from_utf8(registry), default_font(), r, error)) {
+            return fail(error);
+        }
+        const std::string text = tools::format_verify_report(r.report);
+        std::fwrite(text.data(), 1, text.size(), stdout);
+        std::printf("%s %s %s %s (sha256 %s)\n", r.already ? "already published:" : "published", r.entry.name.c_str(),
+                    r.entry.version.c_str(), r.entry.archive.c_str(), r.entry.sha256.c_str());
+        return 0;
+    }
+    if (cmd == "install" && !target.empty()) {
+        tools::InstallResult r;
+        if (!tools::install_package(path_from_utf8(project), target, path_from_utf8(registry), default_font(), r,
+                                    error)) {
+            return fail(error);
+        }
+        for (const tools::VerifyReport& v : r.reports) {
+            const std::string text = tools::format_verify_report(v);
+            std::fwrite(text.data(), 1, text.size(), stdout);
+        }
+        if (r.installed.empty()) std::printf("%s is already installed\n", target.c_str());
+        for (const std::string& s : r.installed) std::printf("installed %s into packages/\n", s.c_str());
+        return 0;
+    }
+    if (cmd == "list" && target.empty()) {
+        auto reg = tools::Registry::open(path_from_utf8(registry), error);
+        if (!reg) return fail(error);
+        for (const tools::RegistryEntry& e : reg->entries()) {
+            std::printf("%s %s  %s  %s%s\n", e.name.c_str(), e.version.c_str(), e.license.c_str(),
+                        e.plugin ? (e.sim_safe ? "plugin (sim-safe) " : "plugin ") : "", e.description.c_str());
+        }
+        return 0;
+    }
+    return usage();
+}
+
+int license_command(int argc, char** argv) {
+    if (std::string_view(argv[2]) != "report" || argc != 4) return usage();
+    std::string error;
+    auto report = cuervo::tools::license_report(cuervo::platform::path_from_utf8(argv[3]), error);
+    if (!report) return fail(error);
+    std::fwrite(report->data(), 1, report->size(), stdout);
+    return 0;
 }
 
 int tier_command(int argc, char** argv) {
@@ -280,7 +480,12 @@ int export_command(int argc, char** argv) {
     // Stripped players are built with this cuervo-tools' own configure
     // (tools/cuervo_tools/CMakeLists.txt): same sources, compilers, generator.
     o.toolchain.source_dir = platform::path_from_utf8(CUERVO_TOOLS_SOURCE_DIR);
-    o.notices_root = o.toolchain.source_dir; // shipped as licenses/ with the game
+    // Shipped as licenses/ with the game: from the source checkout, or from a
+    // prebuilt package (THIRD_PARTY_NOTICES.md beside bin/).
+    o.notices_root = o.toolchain.source_dir;
+    if (std::error_code ec; !std::filesystem::exists(o.notices_root / "THIRD_PARTY_NOTICES.md", ec)) {
+        o.notices_root = (platform::executable_dir() / "..").lexically_normal();
+    }
     o.toolchain.cmake = platform::path_from_utf8(f.cmake.empty() ? std::string(CUERVO_TOOLS_CMAKE) : f.cmake);
     o.toolchain.generator = CUERVO_TOOLS_GENERATOR;
     o.toolchain.make_program = platform::path_from_utf8(CUERVO_TOOLS_MAKE_PROGRAM);
@@ -306,24 +511,13 @@ int export_command(int argc, char** argv) {
     };
     if (!f.runtime.empty()) o.runtime = platform::path_from_utf8(f.runtime);
     bool env_runtime = false;
-    if (o.pack.platform == assets::PackPlatform::Web) {
-        // The pack-loading web runtime (docs/EXPORT.md "Web").
-        auto env = platform::env("CUERVO_EXPORT_WEB_RUNTIME");
-        env_runtime = env && !env->empty();
-        o.full_runtime = platform::path_from_utf8(env_runtime ? *env : std::string(CUERVO_TOOLS_WEB_RUNTIME));
-    } else if (o.pack.platform == assets::PackPlatform::Linux) {
-        // The player from this build tree; CUERVO_EXPORT_RUNTIME picks another
-        // (e.g. a Release build's).
-        auto env = platform::env("CUERVO_EXPORT_RUNTIME");
-        env_runtime = env && !env->empty();
-        o.full_runtime = platform::path_from_utf8(env_runtime ? *env : std::string(CUERVO_TOOLS_RUNTIME));
-    } else if (o.pack.platform == assets::PackPlatform::Windows) {
-        auto env = platform::env("CUERVO_EXPORT_RUNTIME");
-        if (env && !env->empty()) {
-            o.runtime = platform::path_from_utf8(*env);
-        } else if (assets::host_platform() == assets::PackPlatform::Windows) {
-            o.runtime = platform::path_from_utf8(std::string(CUERVO_TOOLS_RUNTIME));
-        }
+    if (auto env = platform::env(o.pack.platform == assets::PackPlatform::Web ? "CUERVO_EXPORT_WEB_RUNTIME"
+                                                                             : "CUERVO_EXPORT_RUNTIME");
+        env && !env->empty()) {
+        env_runtime = true;
+        o.full_runtime = platform::path_from_utf8(*env);
+    } else {
+        o.full_runtime = default_player(o.pack.platform);
     }
     // The prebuilt player's build type, unless it came from elsewhere.
     const std::string full_label =
@@ -332,7 +526,7 @@ int export_command(int argc, char** argv) {
     if (!tools::export_project(platform::path_from_utf8(argv[2]), o, summary, error)) return fail(error);
     print_summary(summary.pack);
     const tools::ShippedPlayer& shipped = summary.player;
-    if (shipped.kind == tools::ShippedPlayer::Kind::Full && o.pack.platform == assets::PackPlatform::Linux &&
+    if (shipped.kind == tools::ShippedPlayer::Kind::Full && o.pack.platform != assets::PackPlatform::Web &&
         !full_label.empty()) {
         std::fprintf(stderr,
                      "cuervo-tools: note: shipped the %s runtime of this build tree; export from a Release build, "
@@ -532,11 +726,15 @@ int main(int argc, char** argv) {
     if (group == "docs") return docs_command(argc, argv);
     if (argc < 3) return usage();
     if (group == "fmt") return fmt_command(argc, argv);
+    if (group == "test") return test_command(argc, argv);
+    if (group == "plugin") return plugin_command(argc, argv);
+    if (group == "license") return license_command(argc, argv);
     if (group == "pack") return pack_command(argc, argv);
     if (group == "export") return export_command(argc, argv);
     if (group == "pack-info") return pack_info_command(argc, argv);
     if (argc < 4) return usage();
     if (group == "scene") return scene_command(argc, argv);
     if (group == "tier") return tier_command(argc, argv);
+    if (group == "package") return package_command(argc, argv);
     return usage();
 }

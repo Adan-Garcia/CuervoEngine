@@ -1,0 +1,18 @@
+# Lantern Cave (DESIGN.md 4.17, milestone 9.8): a physics platformer lit by 2D
+# lights. Tilemap terrain with collision and light occluders, a
+# CharacterBody2D explorer with an animated body and a lantern, flickering
+# torches, a sweeping beacon and pushable crates that cast shadows.
+#   cuervo --game examples/lantern_cave
+name = "Lantern Cave"
+main = "Game"
+virtual_size = [1280, 720]
+tick_rate = 60
+seed = 20261025
+clear_color = "17121c"
+render_tier = "compatible"
+
+[input.actions]
+move_left = ["Key.A", "Key.Left", "Pad.DpadLeft"]
+move_right = ["Key.D", "Key.Right", "Pad.DpadRight"]
+jump = ["Key.Space", "Key.W", "Key.Up", "Pad.South"]
+restart = ["Key.R", "Pad.Start"]

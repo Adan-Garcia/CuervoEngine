@@ -1,0 +1,231 @@
+// A 2D area detector that monitors overlapping physics bodies and areas.
+class Area2D extends Node2D {
+    // Emitted when a physics body enters this area.
+    signal body_entered(body: Node2D)
+    // Emitted when a physics body exits this area.
+    signal body_exited(body: Node2D)
+    // Emitted when another area enters this area.
+    signal area_entered(area: Area2D)
+    // Emitted when another area exits this area.
+    signal area_exited(area: Area2D)
+
+    // The physics layers this area occupies.
+    @export var collision_layer = 1
+    // The physics layers this area detects.
+    @export var collision_mask = 1
+    // When true, the area monitors overlaps and emits signals.
+    @export var monitoring = true
+
+    // Native body handle.
+    var body_handle = 0
+    // Currently overlapping bodies.
+    var overlapping_bodies = List<Node2D>()
+    // Currently overlapping areas.
+    var overlapping_areas = List<Area2D>()
+
+    // Ensures the native sensor body is created.
+    fn ensure_body() {
+        if body_handle == 0 {
+            body_handle = _Physics.body_create(0, global_position(), global_rotation(), collision_layer, collision_mask, self)
+            for c in children {
+                if c is CollisionShape2D cs {
+                    cs.register_shape()
+                } else if c is CollisionPolygon2D cp {
+                    cp.register_shape()
+                }
+            }
+        }
+    }
+
+    // Engine-internal tree entry hook ensuring native sensor body exists before child shapes register.
+    fn enter_tree() {
+        ensure_body()
+        super.enter_tree()
+    }
+
+    // Creates native sensor body.
+    fn ready() {
+        ensure_body()
+    }
+
+    // Cleans up native sensor body.
+    fn exit() {
+        if body_handle != 0 {
+            _Physics.body_destroy(body_handle)
+            body_handle = 0
+        }
+    }
+
+    // Returns a list of all currently overlapping physics bodies.
+    fn get_overlapping_bodies() -> List<Node2D> {
+        return overlapping_bodies
+    }
+
+    // Returns a list of all currently overlapping Area2Ds.
+    fn get_overlapping_areas() -> List<Area2D> {
+        return overlapping_areas
+    }
+
+    // Returns true if this area currently overlaps `body`.
+    fn overlaps_body(body: Node2D) -> bool {
+        return overlapping_bodies.contains(body)
+    }
+
+    // Returns true if this area currently overlaps `area`.
+    fn overlaps_area(area: Area2D) -> bool {
+        return overlapping_areas.contains(area)
+    }
+
+    // Internal sensor event callback when a body begins touch.
+    fn _on_body_enter(b: Node2D) {
+        if !monitoring {
+            return
+        }
+        if !overlapping_bodies.contains(b) {
+            overlapping_bodies.push(b)
+            emit body_entered(b)
+        }
+    }
+
+    // Internal sensor event callback when a body ends touch.
+    fn _on_body_exit(b: Node2D) {
+        if !monitoring {
+            return
+        }
+        var i = 0
+        while i < overlapping_bodies.len() {
+            if overlapping_bodies[i] == b {
+                overlapping_bodies.remove(i)
+                emit body_exited(b)
+                return
+            }
+            i = i + 1
+        }
+    }
+
+    // Internal sensor event callback when an area begins touch.
+    fn _on_area_enter(a: Area2D) {
+        if !monitoring {
+            return
+        }
+        if !overlapping_areas.contains(a) {
+            overlapping_areas.push(a)
+            emit area_entered(a)
+        }
+    }
+
+    // Internal sensor event callback when an area ends touch.
+    fn _on_area_exit(a: Area2D) {
+        if !monitoring {
+            return
+        }
+        var i = 0
+        while i < overlapping_areas.len() {
+            if overlapping_areas[i] == a {
+                overlapping_areas.remove(i)
+                emit area_exited(a)
+                return
+            }
+            i = i + 1
+        }
+    }
+}
+
+// A 2D raycast node that casts a ray along target_position to detect colliders.
+class RayCast2D extends Node2D {
+    // The destination endpoint vector of the raycast relative to this node.
+    @export var target_position = vec2(0.0, 50.0)
+    // The physics layers this ray scans for.
+    @export var collision_mask = 1
+    // When true, the ray updates automatically each tick.
+    @export var enabled = true
+    // When true, the ray ignores its parent physics body.
+    @export var exclude_parent = true
+    // When true, forces debug drawing regardless of global debug flag.
+    @export var debug_draw = false
+
+    // True if the ray is currently colliding with a shape.
+    var colliding = false
+    // The hit collider node if any.
+    var collider: Node2D? = null
+    // The world point of contact.
+    var collision_point = vec2(0.0, 0.0)
+    // The surface normal at the hit point.
+    var collision_normal = vec2(0.0, 0.0)
+
+    // Engine-internal per-tick update hook that runs raycast before script update().
+    fn update_tree(dt: float) {
+        if !freed && can_process() && enabled {
+            force_raycast_update()
+        }
+        super.update_tree(dt)
+    }
+
+    // Updates ray query each tick while enabled.
+    fn update(dt: float) {
+        if enabled {
+            force_raycast_update()
+        }
+    }
+
+    // Returns true if a collision is detected.
+    fn is_colliding() -> bool {
+        return colliding
+    }
+
+    // Returns the collider node that was hit, or null.
+    fn get_collider() -> Node2D? {
+        return collider
+    }
+
+    // Returns the world point of the ray collision.
+    fn get_collision_point() -> vec2 {
+        return collision_point
+    }
+
+    // Returns the world normal of the ray collision.
+    fn get_collision_normal() -> vec2 {
+        return collision_normal
+    }
+
+    // Internal callback from native raycast query.
+    fn _apply_raycast_result(hit: bool, pt: vec2, norm: vec2, col: Node2D?) {
+        colliding = hit
+        collision_point = pt
+        collision_normal = norm
+        collider = col
+    }
+
+    // Immediately executes the raycast against the current physics world.
+    fn force_raycast_update() {
+        var exclude_handle = 0
+        if exclude_parent && parent is PhysicsBody2D b {
+            exclude_handle = b.body_handle
+        }
+        _Physics.raycast_node(self, global_position(), target_position.rotated(global_rotation()), collision_mask, exclude_handle)
+    }
+
+    // Draws the raycast line and collision hit point in editor or when debug shapes are toggled.
+    fn draw(g: Canvas) {
+        if !ready_done && !_Physics.get_editor_debug_shapes() {
+            return
+        }
+        if ready_done && !debug_draw && !_Physics.get_debug_shapes() {
+            return
+        }
+        var from = global_position()
+        var to = from + target_position.rotated(global_rotation())
+        var line_col = Color.rgb(0.9, 0.2, 0.2, 0.8)
+        if colliding {
+            line_col = Color.rgb(0.2, 0.9, 0.3, 0.9)
+            g.line(from, collision_point, line_col, width = 1.5)
+            g.line(collision_point, to, Color.rgb(0.6, 0.6, 0.6, 0.4), width = 1.0)
+            g.circle(collision_point, 3.5, fill = line_col)
+            g.line(collision_point, collision_point + collision_normal * 12.0, Color.rgb(0.2, 0.5, 1.0, 0.9), width = 1.5)
+        } else {
+            g.line(from, to, line_col, width = 1.5)
+            g.circle(to, 2.5, fill = line_col)
+        }
+    }
+}
+

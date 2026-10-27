@@ -840,7 +840,7 @@ struct AotRuntime {
 
     static bool bind_image(VM& vm, const AotImageDesc* img) {
         for (std::uint32_t i = 0; i < img->native_count; ++i) {
-            img->native_ids[i] = vm.native_index(img->native_names[i]);
+            img->native_ids[i] = vm.resolve_native(img->native_names[i]); // FFI keys bind here
         }
         if (vm.protos.size() < img->proto_count) return false;
         for (std::uint32_t i = 0; i < img->proto_count; ++i) {
@@ -852,7 +852,7 @@ struct AotRuntime {
     static bool load_image(VM& vm, const AotImageDesc* img, RunResult* out_res) {
         for (std::uint32_t i = 0; i < img->name_count; ++i) vm.intern(img->names[i]);
         for (std::uint32_t i = 0; i < img->native_count; ++i) {
-            img->native_ids[i] = vm.native_index(img->native_names[i]);
+            img->native_ids[i] = vm.resolve_native(img->native_names[i]); // FFI keys bind here
         }
         vm.classes.clear();
         vm.classes.reserve(img->class_count);
@@ -2453,7 +2453,12 @@ void close_lib(void* h) {
 } // namespace
 
 bool compile_c_module(std::string_view c_source, const std::filesystem::path& so_path, std::string& error,
-                      int opt_level) {
+                      int opt_level, const std::vector<std::string>& link_args) {
+    std::string extra;
+    for (const std::string& a : link_args) {
+        extra += ' ';
+        extra += shell_quote_str(a);
+    }
     std::error_code ec;
     if (!so_path.parent_path().empty()) std::filesystem::create_directories(so_path.parent_path(), ec);
 
@@ -2480,12 +2485,38 @@ bool compile_c_module(std::string_view c_source, const std::filesystem::path& so
     std::string cc = default_c_compiler();
     int clamped_opt = std::clamp(opt_level, 0, 3);
 #if defined(_WIN32)
+    // The module is loaded into this process, so it is built for this
+    // process's C runtime: lld-link/link.exe options under the MSVC runtime,
+    // GNU ld ones under MinGW-w64 (whose default compiler is its gcc).
+#if defined(__MINGW32__)
+    // ld bases a DLL at a hash of its output path by default, and the path
+    // holds a per-process directory: a fixed base keeps modules byte-identical.
+    // -static: the module carries its own libgcc rather than needing MinGW's DLLs.
+    const char* link_flags = "-Wl,--no-insert-timestamp -Wl,--disable-auto-image-base -s -static";
+#else
+    // This process's DLL runtime (release or debug), as the engine and its
+    // plugin libraries use, named library by library: clang drivers differ
+    // in what they pass the linker, and any other runtime won't link a plugin
+    // library built with this one (LNK4098, unresolved __imp_ symbols).
+#if defined(_DEBUG)
+    const char* link_flags =
+        "-fms-runtime-lib=dll_dbg -Wl,/NODEFAULTLIB:libcmt.lib -Wl,/NODEFAULTLIB:libcmtd.lib "
+        "-Wl,/NODEFAULTLIB:msvcrt.lib -Wl,/NODEFAULTLIB:libucrt.lib -Wl,/NODEFAULTLIB:libvcruntime.lib "
+        "-Wl,/DEFAULTLIB:msvcrtd.lib -Wl,/DEFAULTLIB:ucrtd.lib -Wl,/DEFAULTLIB:vcruntimed.lib "
+        "-Wl,/BREPRO -Wl,/DEBUG:NONE -Wl,/NOIMPLIB";
+#else
+    const char* link_flags =
+        "-fms-runtime-lib=dll -Wl,/NODEFAULTLIB:libcmt.lib -Wl,/NODEFAULTLIB:libucrt.lib "
+        "-Wl,/NODEFAULTLIB:libvcruntime.lib -Wl,/DEFAULTLIB:msvcrt.lib -Wl,/DEFAULTLIB:ucrt.lib "
+        "-Wl,/DEFAULTLIB:vcruntime.lib -Wl,/BREPRO -Wl,/DEBUG:NONE -Wl,/NOIMPLIB";
+#endif
+#endif
     std::string inner_cmd = std::format(
         "{} -std=c11 -O{} -g0 -fno-ident -ffile-prefix-map={}={} "
         "-ffp-contract=off -fno-fast-math -shared -Wall -Wextra -Wno-unused-label "
-        "-Wno-unused-parameter -Wl,/BREPRO -Wl,/DEBUG:NONE -Wl,/NOIMPLIB -o {} {} >{} 2>&1",
-        shell_quote_str(cc), clamped_opt, shell_quote(tmp_dir), shell_quote_str("."), shell_quote(built_path),
-        shell_quote(c_path), shell_quote(log_path));
+        "-Wno-unused-parameter {} -o {} {}{} >{} 2>&1",
+        shell_quote_str(cc), clamped_opt, shell_quote(tmp_dir), shell_quote_str("."), link_flags,
+        shell_quote(built_path), shell_quote(c_path), extra, shell_quote(log_path));
     // cmd.exe strips outer quotes when a command both starts and ends with '"'
     // unless the whole command is wrapped in an extra pair of quotes.
     std::string cmd = "\"" + inner_cmd + "\"";
@@ -2493,9 +2524,9 @@ bool compile_c_module(std::string_view c_source, const std::filesystem::path& so
     std::string cmd = std::format(
         "{} -std=c11 -O{} -g0 -fno-ident -Wl,--build-id=none -ffile-prefix-map={}={} "
         "-ffp-contract=off -fno-fast-math -fPIC -shared -Wall -Wextra -Wno-unused-label "
-        "-Wno-unused-parameter -o {} {} -lm >{} 2>&1",
+        "-Wno-unused-parameter -o {} {}{} -lm >{} 2>&1",
         shell_quote_str(cc), clamped_opt, shell_quote(tmp_dir), shell_quote_str("."), shell_quote(built_path),
-        shell_quote(c_path), shell_quote(log_path));
+        shell_quote(c_path), extra, shell_quote(log_path));
 #endif
 
     int rc = std::system(cmd.c_str());
@@ -2613,6 +2644,15 @@ std::unique_ptr<AotModule> AotModule::open_bytes(std::span<const std::byte> so_b
     }
     mod->temp_path_ = std::move(so_path);
     return mod;
+}
+
+void* AotModule::symbol(const char* name) const {
+    if (handle_ == nullptr) return nullptr;
+#if defined(_WIN32)
+    return reinterpret_cast<void*>(::GetProcAddress(static_cast<HMODULE>(handle_), name));
+#else
+    return ::dlsym(handle_, name);
+#endif
 }
 
 bool AotModule::bind(VM& vm, std::string& error) const {

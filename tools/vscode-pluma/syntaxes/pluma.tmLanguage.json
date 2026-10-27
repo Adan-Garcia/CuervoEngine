@@ -352,7 +352,7 @@
       "patterns": [
         {
           "name": "keyword.control.pluma",
-          "match": "(?<![.\\w])\\b(?:if|else|match|for|foreach|in|while|loop|break|continue|return|step|await|yield|start|emit|defer)\\b"
+          "match": "(?<![.\\w])\\b(?:if|else|match|for|foreach|in|while|loop|break|continue|return|step|await|yield|start|emit|defer|import)\\b"
         },
         {
           "name": "storage.type.pluma",

@@ -1,0 +1,6 @@
+# Security problems go to a private advisory, never a public issue (SECURITY.md).
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/Adan-Garcia/CuervoEngine/security/advisories/new
+    about: Report it privately, as SECURITY.md describes.

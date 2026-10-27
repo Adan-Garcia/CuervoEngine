@@ -1,0 +1,479 @@
+// Engine API: Tilemaps (DESIGN.md 4.17, Milestone 9.5).
+//
+// TileMapLayer: a 2D uniform grid of tiles backed by a TileSet, with cell
+// editing, coordinate conversions, autotiling, and scene file serialization.
+
+// A single tile definition within a TileSet.
+struct TileDef {
+    // Unique identifier of this tile in the tileset.
+    var id = 0
+    // Vector asset path ("" = draws colored shape or empty).
+    var asset = ""
+    // Fill color for rectangle shape or tint color for vector asset.
+    var color = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }
+    // Whether navigation regions treat this tile as traversable.
+    var walkable = true
+    // Traversal cost multiplier for pathfinding (1.0 = standard cost).
+    var nav_cost = 1.0
+    // Terrain identifier (-1 = no terrain). Tiles with matching terrain connect during autotiling.
+    var terrain = -1
+    // Bitmask of matching neighbor peering bits for autotiling:
+    // Bit 0 (1): North, Bit 1 (2): East, Bit 2 (4): South, Bit 3 (8): West
+    // Bit 4 (16): NorthEast, Bit 5 (32): SouthEast, Bit 6 (64): SouthWest, Bit 7 (128): NorthWest
+    var peering_bits = 0
+}
+
+// A collection of tile definitions and grid properties.
+struct TileSet {
+    // Pixel size of each tile (width, height).
+    var tile_size = vec2(32.0, 32.0)
+    // List of tile definitions in this set.
+    var tiles = List<TileDef>()
+
+    // Finds a tile by ID, or null if not found.
+    fn find_tile(id: int) -> TileDef? {
+        for t in tiles {
+            if t.id == id {
+                return t
+            }
+        }
+        return null
+    }
+
+    // Finds an autotile matching terrain and neighbor peering bits.
+    fn find_autotile(terrain: int, mask: int) -> TileDef? {
+        var best: TileDef? = null
+        var best_count = -1
+        var fallback: TileDef? = null
+        var fallback_score = -999
+        for t in tiles {
+            if t.terrain == terrain {
+                if t.peering_bits == mask {
+                    return t
+                }
+                // Subset match fallback
+                if (t.peering_bits & mask) == t.peering_bits {
+                    var count = popcount(t.peering_bits)
+                    if count > best_count {
+                        best = t
+                        best_count = count
+                    }
+                }
+                // General overlap fallback if no subset match exists in the tileset
+                var overlap = popcount(t.peering_bits & mask)
+                var extra = popcount(t.peering_bits & (~mask))
+                var score = overlap * 16 - extra
+                if score > fallback_score {
+                    fallback = t
+                    fallback_score = score
+                }
+            }
+        }
+        if best != null {
+            return best
+        }
+        return fallback
+    }
+}
+
+// A placed tile cell in a TileMapLayer.
+struct TileCell {
+    // Cell grid X coordinate.
+    var x = 0
+    // Cell grid Y coordinate.
+    var y = 0
+    // Tile ID from the layer's TileSet.
+    var tile_id = 0
+    // Terrain group (-1 = none).
+    var terrain = -1
+}
+
+// Packs a 2D integer cell coordinate into a 32-bit key for fast Map lookup.
+fn tile_pack_coord(x: int, y: int) -> int {
+    return ((y & 0xFFFF) << 16) | (x & 0xFFFF)
+}
+
+// Unpacks grid X coordinate from a packed key.
+fn tile_unpack_x(p: int) -> int {
+    var x = p & 0xFFFF
+    if x >= 0x8000 {
+        return x - 0x10000
+    }
+    return x
+}
+
+// Unpacks grid Y coordinate from a packed key.
+fn tile_unpack_y(p: int) -> int {
+    var y = (p >> 16) & 0xFFFF
+    if y >= 0x8000 {
+        return y - 0x10000
+    }
+    return y
+}
+
+// Constructs an autotile bitmask from neighbor booleans.
+fn autotile_mask(north: bool, east: bool, south: bool, west: bool,
+                  north_east = false, south_east = false, south_west = false, north_west = false) -> int {
+    var m = 0
+    if north { m = m | 1 }
+    if east { m = m | 2 }
+    if south { m = m | 4 }
+    if west { m = m | 8 }
+    // Corners are only considered connected when adjacent cardinals are both present
+    if north && east && north_east { m = m | 16 }
+    if south && east && south_east { m = m | 32 }
+    if south && west && south_west { m = m | 64 }
+    if north && west && north_west { m = m | 128 }
+    return m
+}
+
+// A 2D uniform grid layer of tiles (milestone 9.5, DESIGN.md 4.17).
+class TileMapLayer extends Node2D {
+    // Pixel dimensions of each cell on this layer.
+    @export var tile_size = vec2(32.0, 32.0)
+    // The tileset defining tile properties.
+    @export var tileset = TileSet {}
+    // Placed cells saved in the scene file.
+    @export var cells = List<TileCell>()
+    // Whether this layer is enabled for rendering and updates.
+    @export var enabled = true
+    // Solid tiles (TileDef.walkable false) block 2D lights (milestone 9.8),
+    // merged into as few rectangles as possible (solid_rects()).
+    @export var light_occluders = false
+    // Blocks lights whose `light_mask` shares a bit with this.
+    @export var occluder_mask = 1
+    // Normal mapping of the solid tiles' faces (LightOccluder2D.bevel).
+    @export var occluder_bevel = 8.0
+
+    // Internal lookup cache from packed coordinate to index in `cells`.
+    var _cell_map = Map<int, int>()
+    var _map_dirty = true
+    // Internal cache of solid_rects(), rebuilt when the cells change.
+    var _solid_rects = List<Rect2>()
+    var _rects_dirty = true
+    var _rects_cells = -1
+
+    // Returns valid positive pixel dimensions of a cell on this layer.
+    fn _effective_tile_size() -> vec2 {
+        var sx = tile_size.x > 0.0 ? tile_size.x : (tileset.tile_size.x > 0.0 ? tileset.tile_size.x : 32.0)
+        var sy = tile_size.y > 0.0 ? tile_size.y : (tileset.tile_size.y > 0.0 ? tileset.tile_size.y : 32.0)
+        return vec2(sx, sy)
+    }
+
+    // The size of one cell in pixels: `tile_size`, else the tileset's, else 32.
+    fn cell_size() -> vec2 {
+        return _effective_tile_size()
+    }
+
+    // Ensures the coordinate lookup cache is synchronized with `cells` and deduplicates any repeated coordinates.
+    fn _ensure_map() {
+        if _map_dirty || _cell_map.len() != cells.len() {
+            _cell_map.clear()
+            var has_dups = false
+            for i in 0..cells.len() {
+                var c = cells[i]
+                var pk = tile_pack_coord(c.x, c.y)
+                if _cell_map.has(pk) {
+                    has_dups = true
+                }
+                _cell_map[pk] = i
+            }
+            if has_dups {
+                var dedup = List<TileCell>()
+                _cell_map.clear()
+                for i in 0..cells.len() {
+                    var c = cells[i]
+                    var pk = tile_pack_coord(c.x, c.y)
+                    if _cell_map.has(pk) {
+                        dedup[_cell_map[pk]] = c
+                    } else {
+                        _cell_map[pk] = dedup.len()
+                        dedup.push(c)
+                    }
+                }
+                cells = dedup
+            }
+            _map_dirty = false
+        }
+    }
+
+    // Sets or replaces a cell at grid coordinate (x, y). If `tile_id < 0`, erases the cell.
+    fn set_cell(x: int, y: int, tile_id: int, terrain = -1) {
+        if tile_id < 0 {
+            erase_cell(x, y)
+            return
+        }
+        _rects_dirty = true
+        _ensure_map()
+        var pk = tile_pack_coord(x, y)
+        if _cell_map.has(pk) {
+            var idx = _cell_map[pk]
+            cells[idx] = TileCell { x = x, y = y, tile_id = tile_id, terrain = terrain }
+        } else {
+            var idx = cells.len()
+            cells.push(TileCell { x = x, y = y, tile_id = tile_id, terrain = terrain })
+            _cell_map[pk] = idx
+        }
+    }
+
+    // Returns the tile ID at grid coordinate (x, y), or -1 if empty.
+    fn get_cell(x: int, y: int) -> int {
+        _ensure_map()
+        var pk = tile_pack_coord(x, y)
+        if _cell_map.has(pk) {
+            var idx = _cell_map[pk]
+            return cells[idx].tile_id
+        }
+        return -1
+    }
+
+    // Returns the terrain ID at grid coordinate (x, y), or -1 if empty.
+    fn get_cell_terrain(x: int, y: int) -> int {
+        _ensure_map()
+        var pk = tile_pack_coord(x, y)
+        if _cell_map.has(pk) {
+            var idx = _cell_map[pk]
+            return cells[idx].terrain
+        }
+        return -1
+    }
+
+    // Returns true if a placed cell exists at (x, y).
+    fn has_cell(x: int, y: int) -> bool {
+        _ensure_map()
+        return _cell_map.has(tile_pack_coord(x, y))
+    }
+
+    // Removes the cell at (x, y).
+    fn erase_cell(x: int, y: int) {
+        _ensure_map()
+        var pk = tile_pack_coord(x, y)
+        if !_cell_map.has(pk) {
+            return
+        }
+        _rects_dirty = true
+        var idx = _cell_map[pk]
+        var last_idx = cells.len() - 1
+        if idx != last_idx {
+            // Swap with back for O(1) removal
+            var back = cells[last_idx]
+            cells[idx] = back
+            _cell_map[tile_pack_coord(back.x, back.y)] = idx
+        }
+        cells.pop()
+        _cell_map.remove(pk)
+    }
+
+    // Clears all placed cells on this layer.
+    fn clear() {
+        cells.clear()
+        _cell_map.clear()
+        _map_dirty = false
+        _rects_dirty = true
+    }
+
+    // Whether the tile at (x, y) is solid: placed and not walkable.
+    fn is_solid(x: int, y: int) -> bool {
+        var id = get_cell(x, y)
+        if id < 0 {
+            return false
+        }
+        if tileset.find_tile(id)? t {
+            return !t.walkable
+        }
+        return false
+    }
+
+    // The solid tiles as rectangles in cell coordinates: runs along each row,
+    // joined with the identical runs of the rows below. Lights
+    // (`light_occluders`) and TileMapCollision2D use them, so a wall of many
+    // tiles is one occluder and one collision box. Scanned in row order, so
+    // the list is the same in every run.
+    fn solid_rects() -> List<Rect2> {
+        _ensure_map()
+        if !_rects_dirty && _rects_cells == cells.len() {
+            return _solid_rects
+        }
+        _rects_dirty = false
+        _rects_cells = cells.len()
+        _solid_rects = List<Rect2>()
+        if cells.is_empty() {
+            return _solid_rects
+        }
+        var used = get_used_rect()
+        var x0 = used.pos.x as int
+        var y0 = used.pos.y as int
+        var w = used.size.x as int
+        var h = used.size.y as int
+        // Open rectangles by their run's packed (start, end): index into _solid_rects.
+        var open = Map<int, int>()
+        for y in y0..(y0 + h) {
+            var next = Map<int, int>()
+            var x = x0
+            while x < x0 + w {
+                if !is_solid(x, y) {
+                    x += 1
+                    continue
+                }
+                var x_start = x
+                while x < x0 + w && is_solid(x, y) {
+                    x += 1
+                }
+                var key = tile_pack_coord(x_start, x)
+                if open.has(key) {
+                    var i = open[key]
+                    var r = _solid_rects[i]
+                    _solid_rects[i] = Rect2 { pos = r.pos, size = vec2(r.size.x, r.size.y + 1.0) }
+                    next[key] = i
+                } else {
+                    next[key] = _solid_rects.len()
+                    _solid_rects.push(Rect2.of(x_start as float, y as float, (x - x_start) as float, 1.0))
+                }
+            }
+            open = next
+        }
+        return _solid_rects
+    }
+
+    // Returns the count of placed cells.
+    fn cell_count() -> int {
+        _ensure_map()
+        return cells.len()
+    }
+
+    // Returns a list of all placed cell grid coordinates.
+    fn get_used_cells() -> List<ivec2> {
+        _ensure_map()
+        var list = List<ivec2>()
+        for c in cells {
+            list.push(ivec2.of(c.x, c.y))
+        }
+        return list
+    }
+
+    // Returns the bounding rectangle in cell coordinates enclosing all placed cells.
+    fn get_used_rect() -> Rect2 {
+        _ensure_map()
+        if cells.is_empty() {
+            return Rect2.of(0.0, 0.0, 0.0, 0.0)
+        }
+        var min_x = cells[0].x
+        var max_x = cells[0].x
+        var min_y = cells[0].y
+        var max_y = cells[0].y
+        for c in cells {
+            if c.x < min_x { min_x = c.x }
+            if c.x > max_x { max_x = c.x }
+            if c.y < min_y { min_y = c.y }
+            if c.y > max_y { max_y = c.y }
+        }
+        return Rect2.of(min_x as float, min_y as float,
+                        (max_x - min_x + 1) as float, (max_y - min_y + 1) as float)
+    }
+
+    // Converts a cell grid coordinate into local pixel position (center of tile).
+    fn map_to_local(coord: ivec2) -> vec2 {
+        var sz = _effective_tile_size()
+        return vec2((coord.x as float + 0.5) * sz.x, (coord.y as float + 0.5) * sz.y)
+    }
+
+    // Converts local pixel position into a cell grid coordinate.
+    fn local_to_map(pos: vec2) -> ivec2 {
+        var sz = _effective_tile_size()
+        return ivec2.of(floor(pos.x / sz.x) as int, floor(pos.y / sz.y) as int)
+    }
+
+    // Converts a cell grid coordinate into global world coordinates.
+    fn map_to_global(coord: ivec2) -> vec2 {
+        return to_global(map_to_local(coord))
+    }
+
+    // Converts global world coordinates into a cell grid coordinate.
+    fn global_to_map(pos: vec2) -> ivec2 {
+        return local_to_map(to_local(pos))
+    }
+
+    // Calculates the autotile neighbor bitmask for cell (x, y) matching `terrain`.
+    fn calculate_autotile_mask(x: int, y: int, terrain: int) -> int {
+        var n = get_cell_terrain(x, y - 1) == terrain
+        var e = get_cell_terrain(x + 1, y) == terrain
+        var s = get_cell_terrain(x, y + 1) == terrain
+        var w = get_cell_terrain(x - 1, y) == terrain
+        var ne = get_cell_terrain(x + 1, y - 1) == terrain
+        var se = get_cell_terrain(x + 1, y + 1) == terrain
+        var sw = get_cell_terrain(x - 1, y + 1) == terrain
+        var nw = get_cell_terrain(x - 1, y - 1) == terrain
+        return autotile_mask(n, e, s, w, ne, se, sw, nw)
+    }
+
+    // Updates the autotiled tile ID at (x, y) based on current neighbor connections.
+    fn update_autotile(x: int, y: int) {
+        var terrain = get_cell_terrain(x, y)
+        if terrain < 0 {
+            return
+        }
+        var mask = calculate_autotile_mask(x, y, terrain)
+        if tileset.find_autotile(terrain, mask)? tile {
+            set_cell(x, y, tile.id, terrain)
+        }
+    }
+
+    // Places a terrain tile at (x, y) and updates autotiling for the cell and its 8 neighbors.
+    // If `terrain < 0`, erases the cell at (x, y) and updates its 8 neighbors.
+    fn set_cell_autotile(x: int, y: int, terrain: int) {
+        if terrain < 0 {
+            erase_cell(x, y)
+        } else {
+            var init_id = 0
+            if tileset.find_autotile(terrain, 0)? default_tile {
+                init_id = default_tile.id
+            }
+            set_cell(x, y, init_id, terrain)
+            update_autotile(x, y)
+        }
+        // Update 8 neighbors
+        update_autotile(x, y - 1)
+        update_autotile(x + 1, y - 1)
+        update_autotile(x + 1, y)
+        update_autotile(x + 1, y + 1)
+        update_autotile(x, y + 1)
+        update_autotile(x - 1, y + 1)
+        update_autotile(x - 1, y)
+        update_autotile(x - 1, y - 1)
+    }
+
+    // Draws all visible tiles on this layer.
+    fn draw(g: Canvas) {
+        if !visible || !enabled || cells.is_empty() {
+            return
+        }
+        _ensure_map()
+        var sz = _effective_tile_size()
+        var g_rot = global_rotation()
+        var g_scale = global_scale()
+        if light_occluders {
+            for r in solid_rects() {
+                var center = to_global((r.pos + r.size * 0.5) * sz)
+                g.occluder_rect(center, r.size * sz * g_scale, rotation = g_rot, mask = occluder_mask,
+                                bevel = occluder_bevel)
+            }
+        }
+
+        for c in cells {
+            if tileset.find_tile(c.tile_id)? t {
+                var local_center = map_to_local(ivec2.of(c.x, c.y))
+                var world_center = to_global(local_center)
+
+                if t.asset.len() > 0 {
+                    g.vector(t.asset, world_center, rotation = g_rot, scale = g_scale,
+                             centered = true, tint = t.color)
+                } else {
+                    var cell_scaled_size = vec2(abs(sz.x * g_scale.x), abs(sz.y * g_scale.y))
+                    g.rect(world_center - cell_scaled_size * 0.5, cell_scaled_size,
+                           fill = t.color, rotation = g_rot)
+                }
+            }
+        }
+    }
+}
+

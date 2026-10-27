@@ -34,7 +34,7 @@ class SupportMatrix(unittest.TestCase):
         self.assertTrue(any("'web' flag" in m for m in sm.validate(self.data)))
 
     def test_planned_feature_on_a_platform_is_rejected(self):
-        e = self.first_entry("physics")
+        e = self.first_entry("gpu-particles")
         e["platforms"] = ["linux"]
         e["desktop_only"] = True
         self.assertTrue(any("works on no platform" in m for m in sm.validate(self.data)))
@@ -47,11 +47,12 @@ class SupportMatrix(unittest.TestCase):
         self.assertTrue(any("needs at least one platform" in m for m in sm.validate(self.data)))
 
     def test_windows_row_must_match_target_status(self):
-        self.first_entry("windows")["status"] = "stable"
+        self.first_entry("windows")["status"] = "experimental"
         self.assertTrue(any("target windows" in m for m in sm.validate(self.data)))
 
-    def test_windows_stays_experimental(self):
-        self.assertEqual(self.first_entry("windows")["status"], "experimental")
+    def test_windows_is_stable(self):
+        # Milestone 10.5a (docs/WINDOWS.md "Validation results").
+        self.assertEqual(self.first_entry("windows")["status"], "stable")
 
     def test_stale_region_is_detected(self):
         data = copy.deepcopy(self.data)

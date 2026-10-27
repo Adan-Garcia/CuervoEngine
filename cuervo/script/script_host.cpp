@@ -18,14 +18,20 @@
 #include "cuervo/core/log.hpp"
 #include "cuervo/core/name.hpp"
 #include "cuervo/math/dmath.hpp"
+#include "cuervo/platform/platform.hpp"
 #if CUERVO_FEATURE_PARTICLES
 #include "cuervo/particles/particle_render.hpp"
 #endif
 #include "cuervo/scene/scene_file.hpp"
+#include "cuervo/script/plugin_host.hpp"
+#include "cuervo/script/project.hpp"
 #include "cuervo/script/scene_bridge.hpp"
 #include "cuervo/script/vector_cache.hpp"
 #if CUERVO_FEATURE_AUDIO
 #include "cuervo/script/audio_bindings.hpp"
+#endif
+#if CUERVO_FEATURE_PHYSICS
+#include "cuervo/script/physics_bindings.hpp"
 #endif
 #include "pluma/aot.hpp"
 #include "pluma/checker.hpp"
@@ -56,7 +62,7 @@ constexpr PreludeSource prelude_sources[] = {
 std::vector<pluma::SourceFile::Part> joined_preludes() {
     std::vector<pluma::SourceFile::Part> parts;
     for (const PreludeSource& p : prelude_sources) {
-        if (parts.empty() || parts.back().path != p.path) parts.push_back({p.path, {}});
+        if (parts.empty() || parts.back().path != p.path) parts.push_back({p.path, {}, {}, true});
         parts.back().text += p.text;
     }
     return parts;
@@ -184,8 +190,12 @@ ScriptHost::ScriptHost(HostOptions options, const InputMap& input_map)
         audio_ = own_audio_.get();
     }
 #endif
+#if CUERVO_FEATURE_PHYSICS
+    physics_ = std::make_unique<physics::PhysicsWorld>();
+#endif
     for (pluma::SourceFile::Part& p : joined_preludes()) bindings_.add_prelude(std::move(p.path), std::move(p.text));
     bind();
+    if (options_.plugins) options_.plugins->bind(bindings_);
 #if CUERVO_FEATURE_AUDIO
     bind_audio(bindings_, *audio_);
 #endif
@@ -205,6 +215,12 @@ ScriptHost::~ScriptHost() {
 #if CUERVO_FEATURE_COLLISION
     for (Hitbox& h : hitboxes_) pluma::release(h.owner);
     hitboxes_.clear();
+#endif
+#if CUERVO_FEATURE_PHYSICS
+    if (physics_) {
+        physics_->clear();
+        physics_.reset();
+    }
 #endif
     pluma::release(root_);
     pluma::release(canvas_);
@@ -674,6 +690,10 @@ void ScriptHost::bind() {
 
     bind_scene_and_ui();
     bind_animation();
+    bind_lighting();
+#if CUERVO_FEATURE_PHYSICS
+    bind_physics();
+#endif
 
 #if CUERVO_FEATURE_COLLISION
     // --- Collision (DESIGN.md 4.7)
@@ -729,6 +749,12 @@ void ScriptHost::bind() {
     });
 #endif
 }
+
+#if CUERVO_FEATURE_PHYSICS
+void ScriptHost::bind_physics() {
+    script::bind_physics(bindings_, *this);
+}
+#endif
 
 // ------------------------------------------------------------ lifecycle
 
@@ -913,6 +939,10 @@ bool ScriptHost::finish_load(std::unique_ptr<pluma::Session> next, const std::st
     m.begin();
     root = m.migrate(root_);
     m.migrate_globals();
+#if CUERVO_FEATURE_PHYSICS
+    // Bodies, shapes and joints hold their nodes: move them to the new VM too.
+    if (physics_) physics_->remap_owners([&m](const Value& v) { return m.migrate(v); });
+#endif
     pluma::RunResult restarted = m.finish();
     notes_ = m.warnings();
     for (const std::string& w : notes_) LOG_WARN("hot reload: {}", w);
@@ -937,6 +967,9 @@ bool ScriptHost::finish_load(std::unique_ptr<pluma::Session> next, const std::st
 
 bool ScriptHost::set_root(const Value& root, bool enter_tree) {
     if (session_ == nullptr) return false;
+#if CUERVO_FEATURE_PHYSICS
+    if (physics_) physics_->clear();
+#endif
     pluma::retain(root);
     if (root_.is_obj() && !(root.is_obj() && root.o == root_.o)) session_->vm().reset_scene_arena();
     pluma::release(root_);
@@ -1051,11 +1084,13 @@ void ScriptHost::tick_scripts(const InputFrame& frame) {
         ok = resolve_areas(particles_.collision());
     }
 #elif CUERVO_FEATURE_COLLISION
+    ++particle_ticks_;
     collision_.clear();
     add_hitboxes(collision_);
     collision_.build();
     bool ok = resolve_areas(collision_);
 #else
+    ++particle_ticks_;
     bool ok = true;
 #endif
 
@@ -1064,6 +1099,20 @@ void ScriptHost::tick_scripts(const InputFrame& frame) {
     hitboxes_.clear();
 #endif
     if (!ok) return;
+
+    {
+        CUERVO_PROFILE_ZONE("scene flush");
+        if (auto flush = vm.proto_by_key("Scene.flush")) check(vm.call(*flush, {}), "Scene.flush()");
+    }
+    if (panicked_) return;
+
+#if CUERVO_FEATURE_PHYSICS
+    if (physics_) {
+        CUERVO_PROFILE_ZONE("physics");
+        physics_->step(tick_seconds(), &vm);
+    }
+#endif
+
     CUERVO_PROFILE_ZONE("scene flush");
     if (auto flush = vm.proto_by_key("Scene.flush")) check(vm.call(*flush, {}), "Scene.flush()");
 }
@@ -1084,7 +1133,8 @@ void ScriptHost::draw(render::SdfBatcher& shapes, render::TextRenderer& text, re
 }
 
 DrawTargets make_draw_targets(render::SdfBatcher& shapes, render::TextRenderer& text, render::FontHandle font,
-                              VectorCache* vectors, const Affine2& to_ndc, float pixels_per_unit, bool cameras) {
+                              VectorCache* vectors, const Affine2& to_ndc, float pixels_per_unit, bool cameras,
+                              render::LightBatcher* lights) {
     DrawTargets t;
     t.shapes = &shapes;
     t.text = &text;
@@ -1104,6 +1154,23 @@ DrawTargets make_draw_targets(render::SdfBatcher& shapes, render::TextRenderer& 
         }
         if (what == DrawFlush::Layer) tx->flush(m);
     };
+    if (lights != nullptr) {
+        t.lights = lights;
+        t.apply_lights = [lights, to_ndc, pixels_per_unit](const Affine2& view, float zoom) {
+            const Affine2 m = to_ndc * view;
+            // The world rectangle the view shows: NDC [-1, 1]^2 mapped back.
+            const Affine2 inv = m.inverse();
+            vec2 lo{1e30f, 1e30f};
+            vec2 hi{-1e30f, -1e30f};
+            for (const vec2 corner : {vec2{-1.0f, -1.0f}, vec2{1.0f, -1.0f}, vec2{1.0f, 1.0f}, vec2{-1.0f, 1.0f}}) {
+                const vec2 w = inv.apply(corner);
+                lo = min(lo, w);
+                hi = max(hi, w);
+            }
+            const float px = pixels_per_unit * zoom;
+            lights->flush(m, (lo + hi) * 0.5f, (hi - lo) * 0.5f, px > 0.0f ? 1.0f / px : 1.0f);
+        };
+    }
     return t;
 }
 
@@ -1128,6 +1195,7 @@ void ScriptHost::draw(const DrawTargets& targets) {
     view_zoom_ = 1.0f;
     meshes_pending_ = false;
     if (targets.vectors != nullptr) targets.vectors->begin_shapes();
+    if (targets.lights != nullptr) targets.lights->clear();
     pluma::VM& vm = session_->vm();
     pluma::RunResult r;
     if (auto frame = vm.proto_by_key("Scene.draw_frame")) {
@@ -1144,31 +1212,75 @@ void ScriptHost::draw(const DrawTargets& targets) {
     meshes_pending_ = false;
 }
 
+void hash_global(StateHasher& h, const Value& g) {
+    if (pluma::is_num_tag(g.tag) || g.tag == pluma::Tag::Bool) h.value(static_cast<std::uint64_t>(g.i));
+    if (pluma::is_vec(g)) {
+        for (std::uint32_t i = 0; i < pluma::vec_size(g); ++i) h.value(pluma::vec_data(g)[i]);
+    }
+}
+
+const std::vector<Value>& unused_ui_globals() {
+    static const std::vector<Value> values = [] {
+        std::vector<Value> v;
+        v.push_back(Value::integer(pluma::NumKind::I32, -1)); // UI._tick
+        v.push_back(pluma::vec2_value(-1.0f, -1.0f));         // UI.pointer_pos
+        v.push_back(Value::boolean(false));                   // UI._pointer_moved
+        v.push_back(Value::boolean(false));                   // UI.click_pending
+        v.push_back(pluma::vec2_value(0.0f, 0.0f));           // UI._nav
+        v.push_back(Value::boolean(false));                   // UI._accept
+        v.push_back(Value::boolean(false));                   // UI._cancel
+        v.push_back(pluma::vec2_value(0.0f, 0.0f));           // UI._hold_dir
+        v.push_back(Value::integer(pluma::NumKind::I32, 0));  // UI._hold_ticks
+        return v;
+    }();
+    return values;
+}
+
+// The hash must not depend on which unused features a player was built with:
+// an exported game runs on a stripped player (and the web build), and its
+// replays and the export check compare against the full player. So a missing
+// feature contributes what it holds in a game that doesn't use it.
 std::uint64_t ScriptHost::state_hash() const {
     StateHasher h;
 #if CUERVO_FEATURE_PARTICLES
     h.value(particles_.state_hash());
 #else
-    h.value(0ULL);
+    {
+        // ParticleSystem::state_hash with no emitters: the shared RNG and the tick count.
+        StateHasher p;
+        Pcg32 probe = rng_;
+        p.value(probe.next_u32());
+        p.value(probe.next_u32());
+        p.value(particle_ticks_);
+        h.value(p.digest());
+    }
+#endif
+#if CUERVO_FEATURE_PHYSICS
+    if (physics_ && physics_->body_count() > 0) h.value(physics_->state_hash());
 #endif
     h.value(tick_);
     if (anim_digest_ != 0) h.value(anim_digest_);
     if (session_ != nullptr) {
         // Script globals that are numbers or vectors (scores, timers...).
-        pluma::VM& vm = session_->vm();
-        for (const Value& g : vm.globals) {
-            if (pluma::is_num_tag(g.tag) || g.tag == pluma::Tag::Bool) h.value(static_cast<std::uint64_t>(g.i));
-            if (pluma::is_vec(g)) {
-                for (std::uint32_t i = 0; i < pluma::vec_size(g); ++i) h.value(pluma::vec_data(g)[i]);
+        const pluma::VM& vm = session_->vm();
+        for (std::size_t i = 0; i < vm.globals.size(); ++i) {
+            hash_global(h, vm.globals[i]);
+#if !CUERVO_FEATURE_UI
+            if (i < vm.global_names.size() && vm.global_names[i] == unused_ui_anchor) {
+                for (const Value& g : unused_ui_globals()) hash_global(h, g);
             }
+#endif
         }
     }
     return h.digest();
 }
 
-std::optional<std::string> emit_aot_c(const std::vector<pluma::SourceFile::Part>& files, std::string& error) {
+std::optional<std::string> emit_aot_c(const std::vector<pluma::SourceFile::Part>& files, std::string& error,
+                                      std::shared_ptr<const PluginSet> plugins) {
     InputMap empty_map;
-    ScriptHost host(HostOptions{}, empty_map);
+    HostOptions options;
+    options.plugins = std::move(plugins);
+    ScriptHost host(options, empty_map);
     const pluma::Bindings& bindings = host.bindings();
 
     pluma::Program prog;
@@ -1180,7 +1292,7 @@ std::optional<std::string> emit_aot_c(const std::vector<pluma::SourceFile::Part>
     for (const pluma::Bindings::Finalizer& f : bindings.finalizers()) vm.set_native_finalizer(f.class_name, f.fn);
 
     std::vector<pluma::SourceFile::Part> prelude_parts;
-    for (const pluma::Bindings::Prelude& p : bindings.preludes()) prelude_parts.push_back({p.path, p.source});
+    for (const pluma::Bindings::Prelude& p : bindings.preludes()) prelude_parts.push_back({p.path, p.source, {}, true});
     auto prelude_src = pluma::SourceFile::combine("<prelude>", prelude_parts);
     pluma::Arena prelude_arena;
     pluma::DiagnosticSink pdiags(*prelude_src);
@@ -1224,9 +1336,45 @@ std::optional<std::string> emit_aot_c(const std::vector<pluma::SourceFile::Part>
 }
 
 std::optional<std::vector<std::byte>> compile_aot_scripts(const std::vector<pluma::SourceFile::Part>& files,
-                                                          std::string& error, int opt_level) {
-    auto c_src = emit_aot_c(files, error);
+                                                          std::string& error, int opt_level,
+                                                          std::shared_ptr<const PluginSet> plugins,
+                                                          const std::vector<StaticPlugin>& statics) {
+    auto c_src = emit_aot_c(files, error, std::move(plugins));
     if (!c_src) return std::nullopt;
+    // Statically linked plugins: their entries, for the player to register.
+    std::vector<std::string> link_args;
+    if (!statics.empty()) {
+        std::string table = "\n/* Native plugins linked into this module (cuervo/script/plugin_host.hpp). */\n"
+                            "#if defined(_WIN32)\n#define CUERVO_AOT_EXPORT __declspec(dllexport)\n#else\n"
+                            "#define CUERVO_AOT_EXPORT __attribute__((visibility(\"default\")))\n#endif\n"
+                            "struct cuervo_aot_plugin { const char* name; const char* version; int sim_safe; "
+                            "int (*entry)(const void*, void*); };\n";
+        for (const StaticPlugin& p : statics) {
+            table += std::format("extern int cuervo_plugin_entry_{}(const void*, void*);\n", p.name);
+        }
+        table += "CUERVO_AOT_EXPORT const struct cuervo_aot_plugin cuervo_aot_plugins[] = {\n";
+        for (const StaticPlugin& p : statics) {
+            table += std::format("    {{\"{}\", \"{}\", {}, cuervo_plugin_entry_{}}},\n", p.name, p.version,
+                                 p.sim_safe ? 1 : 0, p.name);
+            link_args.push_back(platform::utf8(p.library));
+        }
+        table += "    {0, 0, 0, 0}\n};\n";
+        *c_src += table;
+#if defined(_WIN32)
+        // A static library names none of its own Windows imports. These are
+        // what Rust's std needs (`--print native-static-libs`) and cover the C
+        // and C++ runtimes' too; unused ones cost nothing.
+        for (const char* lib : {"-lkernel32", "-ladvapi32", "-lntdll", "-luserenv", "-lws2_32", "-lbcrypt"}) {
+            link_args.emplace_back(lib);
+        }
+#if defined(__MINGW32__)
+        // A PE module resolves everything at link time (an ELF one leaves C++
+        // runtime symbols to the host), so a C++ plugin needs libstdc++ here;
+        // compile_c_module links it statically.
+        link_args.emplace_back("-lstdc++");
+#endif
+#endif
+    }
     static std::atomic<std::uint64_t> counter{0};
 #if defined(_WIN32)
     const auto pid = static_cast<unsigned>(::_getpid());
@@ -1235,7 +1383,7 @@ std::optional<std::vector<std::byte>> compile_aot_scripts(const std::vector<plum
 #endif
     std::filesystem::path so_path =
         std::filesystem::temp_directory_path() / std::format("cuervo_aot_{}_{}.so", pid, ++counter);
-    if (!pluma::compile_c_module(*c_src, so_path, error, opt_level)) return std::nullopt;
+    if (!pluma::compile_c_module(*c_src, so_path, error, opt_level, link_args)) return std::nullopt;
     std::ifstream in(so_path, std::ios::binary | std::ios::ate);
     if (!in) {
         std::error_code ec;
@@ -1264,6 +1412,20 @@ pluma::lsp::ServerOptions default_lsp_options(std::string root_path, bool check_
     opts.preludes = engine_preludes();
     opts.root_path = std::move(root_path);
     opts.check_style = check_style;
+    // Packages from the workspace's project.toml (LANGUAGE.md 9.26). A broken
+    // project file just means no packages; the game's own run reports it.
+    opts.packages = [](const std::string& root) {
+        std::vector<pluma::lsp::ServerOptions::PackageDir> out;
+        if (root.empty()) return out;
+        auto vfs = assets::Vfs::dev(platform::path_from_utf8(root));
+        std::string error;
+        if (!vfs->exists("project.toml")) return out;
+        auto project = load_project(*vfs, error);
+        std::vector<ResolvedPackage> packages;
+        if (!project || !resolve_packages(*project, *vfs, packages, error)) return out;
+        for (const ResolvedPackage& p : packages) out.push_back({p.manifest.name, platform::utf8(p.dir)});
+        return out;
+    };
     return opts;
 }
 

@@ -142,14 +142,12 @@ std::optional<std::uint64_t> run_player_headless(const std::filesystem::path& la
 
 // Whether a player with `features` has the same script surface (the
 // optional preludes and natives of audio/ui/particles/collision) as this
-// process's engine. Two things depend on it:
-//   - the state hash: ScriptHost::state_hash covers every numeric script
-//     global, the optional preludes' among them, and the particle world, so
-//     a player without one of these features hashes a different (equally
-//     deterministic) set and is checked against its own dev run instead;
-//   - AOT scripts (--aot): emit_aot_c compiles the prelude of *this* engine
-//     into .cuervo/scripts.so, so a native pack only matches a player with
-//     the same surface (Vulkan, dev tools and importers can still go).
+// process's engine. AOT scripts (--aot) depend on it: emit_aot_c compiles the
+// prelude of *this* engine into .cuervo/scripts.so, so a native pack only
+// matches a player with the same surface (Vulkan, dev tools and importers can
+// still go). The state hash does not: a player without a feature hashes what
+// that feature holds in a game that doesn't use it (ScriptHost::state_hash),
+// so every stripped player is checked against this full engine.
 bool script_surface_matches(const script::FeatureSet& features);
 
 // The state hash of `pack` after verify_tick ticks without input, in this

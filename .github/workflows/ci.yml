@@ -2,9 +2,15 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'milestone-*'] # milestone branches are checked before they merge
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+# A newer push to the same branch replaces the run still going.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test-linux:
@@ -34,8 +40,12 @@ jobs:
           GALLIUM_DRIVER: "llvmpipe"
         run: xvfb-run -a ctest --preset debug --output-on-failure --timeout 180
 
-  test-windows:
-    name: Windows (MSVC / Debug)
+  # Milestone 10.5a (docs/WINDOWS.md): MSVC in Release (the configuration the
+  # prebuilt players use; MSVC's Debug STL makes the suite about three times slower) and
+  # MinGW-w64 GCC in Debug, each with zero warnings and the whole ctest suite.
+  # Both build in C:\cb: the checkout drive (D:) runs out of space.
+  test-windows-msvc:
+    name: Windows (MSVC / Release)
     runs-on: windows-latest
     steps:
       - name: Checkout Code
@@ -55,35 +65,66 @@ jobs:
           }
           echo "C:\tools\glslang\bin" >> $env:GITHUB_PATH
 
-      - name: Install Mesa LLVMpipe (Software OpenGL)
+      - name: Install Mesa llvmpipe (software OpenGL; the runners have no GPU)
         shell: pwsh
-        run: |
-          $url = "https://github.com/mmozeiko/build-mesa/releases/download/26.2.5/mesa-llvmpipe-x64-26.2.5.7z"
-          Invoke-WebRequest -Uri $url -OutFile "mesa.7z"
-          7z x mesa.7z -o"C:\tools\mesa"
-          # System-wide OpenGL ICD registration for headless Windows Server VMs
-          Copy-Item "C:\tools\mesa\opengl32.dll" -Destination "C:\Windows\System32\mesadrv.dll" -Force
-          New-Item -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\OpenGLDrivers\MSOGL" -Force
-          Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\OpenGLDrivers\MSOGL" -Name "DLL" -Value "mesadrv.dll"
-          Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\OpenGLDrivers\MSOGL" -Name "DriverVersion" -Type DWord -Value 1
-          Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\OpenGLDrivers\MSOGL" -Name "Flags" -Type DWord -Value 1
-          Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\OpenGLDrivers\MSOGL" -Name "Version" -Type DWord -Value 2
-          echo "GALLIUM_DRIVER=llvmpipe" >> $env:GITHUB_ENV
-          echo "CUERVO_PARITY_VULKAN=0" >> $env:GITHUB_ENV
-          echo "C:\tools\mesa" >> $env:GITHUB_PATH
+        run: ./.github/scripts/install-mesa.ps1
 
       - name: Configure CMake
-        run: cmake --preset debug
+        run: cmake --preset msvc-release -B C:\cb
 
       - name: Build All Targets
-        run: cmake --build --preset debug
+        run: cmake --build C:\cb
 
-      - name: Deploy Mesa opengl32.dll to binary directories
+      - name: Deploy Mesa opengl32.dll next to the programs
         shell: pwsh
-        run: |
-          Get-ChildItem -Path "build\debug" -Recurse -Directory | ForEach-Object {
-              Copy-Item "C:\tools\mesa\opengl32.dll" -Destination $_.FullName -ErrorAction SilentlyContinue
-          }
+        run: ./.github/scripts/install-mesa.ps1 -Deploy C:\cb
 
       - name: Run Test Suite
-        run: ctest --preset debug --output-on-failure --timeout 360
+        run: ctest --test-dir C:\cb --output-on-failure --timeout 600
+
+  test-windows-mingw:
+    name: Windows (MinGW-w64 GCC / Debug)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up MSYS2 UCRT64 (GCC, CMake, Ninja, glslang)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-glslang
+
+      - name: Install Mesa llvmpipe (software OpenGL; the runners have no GPU)
+        shell: pwsh
+        run: ./.github/scripts/install-mesa.ps1
+
+      # Full DWARF debug info makes each MinGW Debug player about 140 MB, and the
+      # tests copy players and AOT modules around until the runner's disk is
+      # full. Line tables only (-g1) keeps a Debug build (assertions on).
+      - name: Configure CMake
+        shell: msys2 {0}
+        run: cmake --preset mingw-debug -B C:/cb -DCMAKE_C_FLAGS_DEBUG=-g1 -DCMAKE_CXX_FLAGS_DEBUG=-g1
+
+      - name: Build All Targets
+        shell: msys2 {0}
+        run: cmake --build C:/cb
+
+      - name: Drop object files (disk space for the tests)
+        shell: msys2 {0}
+        run: |
+          find /c/cb -name '*.obj' -delete
+          df -h /c .
+
+      - name: Deploy Mesa opengl32.dll next to the programs
+        shell: pwsh
+        run: ./.github/scripts/install-mesa.ps1 -Deploy C:\cb
+
+      - name: Run Test Suite
+        shell: msys2 {0}
+        run: ctest --test-dir C:/cb --output-on-failure --timeout 600

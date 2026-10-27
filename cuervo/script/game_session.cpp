@@ -10,6 +10,8 @@
 #include "cuervo/platform/platform.hpp"
 #include "cuervo/render/font_import.hpp"
 #include "cuervo/render/text_layout.hpp"
+#include "cuervo/script/plugin_host.hpp"
+#include "pluma/aot.hpp"
 
 namespace cuervo::script {
 
@@ -19,6 +21,7 @@ GameSession::GameSession() = default;
 
 GameSession::~GameSession() {
     host_.reset(); // before the audio system and font it points at
+    host_options_.plugins.reset(); // then the plugins, before the module holding linked ones
 }
 
 bool GameSession::packed() const { return vfs_ && vfs_->packed(); }
@@ -95,6 +98,23 @@ bool GameSession::init(const SessionOptions& options, std::string& error) {
         LOG_ERROR("{}", error);
         return false;
     }
+    // Native plugins (milestone 10.5c) before any script is compiled. A native
+    // pack's script module links the plugins that have static libraries.
+    if (native_scripts_) {
+        auto file = vfs_->open(assets::native_scripts_entry, error);
+        if (file) aot_plugins_ = pluma::AotModule::open_bytes(file->bytes(), error);
+        if (!aot_plugins_) {
+            LOG_ERROR("{}", error);
+            return false;
+        }
+    }
+    auto plugins = load_project_plugins(*vfs_, error, aot_plugins_.get());
+    if (!plugins) {
+        LOG_ERROR("{}", error);
+        return false;
+    }
+    add_importers(plugins, *vfs_);
+    host_options_.plugins = std::move(plugins);
 
 #if CUERVO_FEATURE_AUDIO
     // Audio (DESIGN.md 4.9): every file under assets/ is registered by name.

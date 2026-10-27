@@ -279,3 +279,22 @@ TEST_CASE("lsp: completion of the 9.2a collections, str methods and Result") {
     auto dq_items = server.complete(uri, Position{4, 6});
     CHECK(has_completion(dq_items, "push_front"));
 }
+
+TEST_CASE("lsp: packages are checked in their own namespace and definitions follow imports") {
+    ServerOptions opts;
+    opts.packages = [](const std::string&) {
+        return std::vector<ServerOptions::PackageDir>{{"tween", "/libs/tween"}};
+    };
+    Server server(opts);
+    const std::string lib_uri = "file:///libs/tween/scripts/tween.plm";
+    const std::string game_uri = "file:///workspace/game.plm";
+    server.open_document(lib_uri, "pub class Tween {\n    fn value() -> int { return 1 }\n}\nfn helper() {}\n");
+    // The game's own `Tween` and `helper` don't clash with the package's.
+    server.open_document(game_uri, "import tween\nclass Tween {}\nfn helper() {}\nvar v = tween.Tween().value()\n");
+    CHECK(server.diagnostics(lib_uri).empty());
+    CHECK(server.diagnostics(game_uri).empty());
+    auto def = server.definition(game_uri, Position{3, 15}); // the `Tween` in `tween.Tween()`
+    REQUIRE(def.has_value());
+    CHECK(def->uri == lib_uri);
+    CHECK(def->range.start.line == 0);
+}

@@ -1,0 +1,28 @@
+// The noise plugin's script API. The `@native` functions are implemented in
+// Rust (src/lib.rs).
+
+// A node that wanders around `base`, driven by noise.
+pub class Wisp extends Node2D {
+    var base = vec2(0.0, 0.0)
+    var amplitude = 60.0
+    var rate = 0.8
+    var seed = 1
+    var t = 0.0
+
+    fn update(dt: float) {
+        t += dt * rate
+        position = base + offset()
+    }
+
+    // The displacement at time `t` (native: reads `t`, `amplitude`, `seed`).
+    @native fn offset() -> vec2 {}
+}
+
+// Value noise in [-1, 1] at (x, y).
+@native pub fn value(x: float, y: float, seed: int) -> float {}
+
+// A non-negative hash of a lattice point.
+@native pub fn hash(x: int, y: int, seed: int) -> int {}
+
+// The plugin's own description.
+@native pub fn describe() -> str {}

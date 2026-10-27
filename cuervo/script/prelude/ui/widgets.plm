@@ -1,0 +1,566 @@
+// Engine API: Basic UI widgets (DESIGN.md 4.10, Milestone 9.3).
+//
+// Interactive controls: Label, Button, Toggle, Slider, Image, TextureRect,
+// ProgressBar, and LineEdit.
+
+// A line of text. `style` picks the size and color from the theme.
+class Label extends Control {
+    // The text shown.
+    @export var text = ""
+    @export var style = #normal // #normal, #title, #small, #dim, #accent, #danger, #gold
+    @export var font_size = 0.0 // > 0 overrides the style's size
+    @export var align = #left   // #left, #center, #right
+    // The font size: `font_size` if set, else the style's size from the theme.
+    fn text_size() -> float {
+        if font_size > 0.0 {
+            return font_size
+        }
+        var t = get_theme()
+        if style == #title {
+            return t.title_size
+        }
+        if style == #small {
+            return t.small_size
+        }
+        return t.font_size
+    }
+    // The text color for `style`, from the theme.
+    fn text_color() -> Color {
+        var t = get_theme()
+        match style {
+            #dim | #small => return t.text_dim
+            #accent | #title => return t.accent
+            #danger => return t.danger
+            #gold => return t.gold
+            _ => return t.text
+        }
+    }
+    // The size of the measured text.
+    fn content_min_size() -> vec2 {
+        return UI.measure(text, text_size())
+    }
+    // Draws the text, aligned within the rect.
+    fn draw(g: Canvas) {
+        var x = position.x
+        if align == #center {
+            x += size.x * 0.5
+        } else if align == #right {
+            x += size.x
+        }
+        g.text(vec2(x, position.y + size.y * 0.5), text, size = text_size(), color = text_color(), align = align,
+               baseline = #middle)
+    }
+}
+
+// A push button: ui_accept or a click while focused emits `pressed`.
+class Button extends Control {
+    // The caption.
+    @export var text = ""
+    // Activated: ui_accept while focused, or a click.
+    signal pressed
+    var flash = 0 // ticks of "pressed" highlight
+
+    // Buttons take the focus unless disabled.
+    fn can_focus() -> bool {
+        return !disabled
+    }
+    // Emits `pressed` (nothing while disabled).
+    fn activate() {
+        if !disabled {
+            flash = 8
+            emit pressed
+        }
+    }
+    // Counts down the brief pressed look after an activation.
+    fn update(dt: float) {
+        if flash > 0 {
+            flash -= 1
+        }
+    }
+    // The caption's size plus the theme padding.
+    fn content_min_size() -> vec2 {
+        var t = get_theme()
+        return UI.measure(text, t.font_size) + t.padding * 2.0
+    }
+    // Draws the button fill by state, its border and the caption.
+    fn draw(g: Canvas) {
+        var t = get_theme()
+        var focus = has_focus()
+        var fill = flash > 0 ? t.button_pressed : (focus ? t.button_focus : t.button)
+        g.rect(position, size, fill = fill, stroke = focus ? t.accent : t.panel_border, width = t.border,
+               radius = t.radius)
+        var color = disabled ? t.text_disabled : (focus ? t.accent : t.text)
+        g.text(center(), text, size = t.font_size, color = color, align = #center, baseline = #middle)
+    }
+}
+
+// An on/off switch with a label; ui_accept or a click flips it.
+class Toggle extends Control {
+    // The caption beside the check box.
+    @export var text = ""
+    // True when checked.
+    @export var on = false
+    // `on` changed; `value` is the new state.
+    signal toggled(value: bool)
+
+    // Toggles take the focus unless disabled.
+    fn can_focus() -> bool {
+        return !disabled
+    }
+    // Flips `on` and emits `toggled`.
+    fn activate() {
+        if !disabled {
+            on = !on
+            emit toggled(on)
+        }
+    }
+    // The caption's size plus the box and theme padding.
+    fn content_min_size() -> vec2 {
+        var t = get_theme()
+        return UI.measure(text, t.font_size) + t.padding * 2.0 + vec2(72.0, 0.0)
+    }
+    // Draws the toggle fill by state, the check box and the caption.
+    fn draw(g: Canvas) {
+        var t = get_theme()
+        var focus = has_focus()
+        g.rect(position, size, fill = focus ? t.button_focus : t.button, stroke = focus ? t.accent : t.panel_border,
+               width = t.border, radius = t.radius)
+        var color = disabled ? t.text_disabled : (focus ? t.accent : t.text)
+        g.text(vec2(position.x + t.padding.x, position.y + size.y * 0.5), text, size = t.font_size, color = color,
+               baseline = #middle)
+        var sw = vec2(48.0, 24.0)
+        var at = vec2(position.x + size.x - t.padding.x - sw.x, position.y + (size.y - sw.y) * 0.5)
+        g.rect(at, sw, fill = on ? t.accent.with_alpha(0.35) : t.panel, stroke = on ? t.accent : t.text_dim, width = 2.0,
+               radius = sw.y * 0.5)
+        var knob = on ? at + vec2(sw.x - sw.y * 0.5, sw.y * 0.5) : at + vec2(sw.y * 0.5, sw.y * 0.5)
+        g.circle(knob, sw.y * 0.5 - 4.0, fill = on ? t.accent : t.text_dim)
+    }
+}
+
+// A value in [min_value, max_value] snapped to `increment`; ui_left/ui_right
+// change it while focused, the pointer drags it.
+class Slider extends Control {
+    // The caption left of the track; empty for a bare track.
+    @export var text = ""
+    // The current value, between `min_value` and `max_value`.
+    @export var value = 0.5
+    // The lowest value.
+    @export var min_value = 0.0
+    // The highest value.
+    @export var max_value = 1.0
+    @export var increment = 0.1 // 0: continuous
+    // `value` changed (keys or dragging).
+    signal changed(value: float)
+
+    // Sliders take the focus unless disabled.
+    fn can_focus() -> bool {
+        return !disabled
+    }
+    // Sets `value` clamped and snapped, emitting `changed` if it moved.
+    fn set_value(v: float) {
+        var x = clamp(v, min_value, max_value)
+        if increment > 0.0 {
+            x = clamp(min_value + round((x - min_value) / increment) * increment, min_value, max_value)
+        }
+        if x != value {
+            value = x
+            emit changed(x)
+        }
+    }
+    // `value` as a fraction of the range, 0..1.
+    fn ratio() -> float {
+        if max_value <= min_value {
+            return 0.0
+        }
+        return (value - min_value) / (max_value - min_value)
+    }
+    // ui_left and ui_right step the value by `increment`; true if it was used.
+    fn nudge(dir: vec2) -> bool {
+        if dir.x == 0.0 || disabled {
+            return false
+        }
+        var s = increment > 0.0 ? increment : (max_value - min_value) * 0.05
+        set_value(value + dir.x * s)
+        return true
+    }
+    // The left end of the track in screen pixels.
+    fn track_x() -> float {
+        var t = get_theme()
+        return text == "" ? position.x + t.padding.x : position.x + size.x * 0.42
+    }
+    // The track's length in pixels.
+    fn track_width() -> float {
+        var t = get_theme()
+        return max(position.x + size.x - t.padding.x - 64.0 - track_x(), 1.0)
+    }
+    // A click sets the value from the pointer position.
+    fn pointer_down(p: vec2) {
+        pointer_drag(p)
+    }
+    // Dragging sets the value from the pointer position.
+    fn pointer_drag(p: vec2) {
+        if !disabled {
+            set_value(min_value + clamp((p.x - track_x()) / track_width(), 0.0, 1.0) * (max_value - min_value))
+        }
+    }
+    // The caption's size plus the track's minimum length.
+    fn content_min_size() -> vec2 {
+        var t = get_theme()
+        return UI.measure(text, t.font_size) + t.padding * 2.0 + vec2(260.0, 0.0)
+    }
+    // Draws the fill by state, the caption, the track and the value.
+    fn draw(g: Canvas) {
+        var t = get_theme()
+        var focus = has_focus()
+        g.rect(position, size, fill = focus ? t.button_focus : t.button, stroke = focus ? t.accent : t.panel_border,
+               width = t.border, radius = t.radius)
+        var color = disabled ? t.text_disabled : (focus ? t.accent : t.text)
+        var mid = position.y + size.y * 0.5
+        if text != "" {
+            g.text(vec2(position.x + t.padding.x, mid), text, size = t.font_size, color = color, baseline = #middle)
+        }
+        var x0 = track_x()
+        var w = track_width()
+        g.rect(vec2(x0, mid - 3.0), vec2(w, 6.0), fill = t.panel, radius = 3.0)
+        g.rect(vec2(x0, mid - 3.0), vec2(w * ratio(), 6.0), fill = color, radius = 3.0)
+        g.circle(vec2(x0 + w * ratio(), mid), 9.0, fill = color)
+        var pct = round(ratio() * 100.0) as int
+        g.text(vec2(position.x + size.x - t.padding.x, mid), "{pct}%", size = t.small_size, color = color, align = #right,
+               baseline = #middle)
+    }
+}
+
+
+// A vector image (SVG or .evec, like Sprite's `asset`) in a layout rect.
+// Raster images come with the asset pipeline of milestone 11.2a.
+class Image extends Control {
+    // The image file, relative to the project ("" draws nothing).
+    @export var asset = ""
+    // #keep: natural size at the top-left; #scale: fills the rect, ignoring
+    // the proportions; #keep_aspect: as large as fits, centered; #cover: as
+    // small as covers the rect, centered and clipped.
+    @export var stretch = #keep_aspect
+    // Multiplies the image's colors (alpha included).
+    @export var tint = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }
+    // Mirror the image horizontally.
+    @export var flip_h = false
+    // Mirror the image vertically.
+    @export var flip_v = false
+    // true: the natural size doesn't count towards the minimum size (so a
+    // layout can shrink the image); `min_size` still does.
+    @export var ignore_natural_size = false
+
+    // The document size of `asset` ((0, 0) when it can't be read).
+    fn natural_size() -> vec2 {
+        return asset == "" ? vec2(0.0, 0.0) : UI.image_size(asset)
+    }
+    // The natural size, or nothing with `ignore_natural_size`.
+    fn content_min_size() -> vec2 {
+        return ignore_natural_size ? vec2(0.0, 0.0) : natural_size()
+    }
+    // Draws the image placed and scaled by `stretch`, flipped and tinted.
+    fn draw(g: Canvas) {
+        var nat = natural_size()
+        if asset == "" || nat.x <= 0.0 || nat.y <= 0.0 || size.x <= 0.0 || size.y <= 0.0 {
+            return
+        }
+        var s = vec2(1.0, 1.0)
+        var at = position
+        if stretch == #scale {
+            s = size / nat
+        } else if stretch == #keep_aspect || stretch == #cover {
+            var k = stretch == #cover ? max(size.x / nat.x, size.y / nat.y) : min(size.x / nat.x, size.y / nat.y)
+            s = vec2(k, k)
+            at = position + (size - nat * k) * 0.5
+        }
+        var drawn = nat * s
+        if flip_h {
+            s.x = -s.x
+            at.x += drawn.x
+        }
+        if flip_v {
+            s.y = -s.y
+            at.y += drawn.y
+        }
+        if stretch == #cover {
+            UI.push_clip(g, position, size)
+        }
+        g.vector(asset, at, scale = s, centered = false, tint = tint)
+        if stretch == #cover {
+            UI.pop_clip(g)
+        }
+    }
+}
+
+// Godot's name for Image.
+class TextureRect extends Image {}
+
+// A value in [min_value, max_value] shown as a filled bar (not focusable).
+class ProgressBar extends Control {
+    // Optional label at the left of the bar.
+    @export var text = ""
+    // The current value.
+    @export var value = 0.0
+    // The value at which the bar is empty.
+    @export var min_value = 0.0
+    // The value at which the bar is full.
+    @export var max_value = 1.0
+    // Draw "NN%" at the right.
+    @export var show_percentage = true
+    // `value` changed.
+    signal changed(value: float)
+
+    // Sets `value`, clamped, emitting `changed` if it moved.
+    fn set_value(v: float) {
+        var x = clamp(v, min_value, max_value)
+        if x != value {
+            value = x
+            emit changed(x)
+        }
+    }
+    // 0..1.
+    fn ratio() -> float {
+        if max_value <= min_value {
+            return 0.0
+        }
+        return clamp((value - min_value) / (max_value - min_value), 0.0, 1.0)
+    }
+    // The label size plus padding and at least 160 px wide.
+    fn content_min_size() -> vec2 {
+        var t = get_theme()
+        return UI.measure(text, t.font_size) + t.padding * 2.0 + vec2(160.0, 0.0)
+    }
+    // Draws the track, the filled part, the label and the percentage.
+    fn draw(g: Canvas) {
+        var t = get_theme()
+        g.rect(position, size, fill = t.button, stroke = t.panel_border, width = t.border, radius = t.radius)
+        var mid = position.y + size.y * 0.5
+        var inner = size - vec2(t.border * 4.0, t.border * 4.0)
+        var r = ratio()
+        if r > 0.0 {
+            g.rect(position + vec2(t.border * 2.0, t.border * 2.0), vec2(max(inner.x * r, inner.y), inner.y),
+                   fill = disabled ? t.text_disabled : t.accent.with_alpha(0.55), radius = max(t.radius - 2.0, 1.0))
+        }
+        if text != "" {
+            g.text(vec2(position.x + t.padding.x, mid), text, size = t.font_size, color = t.text, baseline = #middle)
+        }
+        if show_percentage {
+            var pct = round(r * 100.0) as int
+            g.text(vec2(position.x + size.x - t.padding.x, mid), "{pct}%", size = t.small_size, color = t.text,
+                   align = #right, baseline = #middle)
+        }
+    }
+}
+
+// A single-line text field. Focus it and press ui_accept (or click it) to
+// edit; typed text comes from the input frame (Input.text, so it replays),
+// ui_backspace / ui_delete / ui_home / ui_end and left/right edit and move
+// the caret, ui_accept finishes (`text_submitted`) and ui_cancel stops
+// editing. Up/down stop editing and move the focus. Bind the ui_* actions to
+// keys that don't type characters (arrows, Enter, Escape): a character typed
+// on the tick of a ui_* press cancels that press.
+class LineEdit extends Control {
+    // The text in the field.
+    @export var text = ""
+    // Shown dimmed while empty.
+    @export var placeholder = ""
+    // > 0: the most characters the field takes.
+    @export var max_length = 0
+    // Draw every character as "*" (the text itself is unchanged).
+    @export var secret = false
+    // false: focusable and selectable, but can't be edited.
+    @export var editable = true
+    // Typing, deleting or set_text() changed `text`.
+    signal text_changed(value: str)
+    // ui_accept while editing.
+    signal text_submitted(value: str)
+
+    // Whether the field is being edited (typed text and edit keys reach it).
+    var editing = false
+    // The caret, in characters (0 .. char count).
+    var caret = 0
+
+    // Focusable unless disabled.
+    fn can_focus() -> bool {
+        return !disabled
+    }
+    // Whether the field is being edited.
+    fn is_editing() -> bool {
+        return editing
+    }
+    // Number of characters (not bytes) in `text`.
+    fn char_count() -> int {
+        return text.char_count()
+    }
+    // Replaces the text (no `text_changed` unless it differs); the caret goes to the end.
+    fn set_text(s: str) {
+        var changed = s != text
+        text = s
+        caret = char_count()
+        if changed {
+            emit text_changed(text)
+        }
+    }
+    // Moves the caret to character `i`, clamped to the text.
+    fn set_caret(i: int) {
+        caret = clamp(i, 0, char_count())
+    }
+    // Inserts typed text at the caret (respecting max_length).
+    fn insert_text(s: str) {
+        if !editable || s == "" {
+            return
+        }
+        var cs = text.chars()
+        var add = s.chars()
+        if max_length > 0 && cs.len() + add.len() > max_length {
+            add = add.slice(0, max(max_length - cs.len(), 0))
+        }
+        if add.len() == 0 {
+            return
+        }
+        var out = "".join(cs.slice(0, caret)) + "".join(add) + "".join(cs.slice(caret))
+        caret += add.len()
+        text = out
+        emit text_changed(text)
+    }
+    // Removes characters `from` up to (not including) `to`, puts the caret at `from` and emits `text_changed`.
+    fn delete_range(from: int, to: int) {
+        var cs = text.chars()
+        text = "".join(cs.slice(0, from)) + "".join(cs.slice(to))
+        caret = from
+        emit text_changed(text)
+    }
+    // Deletes the character before the caret.
+    fn backspace() {
+        if editable && caret > 0 {
+            delete_range(caret - 1, caret)
+        }
+    }
+    // Deletes the character after the caret.
+    fn delete_forward() {
+        if editable && caret < char_count() {
+            delete_range(caret, caret + 1)
+        }
+    }
+    // What UI routes to the field every tick while it is being edited.
+    fn edit_tick() {
+        if UI.typed_text != "" {
+            insert_text(UI.typed_text)
+        }
+        if UI.x.backspace_pressed {
+            backspace()
+        }
+        if UI.x.delete_pressed {
+            delete_forward()
+        }
+        if UI.x.home_pressed {
+            caret = 0
+        }
+        if UI.x.end_pressed {
+            caret = char_count()
+        }
+    }
+    // Starts editing; while editing, finishes it and emits `text_submitted`. Does nothing if not editable.
+    fn activate() {
+        if !editable {
+            return
+        }
+        if editing {
+            editing = false
+            emit text_submitted(text)
+        } else {
+            editing = true
+            caret = char_count()
+        }
+    }
+    // Left/right move the caret while editing; up/down stop editing and return false so the focus moves.
+    fn nudge(dir: vec2) -> bool {
+        if !editing {
+            return false
+        }
+        if dir.x != 0.0 {
+            set_caret(caret + (dir.x < 0.0 ? -1 : 1))
+            return true
+        }
+        editing = false
+        return false
+    }
+    // ui_cancel: stops editing and returns true; false if it wasn't editing.
+    fn on_cancel() -> bool {
+        if editing {
+            editing = false
+            return true
+        }
+        return false
+    }
+    // Clicking starts editing and puts the caret where it landed.
+    fn pointer_down(p: vec2) {
+        if !editable {
+            return
+        }
+        editing = true
+        var t = get_theme()
+        var shown = display_text().chars()
+        var rel = p.x - (position.x + t.padding.x) + text_offset()
+        var best = 0
+        var best_d = abs(rel)
+        for i in 1..(shown.len() + 1) {
+            var d = abs(UI.measure("".join(shown.slice(0, i)), t.font_size).x - rel)
+            if d < best_d {
+                best = i
+                best_d = d
+            }
+        }
+        caret = best
+    }
+    // Stops editing when focus is lost or the field is disabled, and asks the window for text input while editing.
+    fn update(dt: float) {
+        if editing && (!has_focus() || disabled) {
+            editing = false
+        }
+        if editing {
+            UI.wants_text(true)
+        }
+    }
+    // The text as drawn: `text`, or one "*" per character when `secret`.
+    fn display_text() -> str {
+        return secret ? "*".repeat(char_count()) : text
+    }
+    // Wide enough for about twelve characters, plus padding.
+    fn content_min_size() -> vec2 {
+        var t = get_theme()
+        return UI.measure("MMMMMMMMMMMM", t.font_size) + t.padding * 2.0
+    }
+    // Pixels the text is shifted left so the caret stays inside the field.
+    fn text_offset() -> float {
+        var t = get_theme()
+        var shown = display_text().chars()
+        var cx = UI.measure("".join(shown.slice(0, min(caret, shown.len()))), t.font_size).x
+        return max(cx - (size.x - t.padding.x * 2.0 - 4.0), 0.0)
+    }
+    // Draws the field, the text or placeholder scrolled to keep the caret visible, and a blinking caret while editing.
+    fn draw(g: Canvas) {
+        var t = get_theme()
+        var focus = has_focus()
+        g.rect(position, size, fill = editing ? t.panel : (focus ? t.button_focus : t.button),
+               stroke = editing ? t.gold : (focus ? t.accent : t.panel_border), width = t.border, radius = t.radius)
+        var inner_pos = position + vec2(t.padding.x, 0.0)
+        var inner_size = vec2(max(size.x - t.padding.x * 2.0, 1.0), size.y)
+        var mid = position.y + size.y * 0.5
+        UI.push_clip(g, inner_pos, inner_size)
+        var off = text_offset()
+        if text == "" && !editing {
+            g.text(vec2(inner_pos.x, mid), placeholder, size = t.font_size, color = t.text_disabled, baseline = #middle)
+        } else {
+            g.text(vec2(inner_pos.x - off, mid), display_text(), size = t.font_size,
+                   color = disabled ? t.text_disabled : t.text, baseline = #middle)
+        }
+        if editing && (Time.tick / 30) % 2 == 0 {
+            var shown = display_text().chars()
+            var cx = UI.measure("".join(shown.slice(0, min(caret, shown.len()))), t.font_size).x
+            var x = inner_pos.x - off + cx
+            g.line(vec2(x, mid - t.font_size * 0.6), vec2(x, mid + t.font_size * 0.6), color = t.gold, width = 2.0)
+        }
+        UI.pop_clip(g)
+    }
+}

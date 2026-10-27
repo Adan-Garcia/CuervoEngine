@@ -1,0 +1,203 @@
+// Engine API: 2D lighting (DESIGN.md 4.17, milestone 9.7).
+//
+// Lights and occluders are nodes that queue into the frame's lighting while
+// the tree draws (Canvas.point_light and friends); Scene.draw_frame applies
+// them after the world, so CanvasLayers (HUDs, menus) stay unlit. Shadows are
+// raymarched through the occluders' signed distance fields on the GPU, the
+// same on Vulkan and GL. Lighting is render only: it never changes the
+// simulation, a state hash or a replay.
+//
+// Without an AmbientLight2D, lights add their color to the scene. With one,
+// the scene darkens by its `darkness` except where lights reach.
+
+// A light at the node's position reaching `radius` pixels (times its global
+// scale). With `spot_angle` below a full turn it is a cone pointing along the
+// node's rotation (+x at rotation 0).
+class PointLight2D extends Node2D {
+    // false switches the light off.
+    @export var enabled = true
+    // The light's color; its alpha scales the light.
+    @export var color = Color { r = 1.0, g = 0.95, b = 0.8, a = 1.0 }
+    // Brightness multiplier.
+    @export var energy = 1.0
+    // How far the light reaches, in pixels.
+    @export var radius = 200.0
+    // How fast it fades toward `radius` (0 = the gentlest curve).
+    @export var falloff = 1.0
+    // The cone's full angle in radians (6.2831855 = all around).
+    @export var spot_angle = 6.2831855
+    // How much of the cone's edge fades out, in radians.
+    @export var spot_feather = 0.2617994
+    // The size of the light's source; shadows start this far from it.
+    @export var source_radius = 4.0
+    // Occluders cast shadows from this light.
+    @export var shadow_enabled = true
+    // The size of the glowing source in pixels: shadows are sharp where they
+    // touch their occluder and this wide at the light (0 = hard shadows).
+    @export var shadow_softness = 16.0
+    // The color shadows are tinted, its alpha their strength.
+    @export var shadow_color = Color { r = 0.0, g = 0.0, b = 0.0, a = 0.65 }
+    // Only occluders whose `occluder_mask` shares a bit with this cast shadows.
+    @export var light_mask = 1
+    // Darkens instead of lighting (a "negative" light).
+    @export var subtract = false
+    // How far above the plane the light hangs, in pixels: occluder faces are
+    // normal mapped, and a low light rakes across their bevels.
+    @export var height = 48.0
+
+    // Draws the node (render only).
+    fn draw(g: Canvas) {
+        var p = global_position()
+        var s = global_scale()
+        var r = radius * max(s.x, s.y)
+        if !ready_done {
+            // The editor's view: where the light reaches.
+            g.circle(p, 5.0, fill = Color.rgb(color.r, color.g, color.b, 0.9))
+            g.circle(p, r, stroke = Color.rgb(color.r, color.g, color.b, 0.25), width = 1.0)
+        }
+        if !enabled {
+            return
+        }
+        g.point_light(p, r, color = color, energy = energy, falloff = falloff, rotation = global_rotation(),
+                      spot_angle = spot_angle, spot_feather = spot_feather, source_radius = source_radius,
+                      shadows = shadow_enabled, shadow_softness = shadow_softness, shadow_color = shadow_color,
+                      mask = light_mask, subtract = subtract, height = height)
+    }
+}
+
+// Parallel light over the whole view (sun, moon), shining along the node's
+// rotation (+x at rotation 0, so PI/2 shines down).
+class DirectionalLight2D extends Node2D {
+    // false switches the light off.
+    @export var enabled = true
+    // The light's color; its alpha scales the light.
+    @export var color = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }
+    // Brightness multiplier.
+    @export var energy = 0.6
+    // How far back toward the light shadows are traced, in pixels.
+    @export var max_distance = 600.0
+    // Occluders cast shadows from this light.
+    @export var shadow_enabled = true
+    // How much shadows widen with distance (0 = hard shadows).
+    @export var shadow_softness = 16.0
+    // The color shadows are tinted, its alpha their strength.
+    @export var shadow_color = Color { r = 0.0, g = 0.0, b = 0.0, a = 0.65 }
+    // Only occluders whose `occluder_mask` shares a bit with this cast shadows.
+    @export var light_mask = 1
+
+    // Draws the node (render only).
+    fn draw(g: Canvas) {
+        var rot = global_rotation()
+        if !ready_done {
+            var p = global_position()
+            var c = Color.rgb(color.r, color.g, color.b, 0.9)
+            g.circle(p, 6.0, fill = c)
+            g.line(p, p + vec2(28.0, 0.0).rotated(rot), color = c, width = 2.0)
+        }
+        if !enabled {
+            return
+        }
+        g.directional_light(rot, color = color, energy = energy, max_distance = max_distance,
+                            shadows = shadow_enabled, shadow_softness = shadow_softness, shadow_color = shadow_color,
+                            mask = light_mask)
+    }
+}
+
+// Darkens the whole world (night, caves) except where lights reach. One per
+// scene; the last one drawn wins.
+class AmbientLight2D extends Node2D {
+    // false leaves the scene at full brightness.
+    @export var enabled = true
+    // The tint of the darkness.
+    @export var color = Color { r = 0.05, g = 0.06, b = 0.12, a = 1.0 }
+    // 0 = no darkening, 1 = black where no light reaches.
+    @export var darkness = 0.8
+    // How much of the lights' color is added on top of what they reveal.
+    @export var glow = 0.35
+
+    // Draws the node (render only).
+    fn draw(g: Canvas) {
+        if !ready_done {
+            var p = global_position()
+            g.circle(p, 8.0, fill = Color.rgb(color.r, color.g, color.b, 0.9), stroke = Color.rgb(0.9, 0.9, 1.0, 0.8),
+                     width = 1.5)
+        }
+        if enabled {
+            g.ambient_light(color = color, darkness = darkness, glow = glow)
+        }
+    }
+}
+
+// What a `LightOccluder2D` blocks light with.
+enum OccluderShape {
+    Circle,  // a disc of `radius`
+    Rect,    // a `size` rectangle with `corner_radius` corners
+    Capsule, // a segment `size.x` long with round caps of `radius`
+    Polygon, // walls `thickness` wide along `points`
+}
+
+// Blocks light: lights whose `light_mask` shares a bit with `occluder_mask`
+// cast shadows behind it. The shape is centered on the node, turned and sized
+// by its global transform. The occluder's own area stays lit (like a wall's
+// face), so put one under the visuals it should shadow from.
+class LightOccluder2D extends Node2D {
+    // false stops it blocking light.
+    @export var enabled = true
+    // Which shape blocks the light.
+    @export var shape = OccluderShape.Rect
+    // Circle and Capsule: the radius in pixels.
+    @export var radius = 16.0
+    // Rect: width and height; Capsule: the segment's length is `size.x`.
+    @export var size = vec2(32.0, 32.0)
+    // Rect: the corner radius (0 = square corners).
+    @export var corner_radius = 0.0
+    // Polygon: the corners, as offsets from the node.
+    @export var points = List<vec2>()
+    // Polygon: joins the last point to the first.
+    @export var closed = true
+    // Polygon: the walls' thickness in pixels.
+    @export var thickness = 2.0
+    // Blocks lights whose `light_mask` shares a bit with this.
+    @export var occluder_mask = 1
+    // Normal mapping: the face bends outward over this many pixels from the
+    // edge, so edges turned to a light catch it (0 = a flat face).
+    @export var bevel = 8.0
+
+    // Draws the node (render only).
+    fn draw(g: Canvas) {
+        var p = global_position()
+        var rot = global_rotation()
+        var s = global_scale()
+        var k = max(s.x, s.y)
+        if !ready_done {
+            // The editor's view: the occluder's outline.
+            var c = Color.rgb(0.95, 0.75, 0.3, 0.7)
+            match shape {
+                OccluderShape.Circle => g.circle(p, radius * k, stroke = c, width = 1.5),
+                OccluderShape.Rect => {
+                    var sz = size * s
+                    g.rect(p - sz * 0.5, sz, stroke = c, width = 1.5, radius = corner_radius, rotation = rot)
+                }
+                OccluderShape.Capsule => g.capsule(p, size.x * s.x * 0.5, radius * k, rot, stroke = c, width = 1.5),
+                OccluderShape.Polygon => {
+                    if points.len() >= 2 {
+                        g.polyline(points, color = c, width = 1.5, closed = closed, pos = p, rotation = rot, scale = s)
+                    }
+                },
+            }
+        }
+        if !enabled {
+            return
+        }
+        match shape {
+            OccluderShape.Circle => g.occluder_circle(p, radius * k, mask = occluder_mask, bevel = bevel),
+            OccluderShape.Rect => g.occluder_rect(p, size * s, rotation = rot, corner_radius = corner_radius,
+                                                  mask = occluder_mask, bevel = bevel),
+            OccluderShape.Capsule => g.occluder_capsule(p, size.x * s.x * 0.5, radius * k, rotation = rot,
+                                                        mask = occluder_mask, bevel = bevel),
+            OccluderShape.Polygon => g.occluder_polygon(points, closed = closed, thickness = thickness, pos = p,
+                                                        rotation = rot, scale = s, mask = occluder_mask,
+                                                        bevel = bevel),
+        }
+    }
+}

@@ -1,0 +1,152 @@
+node Node2D "Level" {
+    position: vec2 = (0.0, 0.0)
+
+    // --- Static Boundaries & Segment / Polygon Obstacles ---
+    node StaticBody2D "Floor" {
+        position: vec2 = (640.0, 680.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (1280.0, 40.0)
+        }
+    }
+    node StaticBody2D "WallLeft" {
+        position: vec2 = (20.0, 360.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (40.0, 720.0)
+        }
+    }
+    node StaticBody2D "WallRight" {
+        position: vec2 = (1260.0, 360.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (40.0, 720.0)
+        }
+    }
+    node StaticBody2D "Ramp" {
+        position: vec2 = (180.0, 620.0)
+        node CollisionPolygon2D "Wedge" {
+            build_mode: int = 0
+            polygon: List<vec2> = [(-60.0, 40.0), (60.0, -20.0), (60.0, 40.0)]
+        }
+    }
+
+    // --- Kinematic Moving Platforms (AnimatableBody2D) ---
+    node MovingPlatformH "PlatformH" {
+        position: vec2 = (400.0, 520.0)
+        sync_to_physics: bool = true
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (160.0, 24.0)
+        }
+    }
+    node MovingPlatformV "PlatformV" {
+        position: vec2 = (760.0, 420.0)
+        sync_to_physics: bool = true
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (140.0, 24.0)
+        }
+    }
+
+    // --- Convex Polygon Boulders (CollisionPolygon2D) ---
+    node PolygonBoulder "Boulder1" {
+        position: vec2 = (360.0, 260.0)
+        mass: float = 3.0
+        node CollisionPolygon2D "Poly" {
+            build_mode: int = 0
+            polygon: List<vec2> = [(-25.0, -20.0), (20.0, -25.0), (30.0, 15.0), (0.0, 30.0), (-30.0, 10.0)]
+        }
+    }
+    node PolygonBoulder "Boulder2" {
+        position: vec2 = (460.0, 200.0)
+        mass: float = 3.0
+        node CollisionPolygon2D "Poly" {
+            build_mode: int = 0
+            polygon: List<vec2> = [(-22.0, -22.0), (22.0, -18.0), (26.0, 22.0), (-18.0, 26.0)]
+        }
+    }
+
+    // --- Sweeping Hazard Scanner (ShapeCast2D) ---
+    node SweepScanner "Scanner" {
+        position: vec2 = (640.0, 220.0)
+        shape_type: int = 2
+        radius: float = 16.0
+        target_position: vec2 = (0.0, 360.0)
+        enabled: bool = true
+    }
+
+    // --- Stack of Dynamic Boxes for Explosion Impulse Testing ---
+    node Crate "Box1" {
+        position: vec2 = (1020.0, 642.0)
+        mass: float = 1.2
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (36.0, 36.0)
+        }
+    }
+    node Crate "Box2" {
+        position: vec2 = (1060.0, 642.0)
+        mass: float = 1.2
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (36.0, 36.0)
+        }
+    }
+    node Crate "Box3" {
+        position: vec2 = (1100.0, 642.0)
+        mass: float = 1.2
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (36.0, 36.0)
+        }
+    }
+    node Crate "Box4" {
+        position: vec2 = (1040.0, 606.0)
+        mass: float = 1.2
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (36.0, 36.0)
+        }
+    }
+    node Crate "Box5" {
+        position: vec2 = (1080.0, 606.0)
+        mass: float = 1.2
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (36.0, 36.0)
+        }
+    }
+    node Crate "Box6" {
+        position: vec2 = (1060.0, 570.0)
+        mass: float = 1.2
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (36.0, 36.0)
+        }
+    }
+
+    // --- Fast CCD Projectile ---
+    node CcdBullet "Bullet" {
+        position: vec2 = (120.0, 420.0)
+        mass: float = 2.5
+        continuous_cd: bool = true
+        can_sleep: bool = false
+        node CollisionShape2D "Shape" {
+            shape_type: int = 2
+            radius: float = 12.0
+        }
+    }
+
+    // --- Player ---
+    node Player "Player" {
+        position: vec2 = (80.0, 600.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (32.0, 56.0)
+        }
+        node RayCast2D "Ray" {
+            target_position: vec2 = (0.0, 40.0)
+        }
+    }
+}

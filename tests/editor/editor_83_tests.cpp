@@ -17,6 +17,7 @@
 #include "editor/messages.hpp"
 #include "editor/project_env.hpp"
 #include "editor/projects.hpp"
+#include "editor/settings.hpp"
 
 using namespace cuervo;
 using namespace cuervo::editor;
@@ -364,6 +365,73 @@ TEST_CASE("recent projects: newest first, deduplicated, capped, missing ones fla
     CHECK(again.paths() == recent.paths());
     again.remove(again.paths().front());
     CHECK(again.paths().size() == RecentProjects::max_entries - 1);
+}
+
+// ------------------------------------------------------------ settings
+
+TEST_CASE("editor settings: scaling factors and per-project last scene persistence") {
+    EditorSettings settings;
+    CHECK(settings.ui_scale() == doctest::Approx(1.0f));
+    CHECK(settings.font_scale() == doctest::Approx(1.0f));
+
+    settings.set_ui_scale(1.25f);
+    settings.set_font_scale(1.10f);
+    CHECK(settings.ui_scale() == doctest::Approx(1.25f));
+    CHECK(settings.font_scale() == doctest::Approx(1.10f));
+
+    const fs::path proj_a = temp_dir("settings_proj_a");
+    const fs::path proj_b = temp_dir("settings_proj_b");
+    settings.set_last_scene(proj_a, "scenes/level1.scene");
+    settings.set_last_scene(proj_b, "scenes/level2.scene");
+
+    CHECK(settings.last_scene(proj_a) == "scenes/level1.scene");
+    CHECK(settings.last_scene(proj_b) == "scenes/level2.scene");
+
+    const std::string text = settings.serialize();
+    EditorSettings parsed;
+    parsed.parse(text);
+    CHECK(parsed.ui_scale() == doctest::Approx(1.25f));
+    CHECK(parsed.font_scale() == doctest::Approx(1.10f));
+    CHECK(parsed.last_scene(proj_a) == "scenes/level1.scene");
+    CHECK(parsed.last_scene(proj_b) == "scenes/level2.scene");
+
+    // File save and load
+    const fs::path file = temp_dir("settings_dir") / "editor-settings.txt";
+    std::string error;
+    REQUIRE(settings.save(file, error));
+
+    EditorSettings loaded;
+    REQUIRE(loaded.load(file));
+    CHECK(loaded.ui_scale() == doctest::Approx(1.25f));
+    CHECK(loaded.font_scale() == doctest::Approx(1.10f));
+    CHECK(loaded.last_scene(proj_a) == "scenes/level1.scene");
+    CHECK(loaded.last_scene(proj_b) == "scenes/level2.scene");
+}
+
+TEST_CASE("editor document: change_type supports binding scripts and undo/redo") {
+    ProjectEnv& env = prelude_env();
+    EditorDocument doc(&env.classes());
+    doc.new_scene("Node2D", "root");
+    const NodeId child = doc.add_child(doc.model().root(), "Node2D", "player");
+    REQUIRE(child != 0);
+    CHECK(doc.model().get(child)->type == "Node2D");
+
+    // Changing type to Sprite (or another valid Node class)
+    REQUIRE(doc.change_type(child, "Sprite"));
+    CHECK(doc.model().get(child)->type == "Sprite");
+
+    // Undo reverts type
+    REQUIRE(doc.undo());
+    CHECK(doc.model().get(child)->type == "Node2D");
+
+    // Redo re-applies type
+    REQUIRE(doc.redo());
+    CHECK(doc.model().get(child)->type == "Sprite");
+
+    // Non-existent class is rejected
+    CHECK_FALSE(doc.change_type(child, "NonExistentClassXYZ"));
+    // Empty class name is rejected
+    CHECK_FALSE(doc.change_type(child, ""));
 }
 
 TEST_CASE("project templates create projects the editor opens") {

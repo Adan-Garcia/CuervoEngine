@@ -6,12 +6,18 @@
 add_library(project_flags INTERFACE)
 add_library(project::flags ALIAS project_flags)
 
+# Windows threads get a 1 MB (MSVC) or 2 MB (MinGW) main stack by default;
+# deep script recursion and the parser's tests need what Linux gives (8 MB).
 if(MSVC)
+    # CMake's MSVC defaults can be absent; the engine uses exceptions, so ask for /EHsc.
+    string(APPEND CMAKE_CXX_FLAGS " /EHsc")
+    # /fp:precise doesn't contract to FMA since VS 2022 (/fp:contract is opt-in);
+    # tests/cuervo/platform_tests.cpp checks it.
     target_compile_options(project_flags INTERFACE /W4 /permissive- /fp:precise /utf-8 /Gy)
-    target_link_options(project_flags INTERFACE /OPT:REF /OPT:ICF)
+    target_link_options(project_flags INTERFACE /OPT:REF /OPT:ICF /STACK:8388608)
 else()
     target_compile_options(project_flags INTERFACE
-        -Wall -Wextra -Wpedantic -Wshadow -Wnon-virtual-dtor
+        -Wall -Wextra -Wpedantic -Wshadow $<$<COMPILE_LANGUAGE:CXX>:-Wnon-virtual-dtor>
         -ffp-contract=off
         -fno-fast-math
         -ffunction-sections
@@ -19,7 +25,13 @@ else()
     )
     if(APPLE)
         target_link_options(project_flags INTERFACE -Wl,-dead_strip)
+    elseif(WIN32 AND NOT CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
+        # MinGW-w64 (GCC or Clang): GNU ld or lld in its GNU mode. -static links
+        # libgcc, libstdc++ and winpthread in, so programs and exported players
+        # don't need MinGW's DLLs on PATH (the C runtime is the system UCRT).
+        target_link_options(project_flags INTERFACE -Wl,--gc-sections -Wl,--stack,8388608 -static)
     elseif(WIN32)
+        # Clang targeting the MSVC runtime: lld-link.
         target_link_options(project_flags INTERFACE -Wl,/OPT:REF -Wl,/OPT:ICF -Wl,/STACK:8388608)
         if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
             execute_process(
@@ -81,6 +93,10 @@ endif()
 
 if(CUERVO_SIMD STREQUAL "avx2")
     target_compile_options(project_flags INTERFACE ${_cuervo_avx2_flag})
+    if(MINGW AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        # GCC bug 54412: unaligned 32-byte stack spills on Win64 (see Box2D in Dependencies.cmake).
+        target_compile_options(project_flags INTERFACE -Wa,-muse-unaligned-vector-move)
+    endif()
     target_compile_definitions(project_flags INTERFACE CUERVO_SIMD_AVX2=1)
 elseif(CUERVO_SIMD STREQUAL "sse2")
     target_compile_definitions(project_flags INTERFACE CUERVO_SIMD_SSE2=1)

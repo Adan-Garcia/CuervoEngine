@@ -1,0 +1,243 @@
+// Engine API, part 3b: 2D Physics backed by Box2D v3 (DESIGN.md 4.17, milestone 9.6).
+// Compiled in with CUERVO_FEATURE_PHYSICS. Provides scene-tree bodies, shape resources,
+// collision queries, kinematic slide mechanics, sensors, and joints.
+
+// Base class for 2D collision shape resources.
+class Shape2D {
+}
+
+// A 2D circle collision shape defined by its radius.
+class CircleShape2D extends Shape2D {
+    // Radius of the circle in virtual pixels.
+    @export var radius = 16.0
+}
+
+// A 2D rectangular collision shape defined by its width and height.
+class RectangleShape2D extends Shape2D {
+    // Width (x) and height (y) of the rectangle in virtual pixels.
+    @export var size = vec2(32.0, 32.0)
+}
+
+// A 2D capsule collision shape defined by a radius and total height.
+class CapsuleShape2D extends Shape2D {
+    // Radius of the capsule end caps.
+    @export var radius = 10.0
+    // Total height of the capsule from top to bottom.
+    @export var height = 30.0
+}
+
+// A 2D line segment collision shape between two endpoints.
+class SegmentShape2D extends Shape2D {
+    // First endpoint of the line segment relative to the node.
+    @export var a = vec2(-16.0, 0.0)
+    // Second endpoint of the line segment relative to the node.
+    @export var b = vec2(16.0, 0.0)
+}
+
+// A 2D convex polygon collision shape defined by its vertices.
+class ConvexPolygonShape2D extends Shape2D {
+    // List of vertices defining the convex polygon.
+    @export var points = List<vec2>()
+}
+
+// A 2D concave polyline or chain collision shape defined by a sequence of points.
+class ConcavePolygonShape2D extends Shape2D {
+    // Sequence of points forming the chain.
+    @export var points = List<vec2>()
+    // When true, the first and last points are connected into a closed loop.
+    @export var is_loop = false
+}
+
+// A 2D collision shape consisting of a ray that separates colliding bodies.
+class SeparationRayShape2D extends Shape2D {
+    // Length of the separation ray in virtual pixels.
+    @export var length = 20.0
+    // When true, slides along slopes rather than stopping.
+    @export var slide_on_slope = false
+}
+
+// A scene node that assigns a 2D collision shape to a parent PhysicsBody2D or Area2D.
+class CollisionShape2D extends Node2D {
+    // The shape resource defining the collision geometry (not exported as class references cannot be serialized).
+    var shape: Shape2D? = null
+    // Shape type fallback when not using a Shape2D resource (1: Box, 2: Circle, 3: Capsule, 4: Segment).
+    @export var shape_type = 1
+    // Box dimensions (width, height) in pixels.
+    @export var size = vec2(32.0, 32.0)
+    // Circle or capsule radius in pixels.
+    @export var radius = 16.0
+    // Capsule total height in pixels.
+    @export var height = 30.0
+    // Segment endpoint A relative to node.
+    @export var a = vec2(-16.0, 0.0)
+    // Segment endpoint B relative to node.
+    @export var b = vec2(16.0, 0.0)
+    // When true, the shape does not collide or detect overlaps.
+    @export var disabled = false
+    // Debug draw outline/fill color.
+    @export var debug_color = Color { r = 0.2, g = 0.6, b = 1.0, a = 0.4 }
+    // When true, forces debug drawing regardless of global debug flag.
+    @export var debug_draw = false
+
+    // Native handle in the physics world.
+    var shape_handle = 0
+    // Parent body or area owner.
+    var body_owner: Node2D? = null
+
+    // Engine-internal tree entry hook registering collision geometry with parent body.
+    fn enter_tree() {
+        register_shape()
+        super.enter_tree()
+    }
+
+    // Registers the shape with the parent physics body upon entering the tree.
+    fn ready() {
+        register_shape()
+    }
+
+    // Unregisters the shape from the physics world when removed.
+    fn exit() {
+        unregister_shape()
+    }
+
+    // Searches up the hierarchy for an owning body or area and creates the native shape.
+    fn register_shape() {
+        if shape_handle != 0 {
+            return
+        }
+        var p = parent
+        while p != null {
+            if p is PhysicsBody2D b {
+                body_owner = b
+                b.ensure_body()
+                create_shape_for(b.body_handle, false)
+                return
+            } else if p is Area2D a {
+                body_owner = a
+                a.ensure_body()
+                create_shape_for(a.body_handle, true)
+                return
+            }
+            p = p.parent
+        }
+    }
+
+    // Internal helper creating native Box2D shape definition.
+    fn create_shape_for(b_handle: int, is_sensor: bool) {
+        if b_handle == 0 {
+            return
+        }
+        var lyr = 1
+        var msk = 1
+        if body_owner is PhysicsBody2D pb {
+            lyr = pb.collision_layer
+            msk = pb.collision_mask
+        } else if body_owner is Area2D pa {
+            lyr = pa.collision_layer
+            msk = pa.collision_mask
+        }
+
+        if shape is CircleShape2D c {
+            shape_handle = _Physics.shape_create(b_handle, 0, position, rotation, vec2(c.radius, c.radius), vec2(0.0, 0.0), c.radius, is_sensor, lyr, msk, self)
+        } else if shape is RectangleShape2D r {
+            shape_handle = _Physics.shape_create(b_handle, 1, position, rotation, r.size, vec2(0.0, 0.0), 0.0, is_sensor, lyr, msk, self)
+        } else if shape is CapsuleShape2D cap {
+            shape_handle = _Physics.shape_create(b_handle, 2, position, rotation, vec2(cap.radius, cap.height), vec2(0.0, 0.0), cap.radius, is_sensor, lyr, msk, self)
+        } else if shape is SegmentShape2D s {
+            shape_handle = _Physics.shape_create(b_handle, 3, position, rotation, s.a, s.b, 0.0, is_sensor, lyr, msk, self)
+        } else if shape is ConvexPolygonShape2D cp {
+            shape_handle = _Physics.shape_create_polygon(b_handle, position, rotation, cp.points, is_sensor, lyr, msk, self)
+        } else if shape is ConcavePolygonShape2D ccp {
+            shape_handle = _Physics.shape_create_chain(b_handle, position, rotation, ccp.points, ccp.is_loop, is_sensor, lyr, msk, self)
+        } else if shape is SeparationRayShape2D sr {
+            shape_handle = _Physics.shape_create(b_handle, 3, position, rotation, vec2(0.0, 0.0), vec2(0.0, sr.length), 0.0, is_sensor, lyr, msk, self)
+        } else if shape_type == 1 {
+            shape_handle = _Physics.shape_create(b_handle, 1, position, rotation, size, vec2(0.0, 0.0), 0.0, is_sensor, lyr, msk, self)
+        } else if shape_type == 2 {
+            shape_handle = _Physics.shape_create(b_handle, 0, position, rotation, vec2(radius, radius), vec2(0.0, 0.0), radius, is_sensor, lyr, msk, self)
+        } else if shape_type == 3 {
+            shape_handle = _Physics.shape_create(b_handle, 2, position, rotation, vec2(radius, height), vec2(0.0, 0.0), radius, is_sensor, lyr, msk, self)
+        } else if shape_type == 4 {
+            shape_handle = _Physics.shape_create(b_handle, 3, position, rotation, a, b, 0.0, is_sensor, lyr, msk, self)
+        }
+        if disabled && shape_handle != 0 {
+            _Physics.shape_set_disabled(shape_handle, true)
+        }
+    }
+
+    // Destroys the native shape handle.
+    fn unregister_shape() {
+        if shape_handle != 0 {
+            _Physics.shape_destroy(shape_handle)
+            shape_handle = 0
+            body_owner = null
+        }
+    }
+
+    // Draws the collision shape preview in editor or when debug shapes are toggled.
+    fn draw(g: Canvas) {
+        if !ready_done && !_Physics.get_editor_debug_shapes() {
+            return
+        }
+        if ready_done && !debug_draw && !_Physics.get_debug_shapes() {
+            return
+        }
+        var pos = global_position()
+        var rot = global_rotation()
+        var fill_col = debug_color.with_alpha(debug_color.a * 0.35)
+        var stroke_col = debug_color
+
+        if shape is CircleShape2D c {
+            g.circle(pos, c.radius, fill = fill_col, stroke = stroke_col, width = 1.5)
+        } else if shape is RectangleShape2D r {
+            g.rect(pos - r.size * 0.5, r.size, fill = fill_col, stroke = stroke_col, width = 1.5, rotation = rot)
+        } else if shape is CapsuleShape2D cap {
+            var hl = (cap.height - cap.radius * 2.0) * 0.5
+            if hl < 0.0 {
+                hl = 0.0
+            }
+            g.capsule(pos, hl, cap.radius, rot, fill = fill_col, stroke = stroke_col, width = 1.5)
+        } else if shape is SegmentShape2D s {
+            var p_a = pos + s.a.rotated(rot)
+            var p_b = pos + s.b.rotated(rot)
+            g.line(p_a, p_b, stroke_col, width = 2.0)
+            g.circle(p_a, 3.0, fill = stroke_col)
+            g.circle(p_b, 3.0, fill = stroke_col)
+        } else if shape is ConvexPolygonShape2D cp {
+            if cp.points.len() >= 3 {
+                g.polygon(cp.points, fill = fill_col, stroke = stroke_col, width = 1.5, pos = pos, rotation = rot)
+                for pt in cp.points {
+                    g.circle(pos + pt.rotated(rot), 2.5, fill = stroke_col)
+                }
+            }
+        } else if shape is ConcavePolygonShape2D ccp {
+            if ccp.points.len() >= 2 {
+                g.polyline(ccp.points, stroke_col, width = 2.0, closed = ccp.is_loop, pos = pos, rotation = rot)
+                for pt in ccp.points {
+                    g.circle(pos + pt.rotated(rot), 2.5, fill = stroke_col)
+                }
+            }
+        } else if shape is SeparationRayShape2D sr {
+            var p_b = pos + vec2(0.0, sr.length).rotated(rot)
+            g.line(pos, p_b, stroke_col, width = 2.0)
+            g.circle(p_b, 3.0, fill = stroke_col)
+        } else if shape_type == 1 {
+            g.rect(pos - size * 0.5, size, fill = fill_col, stroke = stroke_col, width = 1.5, rotation = rot)
+        } else if shape_type == 2 {
+            g.circle(pos, radius, fill = fill_col, stroke = stroke_col, width = 1.5)
+        } else if shape_type == 3 {
+            var hl = (height - radius * 2.0) * 0.5
+            if hl < 0.0 {
+                hl = 0.0
+            }
+            g.capsule(pos, hl, radius, rot, fill = fill_col, stroke = stroke_col, width = 1.5)
+        } else if shape_type == 4 {
+            var p_a = pos + a.rotated(rot)
+            var p_b = pos + b.rotated(rot)
+            g.line(p_a, p_b, stroke_col, width = 2.0)
+            g.circle(p_a, 3.0, fill = stroke_col)
+            g.circle(p_b, 3.0, fill = stroke_col)
+        }
+    }
+}
+

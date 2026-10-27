@@ -1,5 +1,6 @@
 #include "cuervo/particles/particle_render.hpp"
 
+#include <algorithm>
 #include <vector>
 
 #include "cuervo/jobs/job_system.hpp"

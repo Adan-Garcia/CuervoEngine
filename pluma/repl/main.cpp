@@ -18,8 +18,11 @@
 //   plm --fmt --write file.plm   format file in place
 //   plm --fmt --check file.plm   exit 1 if file is not formatted
 //   plm --lsp                    run Language Server Protocol over stdio
-// Exit status: 0 ok, 1 compile/format errors, 2 cannot read the file, 3 panic.
+//   plm test <file.plm|dir>... [--filter s]   run the @test functions (LANGUAGE.md 9.27)
+// Exit status: 0 ok, 1 compile/format errors (or a failed test), 2 cannot read the file, 3 panic.
 
+#include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -39,6 +42,7 @@
 #include "pluma/session.hpp"
 #include "pluma/source.hpp"
 #include "pluma/stdlib.hpp"
+#include "pluma/testing.hpp"
 
 namespace {
 
@@ -155,6 +159,49 @@ bool parse_mode(std::string_view word, Mode& mode) {
     return true;
 }
 
+// `plm test`: the files given (a directory: its .plm files, recursively, in
+// path order) checked as one program, then each @test run on its own.
+int test_command(int argc, char** argv) {
+    std::vector<pluma::SourceFile::Part> parts;
+    std::string filter;
+    for (int i = 2; i < argc; ++i) {
+        std::string_view arg = argv[i];
+        if (arg == "--filter" && i + 1 < argc) {
+            filter = argv[++i];
+            continue;
+        }
+        std::vector<std::filesystem::path> files;
+        std::error_code ec;
+        if (std::filesystem::is_directory(std::string(arg), ec)) {
+            for (const auto& e : std::filesystem::recursive_directory_iterator(std::string(arg), ec)) {
+                if (e.is_regular_file() && e.path().extension() == ".plm") files.push_back(e.path());
+            }
+            std::sort(files.begin(), files.end());
+        } else {
+            files.emplace_back(std::string(arg));
+        }
+        for (const auto& f : files) {
+            std::ifstream in(f, std::ios::binary);
+            if (!in) {
+                std::cerr << "cannot open " << f.string() << '\n';
+                return 2;
+            }
+            std::stringstream buf;
+            buf << in.rdbuf();
+            parts.push_back({f.generic_string(), buf.str()});
+        }
+    }
+    if (parts.empty()) {
+        std::cerr << "usage: plm test <file.plm|dir>... [--filter <substring>]\n";
+        return 2;
+    }
+    pluma::TestReport report = pluma::run_tests(
+        parts, [] { return std::make_unique<pluma::Session>(pluma::VmOptions{}, &math_bindings()); },
+        pluma::TestSelection{{}, filter});
+    std::cout << pluma::format_test_report(report);
+    return report.ok() ? 0 : 1;
+}
+
 int run_file(int argc, char** argv) {
     Mode mode = Mode::Run;
     bool script = false;
@@ -245,6 +292,7 @@ int run_file(int argc, char** argv) {
 } // namespace
 
 int main(int argc, char** argv) {
+    if (argc > 1 && std::string_view(argv[1]) == "test") return test_command(argc, argv);
     if (argc > 1) {
         return run_file(argc, argv);
     }

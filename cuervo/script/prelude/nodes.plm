@@ -71,12 +71,13 @@ class Shape extends Node2D {
         match kind {
             ShapeKind.Circle => g.circle(position, radius * k, fill = f, stroke = s, width = stroke_width),
             ShapeKind.Rect => {
-                var sz = size * scale
+                // abs: a mirrored parent (scale.x < 0) flips the shape, not its size.
+                var sz = vec2(abs(size.x * scale.x), abs(size.y * scale.y))
                 g.rect(position - sz * 0.5, sz, fill = f, stroke = s, width = stroke_width, radius = corner_radius,
                        rotation = rotation)
             }
-            ShapeKind.Capsule => g.capsule(position, size.x * scale.x * 0.5, radius * k, rotation, fill = f, stroke = s,
-                                           width = stroke_width),
+            ShapeKind.Capsule => g.capsule(position, abs(size.x * scale.x) * 0.5, radius * k, rotation, fill = f,
+                                           stroke = s, width = stroke_width),
             ShapeKind.Ring => g.ring(position, radius * k, thickness * k, fill = f, stroke = s, width = stroke_width),
             ShapeKind.Arc => g.arc(position, radius * k, start_angle + rotation, end_angle + rotation,
                                    stroke = f ?? stroke, width = thickness * k),

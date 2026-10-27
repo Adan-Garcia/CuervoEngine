@@ -10,7 +10,7 @@
 //   cuervo --svg <file.svg|file.evec> [--zoom <z>] [--instances <N>] [--animate-zoom] [...]
 //   cuervo --svg <file.svg> --export <file.evec>   (import to the binary format, no window)
 //   cuervo --font <file.ttf> --export <file.efont>  (import a font atlas, no window)
-//   Shared: [--backend vulkan|gl] [--quit-after <seconds>] [--vsync on|off] [--msaa 1|2|4|8]
+//   Shared: [--backend vulkan|gl|webgpu] [--quit-after <seconds>] [--vsync on|off] [--msaa 1|2|4|8]
 //           [--scale fit|integer|stretch] [--screenshot <file.ppm>] [--gl-es]
 //   --jobs <N>: job system threads (default: CUERVO_JOBS, else auto; DESIGN.md 4.15)
 //   --simd off: run the scalar loops instead of the SIMD kernels (same results; for comparisons)
@@ -82,9 +82,7 @@ std::string_view arg_value(int argc, char** argv, std::string_view flag) {
     return {};
 }
 
-GraphicsApi graphics_api_for(rhi::Backend backend) {
-    return backend == rhi::Backend::Vulkan ? GraphicsApi::Vulkan : GraphicsApi::OpenGL;
-}
+GraphicsApi graphics_api_for(rhi::Backend backend) { return rhi::graphics_api(backend); }
 
 // Creates the window and device together, since the window must be created
 // for a specific graphics API.
@@ -124,11 +122,13 @@ int main(int argc, char** argv) {
 #if defined(__EMSCRIPTEN__)
     // The web build runs the one preloaded game (docs/WEB.md): its game and
     // font arguments come first, then whatever the page passes (shell.html
-    // `?args=`). Demos use blocking loops and are desktop-only.
+    // `?args=`). Demos use blocking loops and are desktop-only. The backend
+    // defaults to WebGPU when the browser has it and to GL (WebGL2) otherwise
+    // (rhi::default_backend); `?args=--backend gl` forces WebGL2.
 #if defined(CUERVO_WEB_PACK)
-    prepend({"cuervo", "--pack", CUERVO_WEB_PACK, "--backend", "gl"}); // an exported pack (docs/EXPORT.md)
+    prepend({"cuervo", "--pack", CUERVO_WEB_PACK}); // an exported pack (docs/EXPORT.md)
 #else
-    prepend({"cuervo", "--game", CUERVO_WEB_GAME_DIR, "--font", CUERVO_WEB_FONT, "--backend", "gl"});
+    prepend({"cuervo", "--game", CUERVO_WEB_GAME_DIR, "--font", CUERVO_WEB_FONT});
 #endif
 #else
     // An exported game (docs/EXPORT.md): `game.pak` next to the executable
@@ -225,17 +225,14 @@ int main(int argc, char** argv) {
     }
 
     const std::string_view backend_arg = arg_value(argc, argv, "--backend");
-    rhi::Backend backend = rhi::backend_compiled_in(rhi::Backend::Vulkan) ? rhi::Backend::Vulkan : rhi::Backend::OpenGL;
+    rhi::Backend backend = rhi::default_backend();
     bool allow_fallback = true;
-    if (backend_arg == "vulkan" || backend_arg == "vk") {
-        backend = rhi::Backend::Vulkan;
+    if (!backend_arg.empty()) {
+        if (!rhi::parse_backend(backend_arg, backend)) {
+            LOG_ERROR("Unknown --backend '{}' (expected vulkan, gl or webgpu)", backend_arg);
+            return EXIT_FAILURE;
+        }
         allow_fallback = false;
-    } else if (backend_arg == "gl" || backend_arg == "opengl") {
-        backend = rhi::Backend::OpenGL;
-        allow_fallback = false;
-    } else if (!backend_arg.empty()) {
-        LOG_ERROR("Unknown --backend '{}' (expected vulkan or gl)", backend_arg);
-        return EXIT_FAILURE;
     }
 
     const std::string title =

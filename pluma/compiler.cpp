@@ -79,9 +79,14 @@ public:
         if (fn_->is_native) {
             // A thunk: the host function gets the parameters (self first).
             std::uint16_t r = alloc(true);
-            std::uint32_t id = vm_.native_index(fn_->name);
+            const std::string& key = fn_->native_name.empty() ? fn_->name : fn_->native_name;
+            std::string why;
+            std::uint32_t id = vm_.resolve_native(key, &why);
             if (id == VM::no_native) {
-                emit(Op::LoadK, r, constant(str_value("native '" + fn_->name + "' is not bound")));
+                // An `@extern` whose library or symbol is missing fails when called.
+                const std::string message = why.empty() ? "native '" + fn_->name + "' is not bound"
+                                                        : "'" + fn_->name + "': " + why;
+                emit(Op::LoadK, r, constant(str_value(message)));
                 emit(Op::CallN, r, static_cast<std::uint16_t>(Builtin::Panic), r, 1);
             } else {
                 emit(Op::CallX, r, static_cast<std::uint16_t>(id), 0, static_cast<std::uint8_t>(proto_->param_count));

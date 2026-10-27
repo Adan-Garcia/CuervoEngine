@@ -1,6 +1,9 @@
 #include "cuervo/script/game_runner.hpp"
 
 #include <SDL3/SDL_timer.h>
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/emscripten.h>
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -41,12 +44,17 @@ namespace fs = std::filesystem;
 namespace {
 
 double now_seconds() {
+#if defined(__EMSCRIPTEN__)
+    // performance.now(): microseconds in a cross-origin isolated page. SDL's
+    // counter only advances in whole milliseconds in the browser, which made
+    // every web --bench frame 16 or 17 ms (milestone 10.4).
+    return emscripten_get_now() / 1000.0;
+#else
     return static_cast<double>(SDL_GetPerformanceCounter()) / static_cast<double>(SDL_GetPerformanceFrequency());
+#endif
 }
 
-GraphicsApi graphics_api_for(rhi::Backend backend) {
-    return backend == rhi::Backend::Vulkan ? GraphicsApi::Vulkan : GraphicsApi::OpenGL;
-}
+GraphicsApi graphics_api_for(rhi::Backend backend) { return rhi::graphics_api(backend); }
 
 std::unique_ptr<rhi::Device> open_device(Window& window, rhi::Backend backend, const rhi::DeviceOptions& options,
                                          const std::string& title, ivec2 size, bool gl_es) {
@@ -139,6 +147,7 @@ private:
     Window window_;
     std::unique_ptr<rhi::Device> device_;
     render::SdfBatcher shapes_;
+    render::LightBatcher lights_;
     render::TextRenderer text_;
     // Sprites (Canvas.vector): the meshes and the images they come from.
     render::MeshBatcher meshes_;
@@ -205,16 +214,20 @@ bool GameLoop::init() {
     device_options.tier = project.render_tier;
     device_ = open_device(window_, options_.backend, device_options, project.name, project.virtual_size, options_.gl_es);
     // A Full project must not quietly fall back to GL: it would be refused anyway.
-    if (!device_ && options_.allow_fallback && options_.backend == rhi::Backend::Vulkan &&
+    // The default backend (Vulkan, or WebGPU in a browser) falls back to GL
+    // (WebGL2 on the web, DESIGN.md 4.4 "Clarified (Milestone 10.3)").
+    if (!device_ && options_.allow_fallback && options_.backend != rhi::Backend::OpenGL &&
         project.render_tier == rhi::Tier::Compatible) {
-        LOG_WARN("Vulkan unavailable, falling back to OpenGL");
+        LOG_WARN("{} unavailable, falling back to OpenGL", rhi::backend_name(options_.backend));
         device_ = open_device(window_, rhi::Backend::OpenGL, device_options, project.name, project.virtual_size,
                               options_.gl_es);
     }
     if (!device_) return false;
     if (!check_device_tier(device_->info(), project.render_tier)) return false;
 
-    if (!shapes_.init(*device_, 4096) || !text_.init(*device_) || !meshes_.init(*device_)) return false;
+    if (!shapes_.init(*device_, 4096) || !lights_.init(*device_) || !text_.init(*device_) || !meshes_.init(*device_)) {
+        return false;
+    }
     if (session_.font_atlas() != nullptr) font_ = text_.add_font(*session_.font_atlas());
 
     timestep_.emplace(project.tick_rate);
@@ -348,7 +361,12 @@ void GameLoop::render() {
     meshes_.clear();
     {
         CUERVO_PROFILE_ZONE("draw");
-        DrawTargets targets = make_draw_targets(shapes_, text_, font_, &vectors_, world_to_ndc, pixels, true);
+        // A capture (--screenshot) shows only its last frame: the frames before
+        // it skip the 2D lighting pass, which is render only (DESIGN.md 4.17,
+        // 9.7) and slow on software WebGL (the web export's verify run).
+        const bool lit = !capture_mode_ || host.tick_count() >= options_.screenshot_tick;
+        DrawTargets targets =
+            make_draw_targets(shapes_, text_, font_, &vectors_, world_to_ndc, pixels, true, lit ? &lights_ : nullptr);
         // Canvas.set_clip: virtual pixels to a scissor in the letterboxed viewport (DESIGN.md 4.17, 9.3).
         rhi::Device* const dev = device_.get();
         targets.clip = [dev, fit](bool on, vec2 pos, vec2 size) {
@@ -440,6 +458,31 @@ void GameLoop::bench_report() const {
              bench_.ticks ? bench_.sim_seconds * 1000.0 / static_cast<double>(bench_.ticks) : 0.0,
              sim_percentile(0.95), sim_sorted.empty() ? 0.0 : sim_sorted.back(), bench_.ticks,
              frames > 0 ? bench_.render_seconds * 1000.0 / frames : 0.0);
+    // Mean frame time of each second of the run, in order (a trailing part of
+    // under half a second is dropped). A cliff -- a stretch of seconds much
+    // slower than the rest, as a GPU memory or driver limit would cause -- shows
+    // as a worst window far above the median one (tools/bench.py "cliff_ratio").
+    std::vector<double> windows;
+    double window_ms = 0.0;
+    std::size_t window_frames = 0;
+    for (double ms : bench_.frame_ms) {
+        window_ms += ms;
+        ++window_frames;
+        if (window_ms >= 1000.0) {
+            windows.push_back(window_ms / static_cast<double>(window_frames));
+            window_ms = 0.0;
+            window_frames = 0;
+        }
+    }
+    if (window_frames > 0 && window_ms >= 500.0) windows.push_back(window_ms / static_cast<double>(window_frames));
+    if (windows.empty()) return;
+    std::vector<double> windows_sorted = windows;
+    std::sort(windows_sorted.begin(), windows_sorted.end());
+    const double median = windows_sorted[(windows_sorted.size() - 1) / 2];
+    std::string means;
+    for (double ms : windows) means += std::format("{}{:.3f}", means.empty() ? "" : " ", ms);
+    LOG_INFO("bench windows | {} x 1 s | frame ms mean {} | worst / median {:.3f}", windows.size(), means,
+             median > 0.0 ? windows_sorted.back() / median : 1.0);
 }
 
 int GameLoop::finish() {
@@ -457,6 +500,7 @@ int GameLoop::finish() {
     }
     text_.shutdown();
     meshes_.shutdown();
+    lights_.shutdown();
     shapes_.shutdown();
     device_.reset();
     window_.destroy();
@@ -472,7 +516,7 @@ int run_game(const GameOptions& options) {
         loop->finish();
         return EXIT_FAILURE;
     }
-    return platform::run_main_loop(std::move(loop));
+    return platform::run_main_loop(std::move(loop), options.vsync);
 }
 
 } // namespace cuervo::script

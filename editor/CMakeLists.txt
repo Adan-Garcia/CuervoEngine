@@ -21,6 +21,8 @@ add_library(editor_core STATIC
     asset_library.cpp
     input_map_doc.cpp
     live_tree.cpp
+    settings.cpp
+    anim_edit.cpp
 )
 target_link_libraries(editor_core PUBLIC cuervo)
 
@@ -43,6 +45,7 @@ add_executable(editor
     app_ui.cpp
     ui.cpp
     history_panel.cpp
+    animation_panel.cpp
     license_view.cpp
     launcher.cpp
 )
@@ -53,6 +56,8 @@ cuervo_add_shaders(editor
 )
 target_link_libraries(editor PRIVATE editor_core imgui SDL3::SDL3)
 set_target_properties(editor PROPERTIES OUTPUT_NAME cuervo-editor)
+# Windows: a GUI program (no console window); started from a terminal it logs there (docs/WINDOWS.md 5).
+cuervo_windows_app(editor GUI)
 target_compile_definitions(editor PRIVATE
     CUERVO_DEFAULT_FONT="${PROJECT_SOURCE_DIR}/assets/fonts/LiberationSans-Regular.ttf"
     # The brand (DESIGN.md 4.16): synced SVGs for the splash, and the fonts

@@ -14,13 +14,13 @@
 A 2D, vector-first, deterministic game engine in C++20 with its own statically typed
 scripting language, **Pluma** (`.plm` files). See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design.
 
-**Status: Beta (v0.1)** — the renderer has Vulkan and OpenGL/GLES/WebGL2 backends in
+**Status: Beta (v0.2)** — the renderer has Vulkan and OpenGL/GLES/WebGL2 backends in
 verified parity, with render tiers (`render_tier` in `project.toml`) and a migration report.
 The engine includes the Pluma language and VM (with AOT compilation to C), deterministic
 collections and math/geometry/random libraries, transform hierarchies and the node library,
 particles, collision, audio, UI widgets, binary scenes, replays, the editor, exporting, and
 the shmup example running natively and in the browser ([`docs/WEB.md`](docs/WEB.md)).
-Linux and web are supported; Windows is experimental and still being validated
+Linux, Windows (MSVC, MinGW-w64 and Clang builds) and the web are supported
 ([`docs/WINDOWS.md`](docs/WINDOWS.md)).
 
 **What is shipped, experimental, planned or unsupported is listed in
@@ -32,13 +32,13 @@ Linux and web are supported; Windows is experimental and still being validated
 | Linux x86-64, Vulkan 1.3 | Stable |
 | Linux x86-64, OpenGL 3.3 core | Stable |
 | Linux, OpenGL ES 3.0 (`--gl-es`) | Stable |
-| Web (WebGL2 / WASM), Chrome | Stable |
+| Web (WebGPU or WebGL2 / WASM), Chrome | Stable |
 | Web, WASM threads | Experimental |
 | Web, Firefox and Safari | Experimental |
-| Windows | Experimental |
+| Windows 10/11 x86-64 | Stable |
 | macOS, iOS, Android, consoles | Unsupported |
 
-53 features are classified (32 stable, 5 experimental, 14 planned, 2 unsupported). The `compatible` render tier runs everywhere; the `full` tier is desktop Vulkan only, and the tier check and the exporter refuse a project that claims more than its target provides. Details, per-feature platforms and the tier guarantees: [docs/STATUS.md](docs/STATUS.md).
+57 features are classified (41 stable, 5 experimental, 9 planned, 2 unsupported). The `compatible` render tier runs everywhere; the `full` tier is desktop Vulkan only, and the tier check and the exporter refuse a project that claims more than its target provides. Details, per-feature platforms and the tier guarantees: [docs/STATUS.md](docs/STATUS.md).
 <!-- support-matrix:end summary -->
 
 
@@ -61,11 +61,15 @@ API reference, search, light and dark): `cmake --build build/debug --target docs
 - [docs/SCENES.md](docs/SCENES.md): scene files and their text form
 - [docs/REPLAYS.md](docs/REPLAYS.md): recording and verifying replays
 - [docs/EXPORT.md](docs/EXPORT.md): packing and exporting games
+- [docs/PACKAGES.md](docs/PACKAGES.md): Pluma packages, `import` and project dependencies
+- [docs/PLUGINS.md](docs/PLUGINS.md): native plugins (C++, Rust, C#), the `@extern` FFI and the embedding API
 - [docs/WEB.md](docs/WEB.md): building and serving WebGL2/WASM exports
-- [docs/WINDOWS.md](docs/WINDOWS.md): Windows status and remaining verification
+- [docs/WINDOWS.md](docs/WINDOWS.md): building on Windows (MSVC, MinGW-w64, Clang), validation results and prebuilt binaries
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md): performance baselines, the capacity test and regression thresholds
 - [editor/README.md](editor/README.md): the editor
 - [CONTRIBUTING.md](CONTRIBUTING.md): building from source, testing, and contribution guide
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) and [SECURITY.md](SECURITY.md): how we work together, and how to report vulnerabilities
+- [docs/ROADMAP.md](docs/ROADMAP.md): the roadmap, generated from the milestones in DESIGN.md
 - [tools/vscode-pluma](tools/vscode-pluma/README.md): the VS Code extension (highlighting,
   language server, debugger)
 - [docs/DESIGN.md](docs/DESIGN.md): architecture, design decisions and the milestone list

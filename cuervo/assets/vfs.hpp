@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -50,6 +51,16 @@ public:
     // Mounts are searched in the order they were added.
     void mount_dir(std::filesystem::path root);
     void mount_pack(std::shared_ptr<const Pack> pack);
+
+    // Files derived by a converter (plugin importers, DESIGN.md 4.18): a path
+    // ending with `output_extension` that no mount has is read by converting
+    // the same path with `source_extension` ("levels/a.scene" from
+    // "levels/a.csv"). Development only: export stores the converted file in
+    // the pack instead, so a release game never runs a converter. A failed
+    // conversion's message is open()'s error.
+    using Convert = std::function<bool(std::string_view source_path, std::span<const std::byte> in,
+                                       std::vector<std::byte>& out, std::string& error)>;
+    void add_derived(std::string source_extension, std::string output_extension, Convert convert);
     void set_user_dir(std::filesystem::path dir) { user_dir_ = std::move(dir); }
 
     // Normalizes a game path ("./a\\b.plm" -> "a/b.plm"); false + `error` for
@@ -88,7 +99,17 @@ private:
         std::filesystem::path dir;
         std::shared_ptr<const Pack> pack;
     };
+    struct Derived {
+        std::string source_extension;
+        std::string output_extension;
+        Convert convert;
+    };
+    std::optional<VfsFile> open_mounted(const std::string& path) const;
+    bool exists_mounted(const std::string& path) const;
+    // The derivation that makes `path` and its source path, if any.
+    const Derived* derived_for(const std::string& path, std::string& source) const;
     std::vector<Mount> mounts_;
+    std::vector<Derived> derived_;
     std::filesystem::path user_dir_;
 };
 

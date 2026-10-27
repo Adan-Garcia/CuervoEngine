@@ -95,6 +95,9 @@ class Node {
     // The first descendant named `n` (depth-first, in child order), or null.
     fn find(n: str) -> Node {
         for c in children {
+            if c.freed {
+                continue
+            }
             if c.name == n {
                 return c
             }
@@ -472,6 +475,8 @@ class Scene {
             g.set_view(cam.global_position(), zoom = cam.zoom > 0.0 ? cam.zoom : 1.0, rotation = cam.global_rotation())
         }
         root.draw_tree(g)
+        // The lights the tree queued shade the world, not the layers above it.
+        g.apply_lights()
         if Camera2D.current_camera != null {
             g.reset_view()
         }

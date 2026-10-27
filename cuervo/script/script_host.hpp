@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #if CUERVO_FEATURE_AUDIO
@@ -16,6 +17,10 @@ namespace cuervo::audio {
 class AudioSystem;
 }
 #endif
+#if CUERVO_FEATURE_PHYSICS
+#include "cuervo/physics/physics_world.hpp"
+#endif
+#include "cuervo/core/hash.hpp"
 #include "cuervo/core/rng.hpp"
 #include "cuervo/input/input_map.hpp"
 #include "cuervo/math/affine2.hpp"
@@ -25,6 +30,7 @@ class AudioSystem;
 #elif CUERVO_FEATURE_COLLISION
 #include "cuervo/collision/collision_world.hpp"
 #endif
+#include "cuervo/render/light_batcher.hpp"
 #include "cuervo/render/sdf_batcher.hpp"
 #include "cuervo/render/text_renderer.hpp"
 #include "cuervo/scene/scene_file.hpp"
@@ -100,6 +106,12 @@ struct DrawTargets {
     // false ignores Canvas.set_view (the editor's scene view has its own
     // camera); the game draws through the scene's Camera2D.
     bool cameras = true;
+    // 2D lighting (DESIGN.md 4.17, 9.7): PointLight2D and friends queue into
+    // `lights` while the tree draws; Canvas.apply_lights calls `apply_lights`
+    // with the current view to shade everything drawn so far. Null `lights`
+    // (or a null `apply_lights`) draws the scene unlit.
+    render::LightBatcher* lights = nullptr;
+    std::function<void(const Affine2& view, float zoom)> apply_lights;
 };
 
 // DrawTargets drawing into the device's current viewport: `to_ndc` maps
@@ -107,8 +119,23 @@ struct DrawTargets {
 // editor's scene view passes its own camera with `cameras` off) and
 // `pixels_per_unit` is framebuffer pixels per virtual unit. Flushes go to
 // `shapes`, `text` and the batcher of `vectors` (optional).
+// `lights` (optional) receives the scene's lights and occluders.
 DrawTargets make_draw_targets(render::SdfBatcher& shapes, render::TextRenderer& text, render::FontHandle font,
-                              VectorCache* vectors, const Affine2& to_ndc, float pixels_per_unit, bool cameras);
+                              VectorCache* vectors, const Affine2& to_ndc, float pixels_per_unit, bool cameras,
+                              render::LightBatcher* lights = nullptr);
+
+// What state_hash() folds in for a script global (numbers, bools, vectors;
+// other values are skipped).
+void hash_global(StateHasher& h, const pluma::Value& g);
+// The hashed UI statics (prelude ui/ui.plm, in declaration order) as a game
+// that never uses the UI leaves them. A player built without the UI feature
+// hashes these after `unused_ui_anchor`, where the UI prelude's globals
+// would be, so it reaches the full player's state hash (DESIGN.md 4.11,
+// milestone 7.5 stripped players). A test checks them against the prelude.
+const std::vector<pluma::Value>& unused_ui_globals();
+inline constexpr std::string_view unused_ui_anchor = "Camera2D.current_camera";
+
+class PluginSet;
 
 struct HostOptions {
     std::uint64_t seed = 1;
@@ -128,6 +155,9 @@ struct HostOptions {
     // Audio triggers go here (cuervo/audio); null = a private null-backend
     // system, so scripts behave identically with or without sound.
     audio::AudioSystem* audio = nullptr;
+    // Native plugins (cuervo/script/plugin_host.hpp): their natives and
+    // finalizers are bound beside the engine's. Kept alive by every host.
+    std::shared_ptr<const PluginSet> plugins;
     // project.toml `main_scene` (project-relative): the first load builds the
     // root from this scene file instead of instantiating a main class.
     std::string main_scene;
@@ -238,6 +268,10 @@ public:
 #if CUERVO_FEATURE_AUDIO
     audio::AudioSystem& audio() { return *audio_; }
 #endif
+#if CUERVO_FEATURE_PHYSICS
+    physics::PhysicsWorld& physics_world() { return *physics_; }
+    const physics::PhysicsWorld& physics_world() const { return *physics_; }
+#endif
     float tick_seconds() const { return 1.0f / options_.tick_rate; }
 
 private:
@@ -250,6 +284,10 @@ private:
     void bind();
     void bind_scene_and_ui(); // script_host_scene.cpp
     void bind_animation();    // anim_bindings.cpp
+    void bind_lighting();     // light_bindings.cpp
+#if CUERVO_FEATURE_PHYSICS
+    void bind_physics();
+#endif
     bool finish_load(std::unique_ptr<pluma::Session> next, const std::string& main_class);
     // A project-relative scene file through the VFS (Scene.load, main_scene).
     std::optional<scene::SceneDoc> load_scene(std::string_view path, std::string& error, scene::LoadInfo* info) const;
@@ -278,6 +316,8 @@ private:
     std::vector<particles::EmitterId> free_emitters_;
 #else
     Pcg32 rng_;
+    // Unpaused ticks: what the particle system would count (state_hash()).
+    std::uint64_t particle_ticks_ = 0;
 #endif
 #if CUERVO_FEATURE_AUDIO
     std::unique_ptr<audio::AudioSystem> own_audio_;
@@ -304,6 +344,9 @@ private:
 #if !CUERVO_FEATURE_PARTICLES
     collision::CollisionWorld collision_;
 #endif
+#endif
+#if CUERVO_FEATURE_PHYSICS
+    std::unique_ptr<physics::PhysicsWorld> physics_;
 #endif
 
     // Canvas targets while draw() runs.
@@ -347,11 +390,26 @@ pluma::lsp::ServerOptions default_lsp_options(std::string root_path = {}, bool c
 
 // Compiles the engine prelude + `files` and emits a self-contained C11/C++20
 // translation unit (`pluma::emit_c`, DESIGN.md 5.12).
-std::optional<std::string> emit_aot_c(const std::vector<pluma::SourceFile::Part>& files, std::string& error);
+// A native plugin linked into an AOT module (DESIGN.md 4.18: AOT exports link
+// plugins statically): its package.toml `linux_static` / `windows_static` / `windows_gnu_static`.
+// The module lists them in `cuervo_aot_plugins`, which the player registers
+// (PluginSet::add_aot_plugins) before binding the scripts.
+struct StaticPlugin {
+    std::string name;
+    std::string version;
+    bool sim_safe = false;
+    std::filesystem::path library;
+};
+
+// `plugins` provides the natives of a project's plugins (milestone 10.5c).
+std::optional<std::string> emit_aot_c(const std::vector<pluma::SourceFile::Part>& files, std::string& error,
+                                      std::shared_ptr<const PluginSet> plugins = nullptr);
 
 // Compiles the engine prelude + `files` to a native shared library image
 // (`.cuervo/scripts.so`, ScriptForm::Native).
 std::optional<std::vector<std::byte>> compile_aot_scripts(const std::vector<pluma::SourceFile::Part>& files,
-                                                          std::string& error, int opt_level = 2);
+                                                          std::string& error, int opt_level = 2,
+                                                          std::shared_ptr<const PluginSet> plugins = nullptr,
+                                                          const std::vector<StaticPlugin>& statics = {});
 
 } // namespace cuervo::script

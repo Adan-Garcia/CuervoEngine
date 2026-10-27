@@ -9,3 +9,11 @@ CMakeUserPresets.json
 .idea/
 __pycache__/
 *.pyc
+Testing/
+# Plugin build outputs (examples/plugins/*/package.toml points at lib/).
+/examples/plugins/*/lib/
+/examples/plugins/*/target/
+/examples/plugins/*/bin/
+/examples/plugins/*/obj/
+/bindings/dotnet/*/bin/
+/bindings/dotnet/*/obj/

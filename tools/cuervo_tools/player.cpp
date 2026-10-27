@@ -12,7 +12,19 @@
 
 #include "cuervo/platform/platform.hpp"
 
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
+#include <cwchar>
+#include <cwctype>
+#include <map>
+#else
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/file.h>
@@ -61,10 +73,98 @@ std::string tail_lines(const std::string& text, std::size_t lines) {
     return text.substr(pos + 1);
 }
 
-#if !defined(_WIN32)
 // One build per cache entry at a time: two ninja runs in one build directory
 // corrupt each other, and parallel exports of projects with the
 // same features share an entry.
+#if defined(_WIN32)
+std::wstring widen(std::string_view text) {
+    if (text.empty()) return {};
+    const int n = ::MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
+    std::wstring out(static_cast<std::size_t>(n), L'\0');
+    ::MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), out.data(), n);
+    return out;
+}
+
+class FileLock {
+public:
+    explicit FileLock(const fs::path& file) {
+        handle_ = ::CreateFileW(file.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (handle_ != INVALID_HANDLE_VALUE) {
+            OVERLAPPED at{};
+            ::LockFileEx(handle_, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &at);
+        }
+    }
+    ~FileLock() {
+        if (handle_ != INVALID_HANDLE_VALUE) {
+            OVERLAPPED at{};
+            ::UnlockFileEx(handle_, 0, MAXDWORD, MAXDWORD, &at);
+            ::CloseHandle(handle_);
+        }
+    }
+    FileLock(const FileLock&) = delete;
+    FileLock& operator=(const FileLock&) = delete;
+
+private:
+    HANDLE handle_ = INVALID_HANDLE_VALUE;
+};
+
+// One argument as CommandLineToArgvW and the C runtimes split it back:
+// quoted when it has spaces, tabs or quotes, with backslashes doubled only
+// where they come before a quote.
+std::wstring quote_arg(const std::wstring& arg) {
+    if (!arg.empty() && arg.find_first_of(L" \t\n\v\"") == std::wstring::npos) return arg;
+    std::wstring out = L"\"";
+    for (std::size_t i = 0;; ++i) {
+        std::size_t slashes = 0;
+        while (i < arg.size() && arg[i] == L'\\') {
+            ++slashes;
+            ++i;
+        }
+        if (i == arg.size()) {
+            out.append(slashes * 2, L'\\');
+            break;
+        }
+        out.append(arg[i] == L'"' ? slashes * 2 + 1 : slashes, L'\\');
+        out.push_back(arg[i]);
+    }
+    out.push_back(L'"');
+    return out;
+}
+
+// Environment names are case-insensitive on Windows.
+struct EnvLess {
+    bool operator()(const std::wstring& a, const std::wstring& b) const {
+        return std::lexicographical_compare(a.begin(), a.end(), b.begin(), b.end(), [](wchar_t x, wchar_t y) {
+            return std::towupper(static_cast<std::wint_t>(x)) < std::towupper(static_cast<std::wint_t>(y));
+        });
+    }
+};
+
+// This process's environment with `overrides` applied, as a CreateProcessW
+// block: sorted NAME=value strings, each NUL-terminated, then one more NUL.
+std::wstring environment_block(const std::vector<std::pair<std::string, std::string>>& overrides) {
+    std::map<std::wstring, std::wstring, EnvLess> vars;
+    if (wchar_t* block = ::GetEnvironmentStringsW()) {
+        for (const wchar_t* p = block; *p != L'\0'; p += std::wcslen(p) + 1) {
+            const std::wstring entry(p);
+            const std::size_t eq = entry.find(L'=', 1); // "=C:=C:\..." entries start with '='
+            if (eq != std::wstring::npos) vars[entry.substr(0, eq)] = entry.substr(eq + 1);
+        }
+        ::FreeEnvironmentStringsW(block);
+    }
+    for (const auto& [k, v] : overrides) vars[widen(k)] = widen(v);
+    std::wstring out;
+    for (const auto& [k, v] : vars) {
+        out += k;
+        out += L'=';
+        out += v;
+        out += L'\0';
+    }
+    out += L'\0';
+    return out;
+}
+#else
 class FileLock {
 public:
     explicit FileLock(const fs::path& file) {
@@ -115,7 +215,7 @@ std::string PlayerToolchain::missing(assets::PackPlatform platform) const {
                                "host-tools, or --host-build <dir>)",
                                platform::utf8(host_build));
         }
-    } else if (platform != assets::PackPlatform::Linux) {
+    } else if (platform != assets::PackPlatform::Linux && platform != assets::PackPlatform::Windows) {
         return std::format("building {} players isn't supported yet", assets::platform_name(platform));
     }
     if (source_dir.empty() || !fs::is_regular_file(source_dir / "CMakeLists.txt", ec)) {
@@ -130,6 +230,17 @@ std::string PlayerToolchain::missing(assets::PackPlatform platform) const {
     for (const fs::path* c : {&c_compiler, &cxx_compiler}) {
         if (!c->empty() && !fs::is_regular_file(*c, ec)) {
             return std::format("the compiler '{}' not found", platform::utf8(*c));
+        }
+    }
+    // cl finds its headers and libraries through the developer prompt's
+    // environment, which the player build inherits.
+    if (platform == assets::PackPlatform::Windows) {
+        std::string name = platform::utf8(cxx_compiler.filename());
+        std::transform(name.begin(), name.end(), name.begin(),
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        const auto include = platform::env("INCLUDE");
+        if ((name == "cl.exe" || name == "cl") && (!include || include->empty())) {
+            return "MSVC needs a Visual Studio developer prompt (vcvars64.bat) to build players";
         }
     }
     return {};
@@ -163,10 +274,15 @@ std::vector<std::string> player_cmake_definitions(const script::FeatureSet& f, a
         std::format("CUERVO_FEATURE_COLLISION={}", on_off(f.collision)),
         std::format("CUERVO_FEATURE_DEV={}", on_off(f.dev)),
         std::format("CUERVO_FEATURE_PARTICLES={}", on_off(f.particles)),
+        std::format("CUERVO_FEATURE_PHYSICS={}", on_off(f.physics)),
         std::format("CUERVO_FEATURE_UI={}", on_off(f.ui)),
         std::format("CUERVO_FONT_IMPORT={}", on_off(f.font_import)),
         std::format("CUERVO_SVG_IMPORT={}", on_off(f.svg_import)),
         std::format("CUERVO_VULKAN={}", on_off(f.vulkan && !web)),
+        // Web players carry WebGPU and WebGL2 in one .wasm and pick at load
+        // (milestone 10.3, DESIGN.md 4.4); native players ship Vulkan and GL
+        // (WebGPU is experimental there).
+        std::format("CUERVO_WEBGPU={}", on_off(web)),
     };
     if (web) defs.push_back("CUERVO_WEB_PACK=fetch"); // loads the game.pak next to the page
     std::sort(defs.begin(), defs.end());
@@ -174,7 +290,7 @@ std::vector<std::string> player_cmake_definitions(const script::FeatureSet& f, a
 }
 
 bool can_strip(const script::FeatureSet& f) {
-    return !(f.audio && f.ui && f.particles && f.collision && f.vulkan && f.dev && f.svg_import && f.font_import);
+    return !(f.audio && f.ui && f.particles && f.collision && f.physics && f.vulkan && f.dev && f.svg_import && f.font_import);
 }
 
 std::string check_feature_dependencies(const script::FeatureSet& f) {
@@ -250,6 +366,9 @@ fs::path default_player_cache_dir() {
     if (auto xdg = platform::env("XDG_CACHE_HOME"); xdg && !xdg->empty()) {
         return platform::path_from_utf8(*xdg) / "cuervo" / "players";
     }
+    if (auto local = platform::env("LOCALAPPDATA"); platform::os == platform::Os::Windows && local && !local->empty()) {
+        return platform::path_from_utf8(*local) / "cuervo" / "players";
+    }
     if (auto home = platform::env("HOME"); home && !home->empty()) {
         return platform::path_from_utf8(*home) / ".cache" / "cuervo" / "players";
     }
@@ -260,13 +379,76 @@ std::optional<ProcessResult> run_process(const std::vector<std::string>& argv, c
                                          const std::vector<std::pair<std::string, std::string>>& env,
                                          const fs::path& log, std::chrono::seconds timeout, std::string& error) {
 #if defined(_WIN32)
-    (void)argv;
-    (void)cwd;
-    (void)env;
-    (void)log;
-    (void)timeout;
-    error = "running build tools from cuervo-tools is not supported on Windows yet";
-    return std::nullopt;
+    if (argv.empty()) {
+        error = "run_process: no program";
+        return std::nullopt;
+    }
+    std::wstring command;
+    for (const std::string& a : argv) {
+        if (!command.empty()) command += L' ';
+        command += quote_arg(widen(a));
+    }
+    std::wstring env_block = environment_block(env);
+    SECURITY_ATTRIBUTES inherit{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+    HANDLE out = ::CreateFileW(log.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &inherit, CREATE_ALWAYS,
+                               FILE_ATTRIBUTE_NORMAL, nullptr);
+    HANDLE in = ::CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &inherit, OPEN_EXISTING, 0,
+                              nullptr);
+    if (out == INVALID_HANDLE_VALUE || in == INVALID_HANDLE_VALUE) {
+        if (out != INVALID_HANDLE_VALUE) ::CloseHandle(out);
+        if (in != INVALID_HANDLE_VALUE) ::CloseHandle(in);
+        error = std::format("can't open the log '{}'", platform::utf8(log));
+        return std::nullopt;
+    }
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = in;
+    si.hStdOutput = out;
+    si.hStdError = out;
+    PROCESS_INFORMATION pi{};
+    // A job holds the whole tree (cmake, ninja, the compilers), so a timeout
+    // ends all of it, as the process kill does on Linux.
+    HANDLE job = ::CreateJobObjectW(nullptr, nullptr);
+    if (job != nullptr) {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        ::SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits));
+    }
+    const std::wstring dir = cwd.empty() ? std::wstring() : cwd.wstring();
+    const BOOL started = ::CreateProcessW(nullptr, command.data(), nullptr, nullptr, TRUE,
+                                          CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW | CREATE_SUSPENDED,
+                                          env_block.data(), dir.empty() ? nullptr : dir.c_str(), &si, &pi);
+    const DWORD start_error = ::GetLastError();
+    ::CloseHandle(out);
+    ::CloseHandle(in);
+    if (!started) {
+        if (job != nullptr) ::CloseHandle(job);
+        error = std::format("can't run '{}' (error {})", argv[0], start_error);
+        return std::nullopt;
+    }
+    if (job != nullptr) ::AssignProcessToJobObject(job, pi.hProcess);
+    ::ResumeThread(pi.hThread);
+    ::CloseHandle(pi.hThread);
+
+    ProcessResult result;
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count();
+    if (::WaitForSingleObject(pi.hProcess, static_cast<DWORD>(ms)) == WAIT_TIMEOUT) {
+        if (job != nullptr) {
+            ::TerminateJobObject(job, 1);
+        } else {
+            ::TerminateProcess(pi.hProcess, 1);
+        }
+        ::WaitForSingleObject(pi.hProcess, INFINITE);
+        result.timed_out = true;
+    }
+    DWORD code = 0;
+    ::GetExitCodeProcess(pi.hProcess, &code);
+    ::CloseHandle(pi.hProcess);
+    if (job != nullptr) ::CloseHandle(job); // ends whatever the program left running
+    result.exit_code = result.timed_out ? -1 : static_cast<int>(code);
+    result.output = read_text(log);
+    return result;
 #else
     if (argv.empty()) {
         error = "run_process: no program";
@@ -334,11 +516,13 @@ std::optional<PlayerBuild> build_player(const script::FeatureSet& features, cons
         return std::nullopt;
     }
     const bool web = platform == assets::PackPlatform::Web;
-    if ((platform != assets::PackPlatform::Linux && !web) || assets::host_platform() != assets::PackPlatform::Linux) {
-        // Windows needs a Windows host (docs/EXPORT.md "Stripped players").
-        error = std::format("building a stripped player for {} is not supported yet (Linux and web, on a Linux "
-                            "host); use --engine full",
-                            assets::platform_name(platform));
+    const bool windows = platform == assets::PackPlatform::Windows;
+    // A native player builds on its own platform with this build's compilers;
+    // web players need emcc's shell scripts, so a Linux host.
+    if (web ? assets::host_platform() != assets::PackPlatform::Linux : assets::host_platform() != platform) {
+        error = std::format("building a stripped player for {} needs a {} host (docs/EXPORT.md \"Stripped "
+                            "players\"); use --engine full or --runtime <path>",
+                            assets::platform_name(platform), web ? "Linux" : assets::platform_name(platform));
         return std::nullopt;
     }
     if (std::string why = check_feature_dependencies(features); !why.empty()) {
@@ -356,9 +540,7 @@ std::optional<PlayerBuild> build_player(const script::FeatureSet& features, cons
         error = std::format("can't create '{}': {}", platform::utf8(build.build_dir), ec.message());
         return std::nullopt;
     }
-#if !defined(_WIN32)
     FileLock lock(cache_root / (build.key + ".lock"));
-#endif
 
     // Configure once; afterwards `cmake --build` re-runs the configure step by
     // itself whenever a CMakeLists changed, so the cache entry tracks the sources.
@@ -381,8 +563,9 @@ std::optional<PlayerBuild> build_player(const script::FeatureSet& features, cons
     }
     if (progress) progress(std::format("building the stripped player ({})", build.key));
     const fs::path build_log = build.build_dir / "player-build-step.log";
+    // Windows ships the GUI-subsystem twin of the runtime (runtime/CMakeLists.txt).
     auto built = run_process({platform::utf8(toolchain.cmake), "--build", platform::utf8(build.build_dir), "--target",
-                              "runtime"},
+                              windows ? "player" : "runtime"},
                              {}, env, build_log, timeout, error);
     if (!built) return std::nullopt;
     {
@@ -397,7 +580,9 @@ std::optional<PlayerBuild> build_player(const script::FeatureSet& features, cons
         return std::nullopt;
     }
     // Web: the page directory (index.html, index.js, index.wasm) is the "player".
-    build.executable = web ? build.build_dir / "runtime" : build.build_dir / "runtime" / "cuervo";
+    build.executable = web       ? build.build_dir / "runtime"
+                       : windows ? build.build_dir / "runtime" / "cuervo-player.exe"
+                                 : build.build_dir / "runtime" / "cuervo";
     if (!fs::exists(web ? build.executable / "index.wasm" : build.executable, ec)) {
         error = std::format("the stripped player build produced no '{}'", platform::utf8(build.executable));
         return std::nullopt;

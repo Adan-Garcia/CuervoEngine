@@ -1,0 +1,17 @@
+# A native plugin written in C++ (docs/PLUGINS.md): a package whose @native
+# declarations (scripts/orbit.plm) are implemented in src/orbit.cpp over the
+# plugin ABI. `cmake --build <build> --target orbit_plugin` puts the libraries
+# in lib/.
+name = "orbit"
+version = "1.0.0"
+description = "Orbiting nodes, with native C++ helpers"
+license = "MIT"
+
+[plugin]
+abi = 1
+sim_safe = true                  # only IEEE arithmetic: deterministic
+linux = "lib/liborbit.so"
+linux_static = "lib/liborbit.a"  # linked into AOT exports
+windows = "lib/orbit.dll"
+windows_static = "lib/orbit_static.lib"  # MSVC-runtime builds
+windows_gnu_static = "lib/liborbit_gnu.a" # MinGW-w64 builds

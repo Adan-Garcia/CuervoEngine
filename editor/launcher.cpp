@@ -96,7 +96,7 @@ bool Launcher::open(std::string& error) {
         if (!window_.create({.title = "Cuervo Engine",
                              .width = options_.width,
                              .height = options_.height,
-                             .graphics = backend == rhi::Backend::Vulkan ? GraphicsApi::Vulkan : GraphicsApi::OpenGL,
+                             .graphics = rhi::graphics_api(backend),
                              .gl_es = options_.gl_es})) {
             return false;
         }

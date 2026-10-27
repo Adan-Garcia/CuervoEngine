@@ -1,0 +1,509 @@
+// Base class for 2D physics bodies (StaticBody2D, RigidBody2D, CharacterBody2D).
+class PhysicsBody2D extends Node2D {
+    // The physics layers this body is on (bitmask).
+    @export var collision_layer = 1
+    // The physics layers this body scans for collisions (bitmask).
+    @export var collision_mask = 1
+
+    // Native body handle.
+    var body_handle = 0
+
+    // Synchronizes node global transform to native physics body.
+    fn _sync_to_physics() {
+        if body_handle != 0 {
+            _Physics.body_set_transform(body_handle, global_position(), global_rotation())
+        }
+    }
+
+    // Internal helper returning the body kind (0: Static, 1: Kinematic, 2: Dynamic).
+    fn _body_kind() -> int {
+        return 0
+    }
+
+    // Internal hook for initializing body-specific properties upon creation.
+    fn _init_body() {
+    }
+
+    // Internal hook for synchronizing script-modified properties to native body.
+    fn _sync_dirty_props() {
+    }
+
+    // Ensures the native physics body is created.
+    fn ensure_body() {
+        if body_handle == 0 {
+            create_native_body(_body_kind())
+            _init_body()
+        }
+    }
+
+    // Engine-internal tree entry hook ensuring native body exists before child shapes register.
+    fn enter_tree() {
+        ensure_body()
+        super.enter_tree()
+        _sync_dirty_props()
+    }
+
+    // Creates the native physics body upon entering the tree.
+    fn ready() {
+        ensure_body()
+    }
+
+    // Cleans up the native body when leaving the tree.
+    fn exit() {
+        destroy_native_body()
+    }
+
+    // Creates the underlying Box2D body with specified type kind (0: Static, 1: Kinematic, 2: Dynamic).
+    fn create_native_body(kind: int) {
+        if body_handle != 0 {
+            return
+        }
+        body_handle = _Physics.body_create(kind, global_position(), global_rotation(), collision_layer, collision_mask, self)
+        for c in children {
+            if c is CollisionShape2D cs {
+                cs.register_shape()
+            } else if c is CollisionPolygon2D cp {
+                cp.register_shape()
+            }
+        }
+    }
+
+    // Destroys the native body handle.
+    fn destroy_native_body() {
+        if body_handle != 0 {
+            _Physics.body_destroy(body_handle)
+            body_handle = 0
+        }
+    }
+}
+
+// A static 2D physics body that does not move under simulation forces (floors, walls, obstacles).
+class StaticBody2D extends PhysicsBody2D {
+    // Constant linear velocity for conveyor belts and moving surfaces.
+    @export var constant_linear_velocity = vec2(0.0, 0.0)
+
+    // Internal helper returning the body kind (0: Static).
+    fn _body_kind() -> int {
+        return 0
+    }
+
+    // Creates static body.
+    fn ready() {
+        ensure_body()
+        if body_handle != 0 && (constant_linear_velocity.x != 0.0 || constant_linear_velocity.y != 0.0) {
+            _Physics.body_set_constant_velocity(body_handle, constant_linear_velocity)
+        }
+    }
+
+    // Static bodies do not move.
+    fn _sync_to_physics() {
+        if body_handle != 0 && (constant_linear_velocity.x != 0.0 || constant_linear_velocity.y != 0.0) {
+            _Physics.body_set_constant_velocity(body_handle, constant_linear_velocity)
+        }
+    }
+}
+
+// A 2D physics body that is simulated kinematically, ideal for moving platforms and doors.
+class AnimatableBody2D extends PhysicsBody2D {
+    // When true, body movement synchronizes to physics simulation ticks.
+    @export var sync_to_physics = true
+
+    // Internal helper returning the body kind (1: Kinematic).
+    fn _body_kind() -> int {
+        return 1
+    }
+
+    // Creates animatable kinematic body.
+    fn ready() {
+        ensure_body()
+    }
+
+    // Synchronizes node global transform to native Box2D body.
+    fn _sync_to_physics() {
+        if sync_to_physics && body_handle != 0 {
+            _Physics.body_set_transform(body_handle, global_position(), global_rotation())
+        }
+    }
+}
+
+// A dynamic 2D rigid body fully simulated by Box2D physics.
+class RigidBody2D extends PhysicsBody2D {
+    // Body mass in kilograms.
+    @export var mass = 1.0
+    // Multiplier for gravity applied to this body.
+    @export var gravity_scale = 1.0
+    // Current linear velocity vector in pixels per second.
+    @export var linear_velocity = vec2(0.0, 0.0)
+    // Current angular velocity in radians per second.
+    @export var angular_velocity = 0.0
+    // Linear damping reducing movement speed over time.
+    @export var linear_damp = 0.0
+    // Angular damping reducing rotational speed over time.
+    @export var angular_damp = 0.0
+    // When true, the body cannot rotate.
+    @export var lock_rotation = false
+    // When true, continuous collision detection (CCD) is enabled for fast-moving bodies.
+    @export var continuous_cd = false
+    // When true, the body can enter sleep state to save CPU simulation time.
+    @export var can_sleep = true
+
+    // Cached linear velocity for detecting direct script field assignments.
+    var _prev_vel = vec2(0.0, 0.0)
+    // Cached angular velocity for detecting direct script field assignments.
+    var _prev_ang_vel = 0.0
+    // Cached rotation lock state for detecting direct script field assignments.
+    var _prev_lock_rot = false
+    // Cached gravity scale for detecting direct script field assignments.
+    var _prev_grav = 1.0
+    // Cached continuous CD flag for detecting direct script field assignments.
+    var _prev_ccd = false
+
+    // Internal helper returning the body kind (2: Dynamic).
+    fn _body_kind() -> int {
+        return 2
+    }
+
+    // Internal hook applying mass, damping, velocities, and motion locks.
+    fn _init_body() {
+        if body_handle != 0 {
+            _Physics.body_set_motion_locks(body_handle, lock_rotation)
+            _Physics.body_set_mass(body_handle, mass)
+            _Physics.body_set_gravity_scale(body_handle, gravity_scale)
+            _Physics.body_set_damp(body_handle, linear_damp, angular_damp)
+            if continuous_cd {
+                _Physics.body_set_bullet(body_handle, continuous_cd)
+            }
+            if !can_sleep {
+                _Physics.body_set_can_sleep(body_handle, can_sleep)
+            }
+            if linear_velocity.x != 0.0 || linear_velocity.y != 0.0 {
+                _Physics.body_set_linear_velocity(body_handle, linear_velocity)
+            }
+            if angular_velocity != 0.0 {
+                _Physics.body_set_angular_velocity(body_handle, angular_velocity)
+            }
+            _prev_vel = linear_velocity
+            _prev_ang_vel = angular_velocity
+            _prev_lock_rot = lock_rotation
+            _prev_grav = gravity_scale
+            _prev_ccd = continuous_cd
+        }
+    }
+
+    // Internal hook pushing any script-modified properties to the native Box2D body.
+    fn _sync_dirty_props() {
+        if body_handle == 0 {
+            return
+        }
+        if lock_rotation != _prev_lock_rot {
+            _Physics.body_set_motion_locks(body_handle, lock_rotation)
+            _prev_lock_rot = lock_rotation
+        }
+        if gravity_scale != _prev_grav {
+            _Physics.body_set_gravity_scale(body_handle, gravity_scale)
+            _prev_grav = gravity_scale
+        }
+        if continuous_cd != _prev_ccd {
+            _Physics.body_set_bullet(body_handle, continuous_cd)
+            _prev_ccd = continuous_cd
+        }
+        if linear_velocity.x != _prev_vel.x || linear_velocity.y != _prev_vel.y {
+            _Physics.body_set_linear_velocity(body_handle, linear_velocity)
+            _prev_vel = linear_velocity
+        }
+        if angular_velocity != _prev_ang_vel {
+            _Physics.body_set_angular_velocity(body_handle, angular_velocity)
+            _prev_ang_vel = angular_velocity
+        }
+    }
+
+    // Engine-internal per-tick update hook that syncs script-modified velocity or flags.
+    fn update_tree(dt: float) {
+        super.update_tree(dt)
+        _sync_dirty_props()
+    }
+
+    // Creates dynamic body and applies initial properties.
+    fn ready() {
+        ensure_body()
+    }
+
+    // Dynamic bodies are driven by Box2D simulation, not synchronized from scene nodes.
+    fn _sync_to_physics() {
+    }
+
+    // Applies a continuous force vector to the center of mass.
+    fn apply_force(force: vec2) {
+        if body_handle != 0 {
+            _Physics.body_apply_force(body_handle, force)
+        }
+    }
+
+    // Applies an instantaneous linear impulse vector to the center of mass.
+    fn apply_impulse(impulse: vec2) {
+        if body_handle != 0 {
+            _Physics.body_apply_impulse(body_handle, impulse)
+        }
+    }
+
+    // Applies a continuous force vector at a specified world offset.
+    fn apply_force_at_point(force: vec2, point: vec2) {
+        if body_handle != 0 {
+            _Physics.body_apply_force_at_point(body_handle, force, point)
+        }
+    }
+
+    // Applies an instantaneous linear impulse vector at a specified world offset.
+    fn apply_impulse_at_point(impulse: vec2, point: vec2) {
+        if body_handle != 0 {
+            _Physics.body_apply_impulse_at_point(body_handle, impulse, point)
+        }
+    }
+
+    // Sets whether continuous collision detection (bullet mode) is enabled.
+    fn set_bullet(bullet: bool) {
+        continuous_cd = bullet
+        _prev_ccd = bullet
+        if body_handle != 0 {
+            _Physics.body_set_bullet(body_handle, bullet)
+        }
+    }
+
+    // Returns true if continuous collision detection (bullet mode) is enabled.
+    fn is_bullet() -> bool {
+        if body_handle != 0 {
+            continuous_cd = _Physics.body_is_bullet(body_handle)
+            _prev_ccd = continuous_cd
+        }
+        return continuous_cd
+    }
+
+    // Sets whether this body can enter sleep mode.
+    fn set_can_sleep(cs: bool) {
+        can_sleep = cs
+        if body_handle != 0 {
+            _Physics.body_set_can_sleep(body_handle, cs)
+        }
+    }
+
+    // Returns true if this body can enter sleep mode.
+    fn is_can_sleep() -> bool {
+        if body_handle != 0 {
+            can_sleep = _Physics.body_is_can_sleep(body_handle)
+        }
+        return can_sleep
+    }
+
+    // Wakes up or puts the body to sleep.
+    fn set_awake(awake: bool) {
+        if body_handle != 0 {
+            _Physics.body_set_awake(body_handle, awake)
+        }
+    }
+
+    // Returns true if the body is currently awake.
+    fn is_awake() -> bool {
+        if body_handle != 0 {
+            return _Physics.body_is_awake(body_handle)
+        }
+        return false
+    }
+
+    // Applies a rotational torque.
+    fn apply_torque(torque: float) {
+        if body_handle != 0 {
+            _Physics.body_apply_torque(body_handle, torque)
+        }
+    }
+
+    // Applies an instantaneous angular impulse.
+    fn apply_angular_impulse(impulse: float) {
+        if body_handle != 0 {
+            _Physics.body_apply_angular_impulse(body_handle, impulse)
+        }
+    }
+
+    // Sets linear velocity directly.
+    fn set_linear_velocity(v: vec2) {
+        linear_velocity = v
+        _prev_vel = v
+        if body_handle != 0 {
+            _Physics.body_set_linear_velocity(body_handle, v)
+        }
+    }
+
+    // Gets linear velocity from simulation.
+    fn get_linear_velocity() -> vec2 {
+        if body_handle != 0 {
+            linear_velocity = _Physics.body_get_linear_velocity(body_handle)
+            _prev_vel = linear_velocity
+        }
+        return linear_velocity
+    }
+
+    // Sets angular velocity directly.
+    fn set_angular_velocity(w: float) {
+        angular_velocity = w
+        _prev_ang_vel = w
+        if body_handle != 0 {
+            _Physics.body_set_angular_velocity(body_handle, w)
+        }
+    }
+
+    // Gets angular velocity from simulation.
+    fn get_angular_velocity() -> float {
+        if body_handle != 0 {
+            angular_velocity = _Physics.body_get_angular_velocity(body_handle)
+            _prev_ang_vel = angular_velocity
+        }
+        return angular_velocity
+    }
+
+    // Internal synchronization called after physics step.
+    fn _set_physics_transform(pos: vec2, rot: float) {
+        position = pos
+        rotation = rot
+    }
+}
+
+// Holds data about a collision occurring during a kinematic move.
+class KinematicCollision2D {
+    // The point of collision in world coordinates.
+    var position = vec2(0.0, 0.0)
+    // The surface normal at the point of collision.
+    var normal = vec2(0.0, 0.0)
+    // The travel motion prior to collision.
+    var travel = vec2(0.0, 0.0)
+    // The remaining motion deflected along the surface.
+    var remainder = vec2(0.0, 0.0)
+    // The colliding body node.
+    var collider: Node2D? = null
+}
+
+// A 2D kinematic body specialized for player and character movement with move_and_slide().
+class CharacterBody2D extends PhysicsBody2D {
+    // Current linear velocity vector in pixels per second.
+    @export var velocity = vec2(0.0, 0.0)
+    // Direction vector pointing up (defaults to (0, -1) for standard 2D view).
+    @export var up_direction = vec2(0.0, -1.0)
+    // Maximum angle in radians for a surface to be considered a walkable floor.
+    @export var floor_max_angle = 0.785398
+    // Maximum number of collision iterations per move_and_slide call.
+    @export var max_slides = 4
+
+    // True if the character stood on a floor surface during the last move_and_slide.
+    var on_floor = false
+    // True if the character touched a wall during the last move_and_slide.
+    var on_wall = false
+    // True if the character bumped a ceiling during the last move_and_slide.
+    var on_ceiling = false
+    // Surface normal vector of the floor contact.
+    var floor_normal = vec2(0.0, 0.0)
+    // Surface normal vector of the wall contact.
+    var wall_normal = vec2(0.0, 0.0)
+    // List of collisions recorded during the last move_and_slide call.
+    var slide_collisions = List<KinematicCollision2D>()
+    // Linear velocity vector of the floor collider beneath the character's feet.
+    @export var floor_velocity = vec2(0.0, 0.0)
+
+    // Internal helper returning the body kind (1: Kinematic).
+    fn _body_kind() -> int {
+        return 1
+    }
+
+    // Creates kinematic character body.
+    fn ready() {
+        ensure_body()
+    }
+
+    // CharacterBody2D synchronizes its transform during move_and_slide.
+    fn _sync_to_physics() {
+    }
+
+    // Internal synchronization called after post-step floor depenetration.
+    fn _set_physics_transform(pos: vec2, rot: float) {
+        position = pos
+        rotation = rot
+    }
+
+    // Returns true if the character is touching a floor surface.
+    fn is_on_floor() -> bool {
+        return on_floor
+    }
+
+    // Returns true if the character is touching a wall surface.
+    fn is_on_wall() -> bool {
+        return on_wall
+    }
+
+    // Returns true if the character is touching a ceiling surface.
+    fn is_on_ceiling() -> bool {
+        return on_ceiling
+    }
+
+    // Returns the normal of the floor contact.
+    fn get_floor_normal() -> vec2 {
+        return floor_normal
+    }
+
+    // Returns the normal of the wall contact.
+    fn get_wall_normal() -> vec2 {
+        return wall_normal
+    }
+
+    // Returns the linear velocity vector of the floor collider beneath the character's feet.
+    fn get_platform_velocity() -> vec2 {
+        return floor_velocity
+    }
+
+    // Returns the number of slide collisions that occurred this frame.
+    fn get_slide_collision_count() -> int {
+        return slide_collisions.len()
+    }
+
+    // Returns the slide collision at index `i`.
+    fn get_slide_collision(i: int) -> KinematicCollision2D {
+        return slide_collisions[i]
+    }
+
+    // Internal helper updating kinematic state from native move_and_slide solver.
+    fn _apply_slide_result(new_pos: vec2, new_vel: vec2, floor: bool, wall: bool, ceiling: bool, fnorm: vec2, wnorm: vec2, fvel: vec2) {
+        position = new_pos
+        velocity = new_vel
+        on_floor = floor
+        on_wall = wall
+        on_ceiling = ceiling
+        floor_normal = fnorm
+        wall_normal = wnorm
+        floor_velocity = fvel
+    }
+
+    // Internal helper clearing recorded slide collisions.
+    fn _clear_slide_collisions() {
+        slide_collisions = List<KinematicCollision2D>()
+    }
+
+    // Internal helper appending a slide collision.
+    fn _add_slide_collision(pos: vec2, norm: vec2, trav: vec2, rem: vec2, col: Node2D?) {
+        var c = KinematicCollision2D()
+        c.position = pos
+        c.normal = norm
+        c.travel = trav
+        c.remainder = rem
+        c.collider = col
+        slide_collisions.push(c)
+    }
+
+    // Moves the character according to `velocity * dt`, sliding along walls/slopes and pushing dynamic bodies.
+    fn move_and_slide() -> bool {
+        if body_handle == 0 {
+            ensure_body()
+        }
+        if body_handle == 0 {
+            position = position + velocity * Time.dt
+            return false
+        }
+        return _Physics.move_and_slide(self, Time.dt)
+    }
+}
+

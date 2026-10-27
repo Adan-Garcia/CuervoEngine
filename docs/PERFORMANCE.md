@@ -32,6 +32,10 @@ each by default, and keeps the median of the runs:
   measured around the tick, outside rendering);
 - the live particle count (one SDF shape per particle);
 - peak resident memory of the process (POSIX `wait4`; skipped on Windows);
+- the **frame-time cliff ratio**: the slowest one-second window's mean frame time over the
+  median window's, worst of the runs (the runtime's `bench windows |` line, milestone 10.4). A
+  steady run stays near 1; a stretch of slow seconds that the percentiles average away shows
+  up here;
 - the **state hash** at tick 600 of a scripted capture run, once with the default job count
   and once with `--jobs 1`;
 - export sizes: `cuervo-tools export` of the shmup and bench examples, full and stripped
@@ -72,22 +76,33 @@ but reports timings as information.
 
 ### Web
 
-The web build is measured by hand, because it needs the emsdk, the host tools and a browser
-(see [WEB.md](WEB.md)). Build the `web-pack` runtime with the bench project preloaded, then run
-it in headless Chrome on the real GPU:
+Milestone 10.4: `--web <web runtime dir>` runs the same workloads in headless Chrome on the real
+GPU (`tools/web/smoke_test.mjs --gpu`), on WebGPU or on the WebGL2 fallback (`--no-webgpu`), and
+stores them under `builds.web`. `--build-dir` then only provides `cuervo-tools`, which packs each
+project next to a copy of the page. It needs the emsdk's Node (or `CUERVO_NODE`) and Chrome.
 
 ```sh
-node tools/web/smoke_test.mjs --gpu --dir <web runtime dir> --args "--bench 6 --bench-warmup 4" --expect "bench |"
-node tools/web/smoke_test.mjs --gpu --dir <web runtime dir> --args "--screenshot /tmp/w.ppm" --expect "state hash"
+cmake --preset web-pack-threads && cmake --build --preset web-pack-threads
+python3 tools/bench.py record --build-dir build/release --web build/web-pack-threads/runtime \
+    --backends webgpu webgl2 --out docs/perf/baseline-<machine-id>.json
+python3 tools/bench.py record --build-dir build/release --web build/web-pack-threads/runtime \
+    --backends webgpu webgl2 --out new.json
+python3 tools/bench.py compare docs/perf/baseline-<machine-id>.json new.json
 ```
 
-The first prints the same `bench | ...` line as a native run (frame time, `sim ... ms/tick`);
-record it under `builds.web.backends.webgl2` with the keys of the native entries
-(`frame_ms`, `sim_tick_ms`, `particles`, `state_hash`, ...); the second gives the state hash
-at the screenshot tick, which must equal the native hash for that tick. No web numbers are
-committed yet: the web figures in [WEB.md](WEB.md) are the last measured ones.
+What differs from a native run:
 
-## Reading a baseline file
+- the canvas, not the window, sets the resolution (1054x593 in the smoke test's 1280x800 page);
+- no peak memory (the browser's processes are not the engine's);
+- the state-hash run passes `--screenshot-tick 600` (a page has no environment variables);
+- uncapped means `setImmediate` frames (`run_main_loop` with VSync off): browsers clamp
+  `setTimeout(0)` to about 4 ms, which had capped WebGL2 runs at 250 FPS, and WebGPU has no swap
+  interval at all (it ran at the 60 Hz animation-frame rate). Chrome still presents WebGL2 at
+  most 240 times a second, so the WebGL2 frame rate is the browser's ceiling, not the engine's;
+- the web clock is `performance.now()`: SDL's counter advanced in whole milliseconds in the
+  browser, so every web frame used to measure 16 or 17 ms.
+
+## Reading a baseline file## Reading a baseline file
 
 ```json
 {
@@ -153,6 +168,7 @@ smoke test).
 | Export sizes (player, pack) | +5% | sizes are exact; growth is a decision |
 | Capacity, CPU limit | -15% | strict: it is machine-comparable |
 | Capacity, frame-time limit | -25% | GPU bound, so loose |
+| Frame-time cliff ratio | at most 1.5 (absolute, the new record only) | a steady run has no slow stretch (milestone 10.4) |
 
 Timings under 0.05 ms are reported as information only: a percentage of a few microseconds is
 noise. Timings, memory and capacity are only enforced on the same machine id.
@@ -215,6 +231,31 @@ by 20% at 50k, which is what the strict 15% check is for), and the second, at a 
 | debug (c++ (GCC) 16.2.1 20260810) | vulkan | Vulkan 1.4.351 (NVIDIA GeForce RTX 3060 Ti), compatible tier | 1280x720 | 4x | 8 | auto |
 | release (c++ (GCC) 16.2.1 20260810) | gl | 3.3.0 NVIDIA 615.78.08 (NVIDIA GeForce RTX 3060 Ti/PCIe/SSE2), 4x MSAA, compatible tier | 1280x720 | 4x | 8 | offscreen |
 | release (c++ (GCC) 16.2.1 20260810) | vulkan | Vulkan 1.4.351 (NVIDIA GeForce RTX 3060 Ti), compatible tier | 1280x720 | 4x | 8 | auto |
+
+### Web (WebGPU and WebGL2)
+
+Milestone 10.4, `builds.web` of the same file: the `web-pack-threads` runtime (emscripten
+6.0.12, 8 job threads) in headless Google Chrome 156 on the RTX 3060 Ti, 1054x593, 4x MSAA.
+
+| Backend | Particles | FPS | frame p50 / p95 / p99 / max (ms) | sim ms/tick (mean / p95) | cliff ratio | state hash |
+|---|---|---|---|---|---|---|
+| webgpu | 1k | 404 | 2.435 / 5.555 / 6.555 / 13.16 | 0.042 / 0.050 | 1.066 | `77e955bfebed7613` |
+| webgpu | 10k | 435 | 2.310 / 3.415 / 4.410 / 11.21 | 0.077 / 0.090 | 1.212 | `bff47994b0264192` |
+| webgpu | 50k | 476 | 2.035 / 2.900 / 3.890 / 11.47 | 0.166 / 0.195 | 1.095 | `08a148babe2ddac5` |
+| webgpu | 100k | 390 | 2.325 / 3.850 / 4.750 / 12.59 | 0.282 / 0.340 | 1.085 | `d6d6a623a66410b3` |
+| webgl2 | 1k | 240 | 4.145 / 4.205 / 4.620 / 6.275 | 0.039 / 0.045 | 1.004 | `77e955bfebed7613` |
+| webgl2 | 10k | 236 | 4.180 / 4.295 / 6.140 / 7.840 | 0.073 / 0.090 | 1.009 | `bff47994b0264192` |
+| webgl2 | 50k | 222 | 4.340 / 5.555 / 6.155 / 7.570 | 0.175 / 0.205 | 1.019 | `08a148babe2ddac5` |
+| webgl2 | 100k | 210 | 4.535 / 6.075 / 6.595 / 7.445 | 0.285 / 0.335 | 1.005 | `d6d6a623a66410b3` |
+
+Every web hash equals the native one for its workload, on both backends and with 1 or 8 jobs.
+**Is the browser benchtest stable on WebGPU?** Yes: no one-second window of any run was more than
+1.21x the median one (the 10k workload; 1.07 to 1.10 elsewhere), and a second, independent record
+compared against this one passed every check (frame p95 within 3.4%, simulation within 3%,
+cliff ratios 1.05 to 1.16). WebGPU frames are bimodal at light loads (p50 about 2.4 ms, p95 up to
+5.6 ms at 1k: the browser's presentation, not the engine, whose simulation tick is 0.04 ms), and
+it runs 100k shapes at 390 FPS against WebGL2's 210 (which the browser caps at 240). The
+simulation is 1.7x (100k) to 1.5x (1k) slower than the native release build's, the cost of WASM.
 
 ### Workloads
 

@@ -1,0 +1,136 @@
+// Top-down navigation demo (milestone 9.5, DESIGN.md 4.17).
+//
+// A TileMapLayer defines ground and obstacle tiles, a NavigationRegion2D
+// bakes walkable space from it, and a Character holding a NavigationAgent2D
+// paths through doorways and around pillars using deterministic A*.
+
+var GROUND = Color { r = 0.16, g = 0.20, b = 0.30, a = 1.0 }
+var WALL = Color { r = 0.55, g = 0.25, b = 0.25, a = 1.0 }
+var obstacles_hit = 0
+
+// The animated top-down character following navigation waypoints.
+class Character extends Node2D {
+    var agent: NavigationAgent2D
+    var nav: NavigationRegion2D
+    var target_marker = vec2(0.0, 0.0)
+    var has_target = false
+    var move_speed = 5.0 // pixels per tick (300 px/s)
+
+    fn ready() {
+        for c in children {
+            if c is NavigationAgent2D a {
+                agent = a
+            }
+        }
+        if agent != null {
+            agent.target_reached.connect(fn() {
+                has_target = false
+            })
+        }
+    }
+
+    fn go_to(pos: vec2) {
+        target_marker = pos
+        has_target = true
+        if agent != null {
+            agent.set_target_position(pos)
+            // Verify that all computed waypoints avoid obstacles
+            if nav != null {
+                for wp in agent.get_current_navigation_path() {
+                    var cell = nav.global_to_map(wp)
+                    if !nav.is_cell_walkable(cell.x, cell.y) {
+                        obstacles_hit += 1
+                        panic("Path error: waypoint inside obstacle at cell ({cell.x}, {cell.y})")
+                    }
+                }
+            }
+        }
+    }
+
+    fn update(dt: float) {
+        if agent != null && !agent.is_navigation_finished() {
+            var next_pos = agent.get_next_path_position()
+            var diff = next_pos - position
+            var dist = diff.length()
+            if dist <= move_speed {
+                position = next_pos
+            } else {
+                position = position + (diff / dist) * move_speed
+            }
+        }
+        // Continuous obstacle avoidance check on character position
+        if nav != null {
+            var cell = nav.global_to_map(position)
+            if !nav.is_cell_walkable(cell.x, cell.y) {
+                obstacles_hit += 1
+                panic("Collision error: character touched obstacle at cell ({cell.x}, {cell.y})")
+            }
+        }
+    }
+
+    fn draw(g: Canvas) {
+        if has_target {
+            g.circle(target_marker, 12.0, fill = null,
+                     stroke = Color { r = 1.0, g = 0.85, b = 0.2, a = 0.8 }, width = 2.0)
+            g.circle(target_marker, 4.0,
+                     fill = Color { r = 1.0, g = 0.85, b = 0.2, a = 1.0 })
+        }
+        var p = global_position()
+        // Draw character body
+        g.circle(p, 16.0, fill = Color { r = 0.2, g = 0.85, b = 0.95, a = 1.0 },
+                 stroke = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }, width = 2.0)
+        // Eyes
+        g.circle(p + vec2(4.0, -4.0), 3.0, fill = Color { r = 0.1, g = 0.1, b = 0.2, a = 1.0 })
+        g.circle(p + vec2(4.0, 4.0), 3.0, fill = Color { r = 0.1, g = 0.1, b = 0.2, a = 1.0 })
+    }
+}
+
+// Main scene controller.
+class Demo extends Node {
+    var character: Character
+    var nav: NavigationRegion2D
+    var map: TileMapLayer
+
+    fn ready() {
+        var level = Scene.load("scenes/level.scene")
+        add_child(level)
+
+        if level.find("Character") is Character c {
+            character = c
+        }
+        if level.find("NavRegion") is NavigationRegion2D n {
+            nav = n
+            if character != null {
+                character.nav = nav
+            }
+        }
+        if level.find("Terrain") is TileMapLayer m {
+            map = m
+            if nav != null {
+                nav.bake_from_tilemap(map)
+            }
+        }
+    }
+
+    fn update(dt: float) {
+        if character == null {
+            return
+        }
+        // Scripted destination inputs for ctest replay verification
+        if Input.pressed(#target_1) {
+            character.go_to(vec2(672.0, 352.0)) // Center room
+        }
+        if Input.pressed(#target_2) {
+            character.go_to(vec2(1056.0, 160.0)) // Top-right room
+        }
+        if Input.pressed(#target_3) {
+            character.go_to(vec2(1056.0, 544.0)) // Bottom-right room
+        }
+        if Input.pressed(#target_4) {
+            character.go_to(vec2(224.0, 352.0)) // Left room
+        }
+        if Input.pressed(#click) {
+            character.go_to(Input.pointer())
+        }
+    }
+}

@@ -14,6 +14,7 @@ import bench  # noqa: E402
 LINE = ("[info ] x.cpp:424: bench | bench | OpenGL | 1280x720 4x MSAA | 99443 avg particles | 596 frames in 3.00 s | "
         "198.7 FPS | frame ms avg 5.034 p50 4.482 p95 6.439 p99 6.831 max 9.287 | "
         "sim 1.771 ms/tick (p95 2.100 max 2.500, 180 ticks) | render CPU 4.456 ms/frame")
+WINDOWS = "[info ] x.cpp:475: bench windows | 3 x 1 s | frame ms mean 5.000 5.100 7.650 | worst / median 1.500"
 
 
 def workload(frame_p95=6.0, sim_mean=1.0, sim_p95=1.2, h="00000000000000aa", rss=250.0):
@@ -55,6 +56,19 @@ class Parsing(unittest.TestCase):
         self.assertEqual(bench.parse_device("OpenGL device: 3.3 NVIDIA (RTX), 4x MSAA"), "3.3 NVIDIA (RTX), 4x MSAA")
         self.assertEqual(bench.parse_threads("Job system: 8 thread(s); SIMD"), 8)
 
+    def test_windows_line(self):
+        b = bench.parse_bench_line(LINE + "\n" + WINDOWS)
+        self.assertEqual(b["frame_windows_ms"], [5.0, 5.1, 7.65])
+        self.assertEqual(b["cliff_ratio"], 1.5)
+        self.assertNotIn("cliff_ratio", bench.parse_bench_line(LINE))  # engines before milestone 10.4
+        self.assertEqual(bench.parse_device("WebGPU device: nvidia ampere (WebGPU (browser)), 4x MSAA"),
+                         "nvidia ampere (WebGPU (browser)), 4x MSAA")
+
+    def test_cliff_ratio_is_the_worst_run(self):
+        runs = [dict(bench.parse_bench_line(LINE), cliff_ratio=r) for r in (1.1, 1.4, 1.2)]
+        self.assertEqual(bench.median_stats(runs)["cliff_ratio"], 1.4)
+        self.assertNotIn("cliff_ratio", bench.median_stats([bench.parse_bench_line(LINE)]))
+
     def test_median_of_runs(self):
         runs = []
         for p95 in (5.0, 9.0, 6.0):
@@ -94,6 +108,17 @@ class Compare(unittest.TestCase):
     def test_sim_tick_regression(self):
         self.assertTrue(self.run_compare(record(sim_mean=1.0 * 1.16))[1])
         self.assertFalse(self.run_compare(record(sim_mean=1.0 * 1.10))[1])
+
+    def test_frame_cliff_is_an_absolute_limit(self):
+        steady, cliff = record(), record()
+        steady["builds"]["release"]["backends"]["gl"]["workloads"]["1000"]["cliff_ratio"] = 1.2
+        cliff["builds"]["release"]["backends"]["gl"]["workloads"]["1000"]["cliff_ratio"] = 1.8
+        rows, failed = self.run_compare(steady)
+        self.assertFalse(failed)
+        self.assertIn("frame_cliff_ratio", bench.format_rows(rows))
+        self.assertTrue(self.run_compare(cliff)[1])
+        # Not in the new record (an older engine): no check at all.
+        self.assertNotIn("frame_cliff_ratio", bench.format_rows(self.run_compare(record())[0]))
 
     def test_frame_threshold_is_looser(self):
         self.assertFalse(self.run_compare(record(frame_p95=6.0 * 1.20))[1])
@@ -154,6 +179,37 @@ def linear(limit_n, budget=bench.BUDGET_MS):
         calls.append(n)
         return {"t": budget * n / limit_n}
     return measure, calls
+
+
+class Web(unittest.TestCase):
+    def test_smoke_command(self):
+        gpu = bench.web_smoke_command("node", "/d", "webgpu", ["--bench", "6"], 40, "bench |")
+        self.assertIn("--gpu", gpu)
+        self.assertEqual(gpu[gpu.index("--expect-backend") + 1], "webgpu")
+        self.assertEqual(gpu[gpu.index("--args") + 1], "--bench 6")
+        self.assertNotIn("--no-webgpu", gpu)
+        gl = bench.web_smoke_command("node", "/d", "webgl2", [], 40, "x")
+        self.assertEqual(gl[gl.index("--expect-backend") + 1], "gl")
+        self.assertIn("--no-webgpu", gl)  # the fallback, as in a browser without WebGPU
+
+    def test_backends_match_the_target(self):
+        class A:
+            pass
+        a = A()
+        a.web, a.backends = "dir", ["webgpu", "webgl2"]
+        bench.check_backends(a)
+        a.backends = ["gl"]
+        with self.assertRaises(SystemExit):
+            bench.check_backends(a)
+        a.web, a.backends = None, ["webgpu"]
+        with self.assertRaises(SystemExit):
+            bench.check_backends(a)
+
+    def test_emscripten_compiler(self):
+        self.assertEqual(bench.emscripten_version({"CMAKE_TOOLCHAIN_FILE": "/x/toolchain.cmake"}), "")
+        self.assertTrue(bench.emscripten_version(
+            {"CMAKE_TOOLCHAIN_FILE": "/nowhere/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake"})
+            .startswith("emscripten"))
 
 
 class CapacitySearch(unittest.TestCase):

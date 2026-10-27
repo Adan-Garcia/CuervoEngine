@@ -5,6 +5,7 @@
 
 #include <doctest.h>
 
+#include <algorithm>
 #include <memory>
 
 #include "pluma/heap.hpp"

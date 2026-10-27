@@ -158,6 +158,9 @@ public:
     static constexpr std::uint32_t no_native = 0xffffffffu;
     std::uint32_t register_native(std::string name, NativeFn fn);
     std::uint32_t native_index(std::string_view name) const;
+    // native_index, also binding an FFI key (pluma/ffi.hpp) on first use;
+    // `error` explains a key that can't be bound.
+    std::uint32_t resolve_native(std::string_view name, std::string* error = nullptr);
     void set_native_finalizer(std::string class_name, void (*finalizer)(void*));
     void (*native_finalizer(std::string_view class_name) const)(void*);
 

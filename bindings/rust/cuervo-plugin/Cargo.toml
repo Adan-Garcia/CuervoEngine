@@ -1,0 +1,12 @@
+[package]
+name = "cuervo-plugin"
+version = "1.0.0"
+edition = "2021"
+description = "Safe Rust bindings for Cuervo Engine native plugins (the plugin ABI, docs/PLUGINS.md)"
+license = "MIT"
+publish = false
+
+# No dependencies: the raw ABI (src/sys.rs) is generated from
+# cuervo/plugin/cuervo_plugin.h by tools/gen_rust_abi.py, so plugins build
+# offline.
+[dependencies]

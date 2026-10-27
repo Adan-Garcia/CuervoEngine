@@ -1,0 +1,16 @@
+# A native plugin written in Rust (docs/PLUGINS.md) over the cuervo-plugin
+# crate (bindings/rust). `cmake --build <build> --target noise_plugin` runs
+# cargo and puts the libraries in lib/.
+name = "noise"
+version = "1.0.0"
+description = "Deterministic value noise, with a wandering node"
+license = "MIT"
+
+[plugin]
+abi = 1
+sim_safe = true                  # integer hashing and IEEE arithmetic only
+linux = "lib/libnoise.so"
+linux_static = "lib/libnoise.a"
+windows = "lib/noise.dll"
+windows_static = "lib/noise.lib"            # x86_64-pc-windows-msvc
+windows_gnu_static = "lib/libnoise_gnu.a"  # x86_64-pc-windows-gnu (when that Rust target is installed)

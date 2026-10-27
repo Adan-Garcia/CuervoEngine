@@ -14,6 +14,9 @@ namespace cuervo {
 Window::~Window() { destroy(); }
 
 bool Window::create(const WindowDesc& desc) {
+    // Web frames run from requestAnimationFrame and must never suspend (the
+    // build links no Asyncify or JSPI); SDL must not try to yield in its swap.
+    SDL_SetHint(SDL_HINT_EMSCRIPTEN_ASYNCIFY, "0");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         LOG_ERROR("SDL_Init failed: {}", SDL_GetError());
         return false;
@@ -51,6 +54,10 @@ bool Window::create(const WindowDesc& desc) {
             break;
         case GraphicsApi::Vulkan:
             flags |= SDL_WINDOW_VULKAN;
+            break;
+        case GraphicsApi::WebGPU:
+            // No SDL graphics context: the WebGPU device wraps the native
+            // window (Wayland/X11/Win32 handle or the web canvas) in a surface.
             break;
     }
 

@@ -4,6 +4,7 @@
 
 #include <doctest.h>
 
+#include <algorithm>
 #include <filesystem>
 
 #include "cuervo/script/project.hpp"

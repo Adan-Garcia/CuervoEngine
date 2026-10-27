@@ -59,6 +59,7 @@ await yield start signal emit
 new alloc free defer
 true false null self super is as
 pub final static get set
+import
 ```
 
 **Clarified:** keywords are accepted as member names after `.` and `?.`
@@ -335,6 +336,9 @@ closing `>` is directly followed by `(` (a call: `List<vec2>()`, `max<int>(a, b)
 | `@inline`, `@cold` | fn | Optimization hints |
 | `@deprecated("…")` | any | Warning on use |
 | `@allow_slow` | `foreach` | Silence the slow-path warning (§5) |
+| `@test` | top-level fn | A unit test, run by `plm test` / `cuervo-tools test`; left out of normal and release builds (§9.27) |
+| `@native` | fn / method | Implemented by the host or a plugin; the body is empty (§9.12, docs/PLUGINS.md) |
+| `@extern("lib", "symbol")` | top-level fn | A C function of a shared library, called through the FFI; the body is empty (§9.28) |
 
 Attributes may be written on the same line as the declaration or on the lines before
 it. **Clarified:** statements take attributes only before `foreach`.
@@ -524,7 +528,9 @@ foreach s in shards { s.ttl -= dt; if s.ttl <= 0.0 { shards.kill(s) } }
 
 ## 7. Grammar (EBNF sketch)
 ```ebnf
-file        = { decl } ;
+file        = { import | decl } ;
+import      = "import" IDENT [ "as" IDENT | "." "{" import_item { "," import_item } "}" ] ;   (* §9.26 *)
+import_item = IDENT [ "as" IDENT ] ;
 decl        = { attribute } [ "pub" ] ( class | struct | enum | trait | fn_decl | var_decl | const_decl ) ;
 attribute   = "@" IDENT [ "(" args ")" ] ;
 
@@ -546,7 +552,7 @@ param       = IDENT [ ":" type ] [ "=" expr ] ;
 generics    = "<" gparam { "," gparam } ">" ;
 gparam      = IDENT [ ":" type { "+" type } ] ;
 
-type        = IDENT [ "<" type_list ">" ] | "[" type ";" expr "]" | fn_type | type "?" ;
+type        = [ IDENT "." ] IDENT [ "<" type_list ">" ] | "[" type ";" expr "]" | fn_type | type "?" ;
 fn_type     = "fn" "(" [ type_list ] ")" [ "->" type ] ;
 type_list   = type { "," type } ;
 
@@ -686,7 +692,9 @@ These follow DESIGN.md §5 and the decisions above; each can be revisited.
 ### 9.3 Names
 - Lookup order: locals (innermost first, through enclosing lambdas), then members of the
   enclosing class or struct (fields and methods through implicit `self`, then statics,
-  inherited ones included), then globals, then built-in functions.
+  inherited ones included), then globals, then built-in functions. Globals are looked
+  up in the file's own package first, then among the names the file imports, then in
+  the root namespace (§9.26).
 - Built-in type names (`int`, `str`, `name`, ...) cannot name a type declaration but may
   name variables and functions (`var name = #shoot`).
 - `_private` members are visible only inside the declaring type (not subclasses).
@@ -837,7 +845,8 @@ DESIGN.md 5.9 has the model; these are the language rules.
 - The engine's API is such a prelude (`cuervo/script/prelude/*.plm`), compiled before the
   game's scripts. `start` and `emit` are keywords, so the emitter API uses `fire`.
 - A project's files are checked as one unit (names are global, so files may refer to each
-  other in any order); diagnostics and panics name the original file and line.
+  other in any order); diagnostics and panics name the original file and line. A package's
+  files are part of the same unit but have a namespace of their own (§9.26).
 
 ### 9.13 `@export`
 DESIGN.md 4.12 has the scene-file side; these are the language rules.
@@ -1193,3 +1202,103 @@ them (`tests/pluma/semantics/`, `tests/pluma/intmodel_tests.cpp`).
   frames of a long one and says how many it left out (`... 4072 more frames ...`);
   `PanicInfo::trace` and `frames` keep all of them. `break` and `continue` inside `defer` get
   their own error.
+
+### 9.26 Packages and `import` (Milestone 10.5b)
+**Clarified (Milestone 10.5b):** packages, `import` and `pub` across packages. The
+project side (`package.toml`, `[dependencies]`, vendoring, versions, export) is in
+[PACKAGES.md](PACKAGES.md).
+- **Namespaces.** A game's own scripts (`scripts/**/*.plm`) are the *root namespace*,
+  as before: their names are global to one another and need no import. Each package is
+  a namespace of its own: its files share their names with one another, and its
+  declarations are keyed `pkg.Name` (`tween.Tween`), so a package's names never clash
+  with the game's, another package's or the engine prelude's. Inside its own package a
+  name may shadow a prelude name (a package's `Tween` hides the engine's there).
+- **`pub`.** Only `pub` top-level declarations are visible outside their package.
+  Everything is visible inside it. `pub` has no effect in the root namespace, since
+  nothing imports a game. Members keep their own rules (`_private`, §9.3).
+- **Imports are per file** and may appear anywhere at the top level. By convention they
+  come first. `import tween` binds `tween`, `import tween as tw` binds `tw`, and
+  `import tween.{Tween, ease as tween_ease}` binds the listed names unqualified.
+  An imported name may not have the same name as a declaration the file can see; rename
+  it with `as`. Importing a package that isn't a dependency, or a package importing
+  itself, is an error.
+- **Qualified names** work wherever a name does. In expressions: `tween.ease(t)`,
+  `tween.Tween(1.0)`, `tween.MAX`, `tween.Ease.Linear`, `tween.Tween.twice(2)`, and
+  assignment to a package's `pub var` (`tween.count += 1`). In types: `var t:
+  tween.Tween`, `List<tween.Tween>`, `extends tw.Base`, `: tw.Easing`, generic bounds.
+  In struct literals: `tween.Point { x = 1 }`. In patterns: `tween.Ease.Linear =>`,
+  `x is tween.Tween t`. A local, field or global with the alias's name takes
+  precedence over the alias.
+- **Visibility of the root.** A package sees the root namespace's prelude names (the
+  engine API, the std library), never the game's own declarations, so a package can be
+  checked on its own (`cuervo-tools package check`).
+- **Run time.** Qualified names are the VM's names too: a package's globals are
+  `tween.count` (Session::global, the debugger), its classes `tween.Tween` (type names
+  in messages and `@export`, hot-reload migration, AOT modules). A package's
+  `fn main` is an ordinary function; only the root's is the entry point. Package
+  globals initialize before the game's, dependencies first.
+
+### 9.27 Unit tests: `@test` (Milestone 10.5b)
+**Clarified (Milestone 10.5b):** scripts can carry their own pure-logic regression tests,
+next to the replay-based game tests (docs/REPLAYS.md).
+- `@test fn name() { ... }` declares a test: a top-level function with no parameters and
+  no result, not `@native`, not a coroutine. `@test` anywhere else is an error.
+- **Left out of builds.** Outside test mode a `@test` function is skipped like a comment:
+  it is not checked, compiled, packed as code or callable, so tests cost a game nothing
+  and other code cannot call them. The language server checks their bodies anyway.
+- **Running.** `plm test <files or directories>` and `cuervo-tools test <project or
+  package>` check the program with its tests and run each test whose namespace is the
+  one under test (a game's own tests, or a package's when given its directory), in
+  source order. Each test runs in a fresh session whose globals are initialized anew, so
+  a test's outcome doesn't depend on the tests before it. `--filter <substring>` selects
+  tests by name.
+- **Outcome.** A test passes when it returns. Any panic fails it: a failed `assert(cond,
+  message)`, an index out of bounds, `panic(...)`. The report lists each test with its
+  file and line, the panic of each failure, and `N passed, M failed`. The command exits
+  1 when a test fails. Everything a test can observe is deterministic (§4.1 rules apply),
+  so a test passes or fails the same way on every machine.
+- `cuervo-tools test` checks against the engine API, so tests may use engine types and
+  pure functions. There is no scene tree or tick loop; game behavior over time is tested
+  with replays.
+
+### 9.28 The FFI: `@extern` (Milestone 10.5c)
+**Clarified (Milestone 10.5c):** scripts can call C functions of shared libraries
+directly, with explicit marshaling. A plugin (docs/PLUGINS.md) is the way to add nodes,
+classes or several related natives. `@extern` is for a few calls into an existing C
+library.
+
+```pluma
+@extern("libm.so.6", "cbrtf") fn cube_root(x: float) -> float {}
+@extern("", "strlen") fn c_strlen(s: str) -> u64 {}   // "": this program and the libraries it links
+@extern("libm.so.6") fn fmax(a: f64, b: f64) -> f64 {}  // the symbol defaults to the function's name
+```
+
+- **Declaration.** A top-level, non-generic function with an empty body. It can't also be
+  `@native`. Both arguments are string literals with no interpolation: the library (a
+  file name the platform loader finds, or `""` for the running program) and an optional
+  symbol. Neither may contain `|`.
+- **Types.** At most 4 parameters. Each parameter is a number, `bool` or `str`. The result
+  is one of those or nothing. Each Pluma type maps to exactly one C type:
+
+  | Pluma | C |
+  |---|---|
+  | `i8` `i16` `int` (i32) `i64` | `int8_t` `int16_t` `int32_t` `int64_t` |
+  | `u8` `u16` `u32` `u64` | `uint8_t` `uint16_t` `uint32_t` `uint64_t` |
+  | `float` (f32), `f64` | `float`, `double` |
+  | `bool` | `bool` (C99 `_Bool`) |
+  | `str` | `const char*`: UTF-8 and NUL-terminated, valid only during the call |
+
+  A `str` result is copied, and a null pointer becomes `""`. An integer result is cut to
+  the declared width (an `i8` result of 300 is 44). Pointers, structs, callbacks and
+  variadic functions are not supported. Wrap those in a plugin.
+- **Binding.** The library is loaded and the symbol looked up the first time the
+  function is called, in the VM and in AOT modules alike. A library or symbol that
+  doesn't exist panics at that call ("can't load library 'x'", "no symbol 'y' in 'x'"),
+  so a declaration that is never called costs nothing. Libraries stay loaded for the
+  life of the process.
+- **Platforms.** Linux and Windows. On the web the call panics: the FFI is not available
+  there.
+- **Determinism.** The engine can't check what a C function does. Calling one from the
+  simulation is safe only if it is deterministic (§4.1 of DESIGN.md: no libm
+  transcendental functions, clocks or unseeded randomness). `cbrtf` from libm, for
+  example, may differ between C libraries.

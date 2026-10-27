@@ -1,0 +1,342 @@
+// Engine API: Base Control node (DESIGN.md 4.10).
+//
+// Retained UI nodes in the scene tree, laid-out rects, focus, and input handling.
+
+// The base of every UI node: a laid-out rect, focus and input (see the
+// top of this file).
+class Control extends Node2D {
+    // Anchors: fractions of the parent's rect (0,0 top-left .. 1,1
+    // bottom-right) where the top-left and bottom-right edges sit. Offsets:
+    // pixels added to them. set_anchors() sets all four from a preset.
+    @export var anchor_min = vec2(0.0, 0.0)
+    // Anchor of the bottom-right edge (see `anchor_min`).
+    @export var anchor_max = vec2(0.0, 0.0)
+    // Pixels added to the top-left edge after anchoring.
+    @export var offset_min = vec2(0.0, 0.0)
+    // Pixels added to the bottom-right edge after anchoring.
+    @export var offset_max = vec2(0.0, 0.0)
+    // The control is never smaller than this (or its content).
+    @export var min_size = vec2(0.0, 0.0)
+    // In an HBox/VBox: share the space left over by the other children.
+    @export var expand = false
+    // Buttons, toggles and sliders ignore input and use `text_disabled`.
+    @export var disabled = false
+    // The laid-out size (with `position`, the rect), set by layout every tick.
+    var size = vec2(0.0, 0.0)
+    // null: the nearest ancestor's theme, else UI.theme.
+    var theme: Theme
+    // Shown in a small box next to the control after it has had the focus
+    // for a few ticks (keyboard, gamepad or pointer hover). "" shows nothing.
+    @export var tooltip = ""
+
+    // On a UI root: ui_cancel was pressed while it held the focus.
+    signal cancelled
+
+    // Controls are laid out in screen coordinates: they never inherit a
+    // parent's transform (DESIGN.md 4.17, milestone 9.1).
+    fn inherits_transform() -> bool {
+        return false
+    }
+
+    // ---- overridable behavior
+    // The size the content needs (a label's text); override in custom controls.
+    fn content_min_size() -> vec2 {
+        return vec2(0.0, 0.0)
+    }
+    // True if the control takes the focus (buttons, toggles and sliders do).
+    fn can_focus() -> bool {
+        return false
+    }
+    // ui_accept or a click while focused.
+    fn activate() {}
+    // A direction while focused; true if the control used it (sliders).
+    fn nudge(dir: vec2) -> bool {
+        return false
+    }
+    // A click (ui_click) at `p`; activates by default.
+    fn pointer_down(p: vec2) {
+        activate()
+    }
+    // The pointer moved to `p` while held after a click on this control.
+    fn pointer_drag(p: vec2) {}
+
+    // Controls that float (popups) aren't laid out by their parent and take
+    // input as roots of their own.
+    fn floating() -> bool {
+        return false
+    }
+    // True when the parent's layout places it: visible and not floating.
+    fn in_layout() -> bool {
+        return visible && !floating()
+    }
+    // Containers that cut their children to their rect (scroll areas): the
+    // pointer only reaches the children inside it.
+    fn clips_children() -> bool {
+        return false
+    }
+    // Text fields while being edited: UI routes the typed text to edit_tick().
+    fn is_editing() -> bool {
+        return false
+    }
+    // Called every tick while is_editing(); a text field applies the typed text and edit keys here.
+    fn edit_tick() {}
+    // ui_cancel while focused; true if the control used it (a text field
+    // stops editing) so the root doesn't see the cancel.
+    fn on_cancel() -> bool {
+        return false
+    }
+    // UI roots only, once per tick before the pointer is handled (popups
+    // close on a click outside).
+    fn on_root_input() {}
+    // The innermost scroll container under `p` that can scroll `dir`
+    // (-1 up, 1 down, 0 any), or null.
+    fn find_scroll(p: vec2, dir: float) -> Control {
+        var found: Control
+        if !visible {
+            return found
+        }
+        if clips_children() && !contains(p) {
+            return found
+        }
+        for c in children {
+            if c is Control k && !k.floating() {
+                var f = k.find_scroll(p, dir)
+                if f != null {
+                    found = f
+                }
+            }
+        }
+        return found
+    }
+    // The first scroll container of this subtree that can scroll `dir`
+    // (-1 up, 1 down), wherever it is: what a gamepad stick scrolls when the
+    // focus isn't inside one.
+    fn find_any_scroll(dir: float) -> Control {
+        if !visible {
+            return null
+        }
+        for c in children {
+            if c is Control k && !k.floating() {
+                var f = k.find_any_scroll(dir)
+                if f != null {
+                    return f
+                }
+            }
+        }
+        return null
+    }
+    // Scroll containers: scroll by `amount` pixels; true if it moved.
+    fn scroll_by(amount: vec2) -> bool {
+        return false
+    }
+    // Scroll containers: pixels per wheel notch.
+    fn scroll_step() -> float {
+        return 0.0
+    }
+
+    // ---- queries
+    // The larger of content_min_size() and `min_size`.
+    fn combined_min_size() -> vec2 {
+        return content_min_size().max(min_size)
+    }
+    // The middle of the control's rect.
+    fn center() -> vec2 {
+        return position + size * 0.5
+    }
+    // True if `p` is inside the control's rect.
+    fn contains(p: vec2) -> bool {
+        return p.x >= position.x && p.y >= position.y && p.x < position.x + size.x && p.y < position.y + size.y
+    }
+    // True if this control holds the focus.
+    fn has_focus() -> bool {
+        return UI.focused == self
+    }
+    // Gives this control the focus.
+    fn grab_focus() {
+        UI.focused = self
+    }
+    // True when its parent isn't a Control: it is laid out in the screen rect.
+    fn is_ui_root() -> bool {
+        return !(parent is Control)
+    }
+    // The theme in effect: `theme`, the nearest ancestor's, or UI.theme.
+    fn get_theme() -> Theme {
+        var n: Node = self
+        while n != null {
+            if n is Control c && c.theme != null {
+                return c.theme
+            }
+            n = n.parent
+        }
+        return UI.theme
+    }
+    // False when it or an ancestor (Node2D or CanvasLayer) is hidden.
+    fn is_visible_in_tree() -> bool {
+        var n: Node = self
+        while n != null {
+            if n is Node2D d && !d.visible {
+                return false
+            }
+            if n is CanvasLayer l && !l.visible {
+                return false
+            }
+            n = n.parent
+        }
+        return true
+    }
+    // True if this control is `c` or above it in the tree.
+    fn is_ancestor_of(c: Node) -> bool {
+        var n = c
+        while n != null {
+            if n == self {
+                return true
+            }
+            n = n.parent
+        }
+        return false
+    }
+
+    // Anchor presets: #full (with `margin` on every side), #center, #top,
+    // #bottom, #left, #right, #top_left, #top_right, #bottom_left,
+    // #bottom_right (`margin` away from the edges).
+    fn set_anchors(preset: name, margin = 0.0) {
+        if preset == #full {
+            anchor_min = vec2(0.0, 0.0)
+            anchor_max = vec2(1.0, 1.0)
+            offset_min = vec2(margin, margin)
+            offset_max = vec2(-margin, -margin)
+            return
+        }
+        var a = vec2(0.5, 0.5)
+        match preset {
+            #top => a = vec2(0.5, 0.0)
+            #bottom => a = vec2(0.5, 1.0)
+            #left => a = vec2(0.0, 0.5)
+            #right => a = vec2(1.0, 0.5)
+            #top_left => a = vec2(0.0, 0.0)
+            #top_right => a = vec2(1.0, 0.0)
+            #bottom_left => a = vec2(0.0, 1.0)
+            #bottom_right => a = vec2(1.0, 1.0)
+            _ => a = vec2(0.5, 0.5)
+        }
+        anchor_min = a
+        anchor_max = a
+        offset_min = (vec2(0.5, 0.5) - a) * (2.0 * margin)
+        offset_max = offset_min
+    }
+
+    // ---- layout
+    // Layout internals: places the control in its parent's rect from its
+    // anchors and offsets; containers override layout_children().
+    fn layout_in(parent_pos: vec2, parent_size: vec2) {
+        var lo = parent_pos + parent_size * anchor_min + offset_min
+        var hi = parent_pos + parent_size * anchor_max + offset_max
+        var sz = (hi - lo).max(combined_min_size())
+        var extra = sz - (hi - lo)
+        var gx = anchor_min.x == anchor_max.x ? anchor_min.x : 0.0
+        var gy = anchor_min.y == anchor_max.y ? anchor_min.y : 0.0
+        set_rect(lo - extra * vec2(gx, gy), sz)
+    }
+    // Places the control at `pos` with size `sz`, then lays out its children.
+    fn set_rect(pos: vec2, sz: vec2) {
+        position = pos
+        size = sz
+        layout_children()
+    }
+    // Lays out the Control children in this rect; containers override it to arrange them.
+    fn layout_children() {
+        for c in children {
+            if c is Control k && !k.floating() {
+                k.layout_in(position, size)
+            }
+        }
+    }
+
+    // Queues the tooltip of a control that has had the focus a while.
+    fn draw_tree(g: Canvas) {
+        super.draw_tree(g)
+        if visible && tooltip != "" && has_focus() && UI.x.focus_ticks >= UI.x.tooltip_delay {
+            Scene.overlays.push(self)
+        }
+    }
+    // Draws the tooltip on the overlay layer; UI internals call it after the tree has been drawn.
+    fn draw_overlay(g: Canvas) {
+        if tooltip == "" || !has_focus() {
+            return
+        }
+        var t = get_theme()
+        var m = UI.measure(tooltip, t.small_size)
+        var sz = m + vec2(20.0, 12.0)
+        var at = vec2(position.x + 12.0, position.y + size.y + 6.0)
+        if at.y + sz.y > Screen.size.y {
+            at.y = position.y - sz.y - 6.0
+        }
+        at = at.min(Screen.size - sz).max(vec2(0.0, 0.0))
+        g.rect(at, sz, fill = t.panel, stroke = t.accent, width = 1.0, radius = t.radius * 0.6)
+        g.text(at + vec2(10.0, 6.0), tooltip, size = t.small_size, color = t.text)
+    }
+
+    // ---- focus helpers
+    // Appends the visible focusable controls in this subtree to `out`, in tree order.
+    fn collect_focusable(out: List<Control>) {
+        if !visible {
+            return
+        }
+        if can_focus() {
+            out.push(self)
+        }
+        for c in children {
+            if c is Control k && !k.floating() {
+                k.collect_focusable(out)
+            }
+        }
+    }
+    // The topmost (last drawn) focusable control under `p`.
+    fn focusable_at(p: vec2) -> Control {
+        var found: Control
+        if !visible {
+            return found
+        }
+        if can_focus() && contains(p) {
+            found = self
+        }
+        if clips_children() && !contains(p) {
+            return found
+        }
+        for c in children {
+            if c is Control k && !k.floating() {
+                var f = k.focusable_at(p)
+                if f != null {
+                    found = f
+                }
+            }
+        }
+        return found
+    }
+    // The UI root this control belongs to (the nearest ancestor-or-self that
+    // is a root), or null.
+    fn root_control() -> Control {
+        var n: Node = self
+        while n != null {
+            if n is Control c && c.is_ui_root() {
+                return c
+            }
+            n = n.parent
+        }
+        return null
+    }
+    // Emits `cancelled` (used by the focus handling).
+    fn emit_cancelled() {
+        emit cancelled
+    }
+
+    // UI roots lay out their tree and handle input before it updates.
+    fn update_tree(dt: float) {
+        if !freed && is_ui_root() && can_process() && is_visible_in_tree() {
+            layout_in(vec2(0.0, 0.0), Screen.size)
+            UI.process(self)
+        }
+        super.update_tree(dt)
+    }
+}
+

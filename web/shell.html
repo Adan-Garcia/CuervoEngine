@@ -6,6 +6,7 @@
 
   URL parameters (development aids, all optional):
     ?args=--quit-after%205        extra runtime arguments, space-separated
+                                  (`--backend gl` forces WebGL2 over WebGPU)
     ?log=1                        show the engine log under the canvas
 -->
 <html lang="en">
@@ -72,9 +73,11 @@
     statusEl.className = 'error';
     statusEl.textContent = 'WebGL context lost; reload the page.';
   });
-  if (!document.createElement('canvas').getContext('webgl2')) {
+  // WebGPU (when the build has it and the browser offers it) or WebGL2
+  // (web/webgpu_init.js); a throwaway canvas, so the game's stays unclaimed.
+  if (!navigator.gpu && !document.createElement('canvas').getContext('webgl2')) {
     statusEl.className = 'error';
-    statusEl.textContent = 'This browser has no WebGL2, which the engine needs.';
+    statusEl.textContent = 'This browser has neither WebGPU nor WebGL2, which the engine needs.';
   }
 </script>
 {{{ SCRIPT }}}

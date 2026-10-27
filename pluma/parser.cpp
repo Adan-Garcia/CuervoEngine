@@ -68,16 +68,24 @@ public:
     Module parse_module_root() {
         Module m;
         std::vector<Decl*> decls;
+        std::vector<ImportDecl*> imports;
         for (;;) {
             skip_terminators();
             if (raw().kind == K::Eof) break;
             std::size_t before = pos_;
+            if (cur().is_keyword("import")) {
+                imports.push_back(import_decl());
+                if (!panic_) expect_stmt_end();
+                recover_decl(before);
+                continue;
+            }
             Decl* d = declaration(DeclContext::TopLevel);
             if (!panic_) expect_stmt_end();
             recover_decl(before);
             decls.push_back(d);
         }
         m.decls = arena_.list(decls);
+        m.imports = arena_.list(imports);
         return m;
     }
 
@@ -85,16 +93,24 @@ public:
         Script s;
         script_ = true;
         std::vector<Stmt*> stmts;
+        std::vector<ImportDecl*> imports;
         for (;;) {
             skip_terminators();
             if (raw().kind == K::Eof) break;
             std::size_t before = pos_;
+            if (cur().is_keyword("import")) {
+                imports.push_back(import_decl());
+                if (!panic_) expect_stmt_end();
+                recover_stmt(before);
+                continue;
+            }
             Stmt* st = statement();
             if (!panic_) expect_stmt_end();
             recover_stmt(before);
             stmts.push_back(st);
         }
         s.stmts = arena_.list(stmts);
+        s.imports = arena_.list(imports);
         return s;
     }
 
@@ -422,6 +438,56 @@ private:
             skip_nl();
         }
         return arena_.list(out);
+    }
+
+    // `import pkg [as alias]` or `import pkg.{Name [as alias], ...}`
+    // (LANGUAGE.md 9.26). Only at the top level of a file.
+    ImportDecl* import_decl() {
+        const Token start = advance(); // import
+        auto* im = arena_.make<ImportDecl>();
+        im->span = sp(start);
+        if (!at(K::Identifier)) {
+            error_expected("package name after 'import'");
+            im->span = from(start);
+            return im;
+        }
+        im->package = ident_of(advance());
+        if (accept(K::Dot)) {
+            if (!expect(K::LeftBrace, "'{' after 'import <package>.'")) {
+                im->span = from(start);
+                return im;
+            }
+            im->has_items = true;
+            NlGuard nl(*this, true, K::LeftBrace);
+            std::vector<ImportItem> items;
+            while (!at(K::RightBrace) && !at(K::Eof) && !panic_) {
+                if (!at(K::Identifier)) {
+                    error_expected("name in import list");
+                    break;
+                }
+                ImportItem item;
+                item.name = ident_of(advance());
+                if (accept_kw("as")) {
+                    if (at(K::Identifier)) {
+                        item.alias = ident_of(advance());
+                    } else {
+                        error_expected("name after 'as'");
+                    }
+                }
+                items.push_back(item);
+                if (!accept(K::Comma)) break;
+            }
+            if (!panic_) expect(K::RightBrace, "',' or '}' in import list");
+            im->items = arena_.list(items);
+        } else if (accept_kw("as")) {
+            if (at(K::Identifier)) {
+                im->alias = ident_of(advance());
+            } else {
+                error_expected("name after 'as'");
+            }
+        }
+        im->span = from(start);
+        return im;
     }
 
     Decl* declaration(DeclContext ctx) {
@@ -799,6 +865,12 @@ private:
             advance();
             auto* n = make<NamedType>(sp(start));
             n->name = ident_of(start);
+            // `pkg.Type`: a type from an imported package.
+            if (raw().kind == K::Dot && toks_[pos_ + 1].kind == K::Identifier) {
+                advance();
+                n->qualifier = n->name;
+                n->name = ident_of(advance());
+            }
             if (at(K::Less)) n->args = type_args();
             out = n;
         } else if (start.kind == K::LeftBracket) {
@@ -1640,6 +1712,16 @@ private:
                     if (try_expr_type_args(args)) m->type_args = args;
                 }
                 m->span = from(start);
+                // `pkg.Point { x = 1 }`: a struct literal of a package's type.
+                if (auto* q = as<IdentExpr>(e); q != nullptr && q->type_args.empty() && !m->safe && !panic_ &&
+                                                 !m->member.empty() && !r_.no_struct &&
+                                                 raw().kind == K::LeftBrace && struct_lit_ahead()) {
+                    auto* id = make<IdentExpr>(m->span);
+                    id->name = m->member.name;
+                    id->type_args = m->type_args;
+                    e = struct_literal(id, Ident{q->name, q->span}, m->member.span);
+                    continue;
+                }
                 e = m;
             } else if (t.kind == K::Question && !t.space_before && !misspaced_ternary_at(effective_pos()) &&
                        !if_binding_at(effective_pos())) {
@@ -2108,10 +2190,14 @@ private:
         return id;
     }
 
-    Expr* struct_literal(IdentExpr* type_name) {
+    Expr* struct_literal(IdentExpr* type_name, Ident qualifier = {}, Span name_span = {}) {
         auto* type = make<NamedType>(type_name->span);
-        type->name = Ident{type_name->name, Span{type_name->span.begin,
-                                                 type_name->span.begin + static_cast<std::uint32_t>(type_name->name.size())}};
+        type->qualifier = qualifier;
+        type->name = Ident{type_name->name,
+                           qualifier.empty() ? Span{type_name->span.begin,
+                                                    type_name->span.begin +
+                                                        static_cast<std::uint32_t>(type_name->name.size())}
+                                             : name_span};
         type->args = type_name->type_args;
         auto* s = make<StructLit>(type_name->span);
         s->type = type;

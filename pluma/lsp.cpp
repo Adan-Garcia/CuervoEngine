@@ -1880,11 +1880,15 @@ private:
 // with `open_docs` (in-memory edits override disk files).
 std::map<std::string, std::string> collect_workspace_files(
     std::string_view root_path,
-    const std::map<std::string, std::string>& open_docs) {
+    const std::map<std::string, std::string>& open_docs,
+    const std::vector<ServerOptions::PackageDir>& packages) {
     std::map<std::string, std::string> files = open_docs;
-    if (!root_path.empty()) {
+    std::vector<std::string_view> dirs;
+    if (!root_path.empty()) dirs.push_back(root_path);
+    for (const auto& p : packages) dirs.push_back(p.dir);
+    for (std::string_view dir : dirs) {
         std::error_code ec;
-        fs::path root(root_path);
+        fs::path root(dir);
         if (fs::exists(root, ec) && fs::is_directory(root, ec)) {
             for (const auto& entry : fs::recursive_directory_iterator(root, ec)) {
                 if (ec) break;
@@ -1908,7 +1912,19 @@ std::unique_ptr<Analysis> build_analysis(
     std::string_view override_uri = {},
     std::optional<std::string> override_text = std::nullopt) {
     auto a = std::make_unique<Analysis>();
-    auto ws_files = collect_workspace_files(options.root_path, open_docs);
+    const std::vector<ServerOptions::PackageDir> packages =
+        options.packages ? options.packages(options.root_path) : std::vector<ServerOptions::PackageDir>{};
+    auto ws_files = collect_workspace_files(options.root_path, open_docs, packages);
+    // A file's package: the one whose directory holds it (LANGUAGE.md 9.26).
+    auto module_of = [&](const std::string& uri) -> std::string {
+        const std::string path = fs::path(uri_to_path(uri)).lexically_normal().generic_string();
+        for (const auto& p : packages) {
+            std::string dir = fs::path(p.dir).lexically_normal().generic_string();
+            if (!dir.ends_with('/')) dir += '/';
+            if (path.starts_with(dir)) return p.name;
+        }
+        return {};
+    };
     if (!override_uri.empty() && override_text.has_value()) {
         ws_files[std::string(override_uri)] = *override_text;
     }
@@ -1921,14 +1937,14 @@ std::unique_ptr<Analysis> build_analysis(
     for (const auto& pre : options.preludes) {
         std::uint32_t len = static_cast<std::uint32_t>(pre.text.size());
         a->slices.push_back(PartSlice{pre.path, pre.text, cursor, cursor + len, true});
-        parts.push_back(SourceFile::Part{pre.path, pre.text});
+        parts.push_back(SourceFile::Part{pre.path, pre.text, {}, true});
         cursor += len + 1;
     }
 
     for (const auto& [uri, text] : ws_files) {
         std::uint32_t len = static_cast<std::uint32_t>(text.size());
         a->slices.push_back(PartSlice{uri, text, cursor, cursor + len, false});
-        parts.push_back(SourceFile::Part{uri, text});
+        parts.push_back(SourceFile::Part{uri, text, module_of(uri)});
         cursor += len + 1;
     }
 
@@ -1964,9 +1980,32 @@ std::unique_ptr<Analysis> build_analysis(
         }
     }
 
+    // Plugins' natives (milestone 10.5c) are declared in their packages'
+    // files and implemented by libraries the server doesn't load: accept the
+    // `@native` declarations of package files, under their qualified names.
+    for (const Decl* d : a->mod.decls) {
+        if (d == nullptr) continue;
+        const std::string_view module = a->source_ptr->module_at(d->span.begin);
+        if (module.empty()) continue;
+        const std::string prefix = std::string(module) + ".";
+        if (const auto* fd = as<FnDecl>(d)) {
+            native_names.emplace(prefix + std::string(fd->name.name));
+            continue;
+        }
+        const List<Decl*>* members = nullptr;
+        if (const auto* cd = as<ClassDecl>(d)) members = &cd->members;
+        if (const auto* sd = as<StructDecl>(d)) members = &sd->members;
+        if (members == nullptr) continue;
+        for (const Decl* m : *members) {
+            if (m != nullptr && m->kind == DeclKind::Fn) {
+                native_names.emplace(prefix + std::string(d->name.name) + "." + std::string(m->name.name));
+            }
+        }
+    }
     a->program.native_names = std::move(native_names);
     CheckOptions chk_opts;
     chk_opts.keep_on_error = true;
+    chk_opts.tests = true; // editors show errors in @test bodies too
     check_module(a->program, *a->source_ptr, a->mod, sink, chk_opts);
 
     a->diags = sink.all();
@@ -3613,7 +3652,7 @@ std::vector<std::string> Server::handle_message(std::string_view json_payload) {
             {"capabilities", std::move(caps)},
             {"serverInfo", json::Value::object({
                                {"name", json::Value::string("pluma-lsp")},
-                               {"version", json::Value::string("0.1.0")},
+                               {"version", json::Value::string("0.2.0")},
                            })},
         });
         return {json::make_response(id, std::move(result))};

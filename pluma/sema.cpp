@@ -316,7 +316,7 @@ Program::Program() {
         t->op_method = b.method;
         t->done = true;
         builtin_traits_[static_cast<int>(b.trait)] = t.get();
-        globals.emplace(std::string(b.name), Symbol{SymKind::Trait, t.get()});
+        globals.emplace(std::string(b.name), Symbol{SymKind::Trait, t.get(), {}, true, true});
         traits.push_back(std::move(t));
     }
 }

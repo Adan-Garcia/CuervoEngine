@@ -191,4 +191,53 @@ class Canvas {
     // Everything drawn after this covers everything drawn before it (shapes
     // and text alike). Scene.draw_frame starts one per CanvasLayer.
     @native fn new_layer() {}
+
+    // 2D lighting (DESIGN.md 4.17, milestone 9.7). The light nodes of
+    // lighting.plm call these while the tree draws; the lights and occluders
+    // queued then shade everything drawn before apply_lights(), which
+    // Scene.draw_frame calls after the world (CanvasLayers stay unlit).
+    // Render only: lighting never touches the simulation.
+    //
+    // A light at `pos` reaching `radius` pixels. `spot_angle` < 2*pi (radians)
+    // makes it a cone pointing along `rotation`, its edge softened over
+    // `spot_feather`. Occluders cast shadows when `shadows` is on:
+    // `shadow_softness` is the size of the glowing source (0 = hard shadows;
+    // they are sharp at their occluder and that wide at the light);
+    // `shadow_color` tints them. Only occluders sharing a bit of `mask` block
+    // it. `subtract` darkens instead of lighting. `height` is how far above
+    // the plane the light hangs: occluder faces are normal mapped against it.
+    @native fn point_light(pos: vec2, radius: float, color: Color = Color {}, energy = 1.0, falloff = 1.0,
+                           rotation = 0.0, spot_angle = 6.2831855, spot_feather = 0.2617994, source_radius = 4.0,
+                           shadows = true, shadow_softness = 16.0,
+                           shadow_color: Color = Color { r = 0.0, g = 0.0, b = 0.0, a = 0.65 }, mask = 1,
+                           subtract = false, height = 48.0) {}
+    // Parallel light (sun, moon) shining along `rotation` over the whole view;
+    // shadows reach `max_distance` pixels back toward it.
+    @native fn directional_light(rotation: float, color: Color = Color {}, energy = 1.0, max_distance = 600.0,
+                                 shadows = true, shadow_softness = 16.0,
+                                 shadow_color: Color = Color { r = 0.0, g = 0.0, b = 0.0, a = 0.65 },
+                                 mask = 1) {}
+    // Darkens the world by `darkness` (0..1) tinted `color`, except where
+    // lights reach; `glow` adds the lights' color on top.
+    @native fn ambient_light(color: Color = Color { r = 0.05, g = 0.06, b = 0.12, a = 1.0 }, darkness = 0.8,
+                             glow = 0.35) {}
+    // A disc that blocks lights sharing a bit of `mask`. Occluders are
+    // normal mapped: their face bends outward over the last `bevel` pixels
+    // from the edge (0 = flat), so edges turned to a light catch it and edges
+    // turned away fall dark; only other occluders shadow a face.
+    @native fn occluder_circle(center: vec2, radius: float, mask = 1, bevel = 8.0) {}
+    // A `size` rectangle centered on `center`, turned by `rotation`.
+    @native fn occluder_rect(center: vec2, size: vec2, rotation = 0.0, corner_radius = 0.0, mask = 1,
+                             bevel = 8.0) {}
+    // A capsule like capsule().
+    @native fn occluder_capsule(center: vec2, half_length: float, radius: float, rotation = 0.0, mask = 1,
+                                bevel = 8.0) {}
+    // The edges through `points` (placed like polygon()), each a wall
+    // `thickness` wide; `closed` joins the last point to the first.
+    @native fn occluder_polygon(points: List<vec2>, closed = true, thickness = 2.0, pos = vec2(0.0, 0.0),
+                                rotation = 0.0, scale = vec2(1.0, 1.0), mask = 1, bevel = 8.0) {}
+    // Shades everything drawn so far with the queued lights (in the current
+    // view), then forgets them. Without an ambient light, lights add to the
+    // scene; with one, the scene darkens except where they reach.
+    @native fn apply_lights() {}
 }

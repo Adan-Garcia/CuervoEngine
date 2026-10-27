@@ -112,8 +112,7 @@ def legend(data):
         "",
         "Each row also says **where** the feature works and which render **tier** it needs. "
         "*Desktop only* means Linux and Windows but not the web; a row that lists Web is "
-        "web-compatible. Windows is an experimental platform, so every Windows entry inherits "
-        "that level. `-` in Tier means the feature does not depend on the render tier. "
+        "web-compatible. `-` in Tier means the feature does not depend on the render tier. "
         "`cuervo-tools tier check --platform <linux|windows|web>` and `cuervo-tools export` refuse a project "
         "that claims more than a row here provides for the target.",
     ]

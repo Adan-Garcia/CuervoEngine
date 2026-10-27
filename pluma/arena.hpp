@@ -23,7 +23,7 @@ struct List {
     T* end() const { return data + count; }
     std::uint32_t size() const { return count; }
     bool empty() const { return count == 0; }
-    T& operator[](std::uint32_t i) const { return data[i]; }
+    T& operator[](std::size_t i) const { return data[i]; }
     T& back() const { return data[count - 1]; }
 };
 

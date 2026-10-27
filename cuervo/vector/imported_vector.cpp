@@ -1,5 +1,6 @@
 #include "cuervo/vector/imported_vector.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <cstring>
 #include <format>

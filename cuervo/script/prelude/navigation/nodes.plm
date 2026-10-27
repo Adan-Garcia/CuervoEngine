@@ -1,0 +1,49 @@
+// Engine API: 2D grid pathfinding and navigation (DESIGN.md 4.17, Milestone 9.5).
+//
+// NavigationRegion2D defines traversable terrain bounds, step costs, obstacle
+// baking from TileMapLayer, and deterministic A* / Dijkstra / Greedy pathfinding.
+// DijkstraMap provides flow field gradient queries and mass crowd steering.
+// NavigationAgent2D steers nodes along waypoints or flow fields with arrival signals.
+
+// An internal node used by the deterministic A* priority queue.
+struct _NavNode {
+    var x = 0
+    var y = 0
+    var g = 0.0
+    var f = 0.0
+    var id = 0
+}
+
+// The pathfinding search algorithm.
+enum PathMethod {
+    // Standard A* search combining path cost and distance heuristic.
+    AStar,
+    // Dijkstra uniform-cost search without heuristic.
+    Dijkstra,
+    // Greedy best-first search guided purely by heuristic.
+    Greedy,
+}
+
+// Distance metric for pathfinding heuristics.
+enum PathHeuristic {
+    // 8-way diagonal distance taking diagonal cost into account.
+    Octile,
+    // Straight-line geometric Euclidean distance.
+    Euclidean,
+    // 4-way taxicab grid distance.
+    Manhattan,
+    // 8-way Chebyshev distance (maximum of horizontal and vertical deltas).
+    Chebyshev,
+}
+
+// Strict deterministic tie-breaking comparator for _NavNode in PriorityQueue.
+fn _nav_node_less(a: _NavNode, b: _NavNode) -> bool {
+    if a.f < b.f { return true }
+    if a.f > b.f { return false }
+    // Tie-breaker 1: prefer larger g (closer to target)
+    if a.g > b.g { return true }
+    if a.g < b.g { return false }
+    // Tie-breaker 2: strict coordinate order
+    return a.id < b.id
+}
+

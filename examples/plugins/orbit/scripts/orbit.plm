@@ -1,0 +1,33 @@
+// The orbit plugin's script API. The `@native` functions are implemented in
+// C++ (src/orbit.cpp); everything else is ordinary Pluma.
+
+// A node that circles `center`. The angle advances natively; the position
+// uses the engine's deterministic sin and cos.
+pub class Orbiter extends Node2D {
+    var center = vec2(0.0, 0.0)
+    var radius = 40.0
+    var speed = 1.0
+    var angle = 0.0
+    var laps = 0
+
+    fn update(dt: float) {
+        var next = advance(angle, speed, dt)
+        if next < angle {
+            laps += 1
+        }
+        angle = next
+        position = center + vec2(cos(angle), sin(angle)) * radius
+    }
+
+    // Kinetic energy of a unit mass on this orbit, from the node's fields.
+    @native fn energy() -> float {}
+}
+
+// `angle + speed * dt`, wrapped into [0, TAU).
+@native pub fn advance(angle: float, speed: float, dt: float) -> float {}
+
+// How many whole orbits `seconds` at `speed` make.
+@native pub fn orbits_in(seconds: float, speed: float) -> int {}
+
+// The plugin's own description.
+@native pub fn describe() -> str {}

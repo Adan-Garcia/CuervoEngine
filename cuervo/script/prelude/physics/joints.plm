@@ -1,0 +1,574 @@
+// Base class for all 2D physics joints constraining two bodies.
+class Joint2D extends Node2D {
+    // Name or relative path of the first connected body.
+    @export var node_a = ""
+    // Name or relative path of the second connected body.
+    @export var node_b = ""
+    // When true, the two connected bodies can collide with each other.
+    @export var collide_connected = false
+    // When true, forces debug drawing regardless of global debug flag.
+    @export var debug_draw = false
+
+    // Native joint handle.
+    var joint_handle = 0
+
+    // Virtual creation method overridden by joint subclasses.
+    fn _create_joint(a: PhysicsBody2D, b: PhysicsBody2D) -> int {
+        return 0
+    }
+
+    // Resolves a node path or node name to an existing PhysicsBody2D in the scene hierarchy.
+    fn resolve_body(path: str) -> PhysicsBody2D? {
+        if path == "" {
+            return null
+        }
+        var p = parent
+        if p != null {
+            var direct = p.find(path)
+            if direct is PhysicsBody2D b_dir {
+                return b_dir
+            }
+        }
+        var root: Node = self
+        while root.parent != null {
+            root = root.parent
+        }
+        var direct_root = root.find(path)
+        if direct_root is PhysicsBody2D b_root {
+            return b_root
+        }
+
+        var parts = path.split("/")
+        var curr: Node? = self
+        var start_idx = 0
+        if path.starts_with("/") {
+            curr = root
+        } else if parts.len() > 0 && parts[0] == root.name {
+            curr = root
+            start_idx = 1
+        } else if p != null && parts.len() > 0 && parts[0] == p.name {
+            curr = p
+            start_idx = 1
+        } else if p != null {
+            curr = p
+        }
+
+        var i = start_idx
+        while i < parts.len() && curr != null {
+            var part = parts[i]
+            if part == "" || part == "." {
+                i = i + 1
+                continue
+            }
+            if part == ".." {
+                curr = curr.parent
+            } else {
+                var next: Node? = null
+                for c in curr.children {
+                    if c.name == part {
+                        next = c
+                        break
+                    }
+                }
+                if next == null {
+                    next = curr.find(part)
+                }
+                curr = next
+            }
+            i = i + 1
+        }
+
+        if curr is PhysicsBody2D b_resolved {
+            return b_resolved
+        }
+
+        if parts.len() > 0 {
+            var leaf = parts[parts.len() - 1]
+            if p != null {
+                var leaf_p = p.find(leaf)
+                if leaf_p is PhysicsBody2D b_lp {
+                    return b_lp
+                }
+            }
+            var leaf_r = root.find(leaf)
+            if leaf_r is PhysicsBody2D b_lr {
+                return b_lr
+            }
+        }
+        return null
+    }
+
+    // Ensures the native joint is created if both connected bodies exist.
+    fn ensure_joint() {
+        if joint_handle != 0 {
+            return
+        }
+        var a = resolve_body(node_a)
+        var b = resolve_body(node_b)
+        if a != null && b != null {
+            a.ensure_body()
+            b.ensure_body()
+            joint_handle = _create_joint(a, b)
+        }
+    }
+
+    // Connects bodies and creates native joint upon entering the tree.
+    fn ready() {
+        ensure_joint()
+    }
+
+    // Cleans up native joint when leaving the scene tree.
+    fn exit() {
+        if joint_handle != 0 {
+            _Physics.joint_destroy(joint_handle)
+            joint_handle = 0
+        }
+    }
+
+    // Sets the target motor speed in radians/sec (or px/sec for prismatic) if supported by the joint.
+    fn set_motor_speed(speed: float) {
+        ensure_joint()
+        if joint_handle != 0 {
+            _Physics.joint_set_motor_speed(joint_handle, speed)
+        }
+    }
+
+    // Enables or disables the joint motor.
+    fn set_motor_enabled(enabled: bool) {
+        ensure_joint()
+        if joint_handle != 0 {
+            _Physics.joint_set_motor_enabled(joint_handle, enabled)
+        }
+    }
+
+    // Returns the constraint reaction force exerted by this joint in Newtons.
+    fn get_reaction_force() -> vec2 {
+        ensure_joint()
+        if joint_handle != 0 {
+            return _Physics.joint_get_reaction_force(joint_handle)
+        }
+        return vec2(0.0, 0.0)
+    }
+
+    // Returns the constraint reaction torque exerted by this joint in Newton-meters.
+    fn get_reaction_torque() -> float {
+        ensure_joint()
+        if joint_handle != 0 {
+            return _Physics.joint_get_reaction_torque(joint_handle)
+        }
+        return 0.0
+    }
+
+    // Draws joint preview in editor or when debug shapes are toggled.
+    fn draw(g: Canvas) {
+        if !ready_done && !_Physics.get_editor_debug_shapes() {
+            return
+        }
+        if ready_done && !debug_draw && !_Physics.get_debug_shapes() {
+            return
+        }
+        var pos = global_position()
+        var col = Color.rgb(0.2, 0.85, 0.95, 0.85)
+        g.circle(pos, 5.0, fill = col.with_alpha(0.3), stroke = col, width = 1.5)
+        g.line(pos - vec2(6.0, 0.0), pos + vec2(6.0, 0.0), col, width = 1.0)
+        g.line(pos - vec2(0.0, 6.0), pos + vec2(0.0, 6.0), col, width = 1.0)
+
+        var a = resolve_body(node_a)
+        var b = resolve_body(node_b)
+        if a != null {
+            g.line(pos, a.global_position(), Color.rgb(0.2, 0.85, 0.95, 0.4), width = 1.0)
+        }
+        if b != null {
+            g.line(pos, b.global_position(), Color.rgb(0.95, 0.85, 0.2, 0.4), width = 1.0)
+        }
+    }
+}
+
+// A revolute pin joint constraining two physics bodies at an anchor point.
+class PinJoint2D extends Joint2D {
+    // Softness (compliance) factor of the joint spring (0 = rigid).
+    @export var softness = 0.0
+    // When true, rotational limits are enforced between lower and upper angles.
+    @export var angular_limit_enabled = false
+    // Lower rotational limit in radians.
+    @export var angular_limit_lower = 0.0
+    // Upper rotational limit in radians.
+    @export var angular_limit_upper = 0.0
+    // When true, the joint motor is active.
+    @export var motor_enabled = false
+    // Target rotational speed of the motor in radians per second.
+    @export var motor_speed = 0.0
+    // Maximum motor torque in Newton-meters.
+    @export var motor_max_torque = 1000.0
+
+    // Internal helper creating native revolute pin joint.
+    fn _create_joint(a: PhysicsBody2D, b: PhysicsBody2D) -> int {
+        return _Physics.joint_create_pin(a.body_handle, b.body_handle, global_position(), softness,
+                                         angular_limit_enabled, angular_limit_lower, angular_limit_upper,
+                                         motor_enabled, motor_speed, motor_max_torque, collide_connected, self)
+    }
+
+    // Sets the pin joint target motor speed in radians per second.
+    fn set_motor_speed(s: float) {
+        motor_speed = s
+        super.set_motor_speed(s)
+    }
+
+    // Enables or disables the pin joint motor.
+    fn set_motor_enabled(e: bool) {
+        motor_enabled = e
+        super.set_motor_enabled(e)
+    }
+}
+
+// Alias for PinJoint2D representing a 2D revolute joint.
+class RevoluteJoint2D extends PinJoint2D {
+}
+
+// A distance joint maintaining a fixed or spring distance between two physics bodies.
+class DistanceJoint2D extends Joint2D {
+    // Target distance between anchor points (0 = auto-calculate from initial positions).
+    @export var length = 0.0
+    // Minimum distance constraint.
+    @export var min_length = 0.0
+    // Maximum distance constraint.
+    @export var max_length = 0.0
+    // Spring stiffness in Hertz.
+    @export var stiffness = 20.0
+    // Spring damping ratio.
+    @export var damping = 0.7
+
+    // Internal helper creating native distance joint.
+    fn _create_joint(a: PhysicsBody2D, b: PhysicsBody2D) -> int {
+        return _Physics.joint_create_distance(a.body_handle, b.body_handle, a.global_position(), b.global_position(),
+                                              length, min_length, max_length, stiffness, damping, collide_connected, self)
+    }
+
+    // Draws distance constraint line between connected bodies.
+    fn draw(g: Canvas) {
+        if !ready_done && !_Physics.get_editor_debug_shapes() {
+            return
+        }
+        if ready_done && !debug_draw && !_Physics.get_debug_shapes() {
+            return
+        }
+        var a = resolve_body(node_a)
+        var b = resolve_body(node_b)
+        if a != null && b != null {
+            var p_a = a.global_position()
+            var p_b = b.global_position()
+            var col = Color.rgb(0.2, 0.95, 0.4, 0.8)
+            g.line(p_a, p_b, col, width = 2.0)
+            g.circle(p_a, 4.0, fill = col)
+            g.circle(p_b, 4.0, fill = col)
+        } else {
+            super.draw(g)
+        }
+    }
+}
+
+// A damped spring joint connecting two bodies with distance spring dynamics.
+class DampedSpringJoint2D extends DistanceJoint2D {
+    // Rest length of the spring in virtual pixels.
+    @export var rest_length = 0.0
+
+    // Internal helper creating native distance spring joint.
+    fn _create_joint(a: PhysicsBody2D, b: PhysicsBody2D) -> int {
+        var l = length
+        if l <= 0.0 && rest_length > 0.0 {
+            l = rest_length
+        }
+        return _Physics.joint_create_distance(a.body_handle, b.body_handle, a.global_position(), b.global_position(),
+                                              l, min_length, max_length, stiffness, damping, collide_connected, self)
+    }
+}
+
+// A prismatic slider joint constraining movement along a linear axis between two bodies.
+class PrismaticJoint2D extends Joint2D {
+    // Slide axis direction vector.
+    @export var axis = vec2(1.0, 0.0)
+    // When true, a linear spring along the slide axis is enabled.
+    @export var enable_spring = false
+    // Spring stiffness in Hertz.
+    @export var spring_stiffness = 10.0
+    // Spring damping ratio.
+    @export var spring_damping = 0.7
+    // Target translation along the slide axis in pixels.
+    @export var target_translation = 0.0
+    // When true, translation limits are enforced along the slide axis.
+    @export var limit_enabled = false
+    // Lower translation limit in pixels.
+    @export var lower_limit = 0.0
+    // Upper translation limit in pixels.
+    @export var upper_limit = 0.0
+    // When true, the linear motor is active.
+    @export var motor_enabled = false
+    // Target speed of the linear motor in pixels per second.
+    @export var motor_speed = 0.0
+    // Maximum motor force in Newtons.
+    @export var motor_max_force = 1000.0
+
+    // Internal helper creating native prismatic joint.
+    fn _create_joint(a: PhysicsBody2D, b: PhysicsBody2D) -> int {
+        return _Physics.joint_create_prismatic(a.body_handle, b.body_handle, global_position(), axis.rotated(global_rotation()),
+                                               enable_spring, spring_stiffness, spring_damping, target_translation,
+                                               limit_enabled, lower_limit, upper_limit,
+                                               motor_enabled, motor_max_force, motor_speed, collide_connected, self)
+    }
+
+    // Sets the linear motor speed in pixels per second.
+    fn set_motor_speed(s: float) {
+        motor_speed = s
+        super.set_motor_speed(s)
+    }
+
+    // Enables or disables the linear motor.
+    fn set_motor_enabled(e: bool) {
+        motor_enabled = e
+        super.set_motor_enabled(e)
+    }
+
+    // Draws slide axis and limits.
+    fn draw(g: Canvas) {
+        super.draw(g)
+        if !ready_done && !_Physics.get_editor_debug_shapes() {
+            return
+        }
+        if ready_done && !debug_draw && !_Physics.get_debug_shapes() {
+            return
+        }
+        var pos = global_position()
+        var rot = global_rotation()
+        var dir = axis.rotated(rot)
+        var axis_len = 40.0
+        if limit_enabled {
+            var abs_lo = lower_limit
+            if abs_lo < 0.0 {
+                abs_lo = -abs_lo
+            }
+            var abs_hi = upper_limit
+            if abs_hi < 0.0 {
+                abs_hi = -abs_hi
+            }
+            axis_len = abs_lo
+            if abs_hi > axis_len {
+                axis_len = abs_hi
+            }
+            if axis_len < 20.0 {
+                axis_len = 20.0
+            }
+        }
+        g.line(pos - dir * 20.0, pos + dir * axis_len, Color.rgb(1.0, 0.8, 0.2, 0.8), width = 1.5)
+        if limit_enabled {
+            var p_lo = pos + dir * lower_limit
+            var p_hi = pos + dir * upper_limit
+            var perp = vec2(-dir.y, dir.x) * 6.0
+            g.line(p_lo - perp, p_lo + perp, Color.rgb(1.0, 0.4, 0.2, 0.9), width = 2.0)
+            g.line(p_hi - perp, p_hi + perp, Color.rgb(1.0, 0.4, 0.2, 0.9), width = 2.0)
+        }
+    }
+}
+
+// Alias for PrismaticJoint2D representing a 2D slider joint.
+class SliderJoint2D extends PrismaticJoint2D {
+}
+
+// A groove joint constraining a body to slide along a groove path.
+class GrooveJoint2D extends Joint2D {
+    // Length of the groove constraint in virtual pixels.
+    @export var length = 50.0
+    // Initial offset along the groove in virtual pixels.
+    @export var initial_offset = 0.0
+
+    // Internal helper creating native groove joint.
+    fn _create_joint(a: PhysicsBody2D, b: PhysicsBody2D) -> int {
+        return _Physics.joint_create_prismatic(a.body_handle, b.body_handle, global_position(), vec2(1.0, 0.0).rotated(global_rotation()),
+                                               false, 0.0, 0.0, initial_offset,
+                                               true, 0.0, length,
+                                               false, 0.0, 0.0, collide_connected, self)
+    }
+
+    // Draws groove line constraint.
+    fn draw(g: Canvas) {
+        super.draw(g)
+        if !ready_done && !_Physics.get_editor_debug_shapes() {
+            return
+        }
+        if ready_done && !debug_draw && !_Physics.get_debug_shapes() {
+            return
+        }
+        var pos = global_position()
+        var dir = vec2(1.0, 0.0).rotated(global_rotation())
+        var p_end = pos + dir * length
+        var perp = vec2(-dir.y, dir.x) * 5.0
+        g.line(pos, p_end, Color.rgb(0.9, 0.6, 0.2, 0.85), width = 2.0)
+        g.line(pos - perp, pos + perp, Color.rgb(0.9, 0.6, 0.2, 0.9), width = 2.0)
+        g.line(p_end - perp, p_end + perp, Color.rgb(0.9, 0.6, 0.2, 0.9), width = 2.0)
+    }
+}
+
+// A weld joint that rigidly connects two physics bodies at an anchor point.
+class WeldJoint2D extends Joint2D {
+    // Linear stiffness in Hertz (0 = rigid).
+    @export var linear_hertz = 0.0
+    // Angular stiffness in Hertz (0 = rigid).
+    @export var angular_hertz = 0.0
+    // Linear damping ratio.
+    @export var linear_damping = 1.0
+    // Angular damping ratio.
+    @export var angular_damping = 1.0
+
+    // Internal helper creating native weld joint.
+    fn _create_joint(a: PhysicsBody2D, b: PhysicsBody2D) -> int {
+        return _Physics.joint_create_weld(a.body_handle, b.body_handle, global_position(),
+                                          linear_hertz, angular_hertz, linear_damping, angular_damping,
+                                          collide_connected, self)
+    }
+}
+
+// A wheel joint providing suspension spring along an axis and rotational drive for vehicle wheels.
+class WheelJoint2D extends Joint2D {
+    // Suspension slide axis direction vector.
+    @export var axis = vec2(0.0, 1.0)
+    // When true, suspension spring is active.
+    @export var enable_spring = true
+    // Suspension spring stiffness in Hertz.
+    @export var suspension_stiffness = 5.0
+    // Suspension damping ratio.
+    @export var suspension_damping = 0.7
+    // When true, suspension translation limits are enforced.
+    @export var enable_limit = false
+    // Lower suspension travel limit in pixels.
+    @export var lower_translation = -20.0
+    // Upper suspension travel limit in pixels.
+    @export var upper_translation = 20.0
+    // When true, the rotational wheel motor is active.
+    @export var motor_enabled = false
+    // Target rotational speed of the wheel in radians per second.
+    @export var motor_speed = 0.0
+    // Maximum wheel motor torque in Newton-meters.
+    @export var motor_max_torque = 1000.0
+
+    // Internal helper creating native wheel joint.
+    fn _create_joint(a: PhysicsBody2D, b: PhysicsBody2D) -> int {
+        return _Physics.joint_create_wheel(a.body_handle, b.body_handle, global_position(), axis.rotated(global_rotation()),
+                                           enable_spring, suspension_stiffness, suspension_damping,
+                                           enable_limit, lower_translation, upper_translation,
+                                           motor_enabled, motor_max_torque, motor_speed, collide_connected, self)
+    }
+
+    // Sets the wheel motor speed in radians per second.
+    fn set_motor_speed(s: float) {
+        motor_speed = s
+        super.set_motor_speed(s)
+    }
+
+    // Enables or disables the wheel motor.
+    fn set_motor_enabled(e: bool) {
+        motor_enabled = e
+        super.set_motor_enabled(e)
+    }
+
+    // Draws wheel suspension axis and travel limits.
+    fn draw(g: Canvas) {
+        super.draw(g)
+        if !ready_done && !_Physics.get_editor_debug_shapes() {
+            return
+        }
+        if ready_done && !debug_draw && !_Physics.get_debug_shapes() {
+            return
+        }
+        var pos = global_position()
+        var rot = global_rotation()
+        var dir = axis.rotated(rot)
+        var p_lo = pos + dir * lower_translation
+        var p_hi = pos + dir * upper_translation
+        var perp = vec2(-dir.y, dir.x) * 6.0
+        g.line(p_lo, p_hi, Color.rgb(0.3, 0.8, 1.0, 0.85), width = 2.0)
+        g.line(p_lo - perp, p_lo + perp, Color.rgb(0.3, 0.8, 1.0, 0.9), width = 1.5)
+        g.line(p_hi - perp, p_hi + perp, Color.rgb(0.3, 0.8, 1.0, 0.9), width = 1.5)
+    }
+}
+
+// A motor joint controlling the relative position, angle, and friction between two bodies.
+class MotorJoint2D extends Joint2D {
+    // Target linear offset vector between the bodies.
+    @export var linear_offset = vec2(0.0, 0.0)
+    // Target relative angle in radians between the bodies.
+    @export var angular_offset = 0.0
+    // Maximum corrective force in Newtons.
+    @export var max_force = 1000.0
+    // Maximum corrective torque in Newton-meters.
+    @export var max_torque = 1000.0
+    // Linear spring stiffness in Hertz for position control.
+    @export var linear_hertz = 2.0
+    // Linear spring damping ratio.
+    @export var linear_damping = 0.7
+    // Maximum spring force in Newtons.
+    @export var max_spring_force = 1000.0
+    // Angular spring stiffness in Hertz for orientation control.
+    @export var angular_hertz = 2.0
+    // Angular spring damping ratio.
+    @export var angular_damping = 0.7
+    // Maximum spring torque in Newton-meters.
+    @export var max_spring_torque = 1000.0
+
+    // Internal helper creating native motor joint.
+    fn _create_joint(a: PhysicsBody2D, b: PhysicsBody2D) -> int {
+        return _Physics.joint_create_motor(a.body_handle, b.body_handle, linear_offset, angular_offset,
+                                           max_force, max_torque, linear_hertz, linear_damping, max_spring_force,
+                                           angular_hertz, angular_damping, max_spring_torque, collide_connected, self)
+    }
+
+    // Sets the target angular motor speed in radians per second.
+    fn set_motor_speed(s: float) {
+        ensure_joint()
+        if joint_handle != 0 {
+            _Physics.joint_set_motor_speed(joint_handle, s)
+        }
+    }
+}
+
+// A mover joint driving dynamic character motion through velocity commands.
+class MoverJoint2D extends Joint2D {
+    // Desired linear velocity vector.
+    @export var linear_velocity = vec2(0.0, 0.0)
+    // Maximum drive force vector along x and y axes.
+    @export var max_force = vec2(1000.0, 1000.0)
+
+    // Internal helper creating native mover joint.
+    fn _create_joint(a: PhysicsBody2D, b: PhysicsBody2D) -> int {
+        return _Physics.joint_create_mover(a.body_handle, b.body_handle, linear_velocity, max_force, collide_connected, self)
+    }
+}
+
+// A pogo stick spring joint constraining two bodies along a contact normal.
+class PogoJoint2D extends Joint2D {
+    // Normal direction vector of the pogo constraint.
+    @export var normal = vec2(0.0, -1.0)
+    // Spring stiffness in Hertz.
+    @export var stiffness = 10.0
+    // Spring damping ratio.
+    @export var damping = 0.7
+    // Rest length of the pogo spring in virtual pixels.
+    @export var rest_length = 30.0
+    // Maximum tension force.
+    @export var max_tension = 50000.0
+    // Maximum compression force.
+    @export var max_compression = 50000.0
+
+    // Internal helper creating native pogo joint.
+    fn _create_joint(a: PhysicsBody2D, b: PhysicsBody2D) -> int {
+        return _Physics.joint_create_pogo(a.body_handle, b.body_handle, global_position(), normal.rotated(global_rotation()),
+                                          stiffness, damping, rest_length, max_tension, max_compression, collide_connected, self)
+    }
+}
+
+// A filter joint disabling collision detection between two specific bodies.
+class FilterJoint2D extends Joint2D {
+    // Internal helper creating native filter joint.
+    fn _create_joint(a: PhysicsBody2D, b: PhysicsBody2D) -> int {
+        return _Physics.joint_create_filter(a.body_handle, b.body_handle, self)
+    }
+}
+

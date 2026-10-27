@@ -43,6 +43,9 @@ struct CheckOptions {
     // when errors were reported, so completion, hover and go-to-definition work
     // on incomplete or broken files.
     bool keep_on_error = false;
+    // `@test` functions (LANGUAGE.md 9.27) are checked and listed in
+    // Program::tests; otherwise they are left out entirely, as in release builds.
+    bool tests = false;
 };
 
 CheckedUnit check_script(Program& program, const SourceFile& source, const Script& script, DiagnosticSink& diags,

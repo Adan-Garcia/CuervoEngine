@@ -66,6 +66,7 @@ public:
                      std::vector<scene::Field> fields = {});
     bool remove(NodeId id);
     bool rename(NodeId id, std::string_view name);
+    bool change_type(NodeId id, std::string_view new_type);
     // `index` among the new parent's children (after removal); nullopt = last.
     bool reparent(NodeId id, NodeId new_parent, std::optional<std::size_t> index = std::nullopt);
     NodeId duplicate(NodeId id);

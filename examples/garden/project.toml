@@ -1,0 +1,22 @@
+# Packages and imports (milestone 10.5b, docs/PACKAGES.md): flowers that
+# open and close with the `tween` package from another directory, colored by
+# the vendored `palette` package. The game declares its own `Tween`, `ease`
+# and `mix` beside theirs; packages are namespaces, so nothing clashes.
+#   cuervo --game examples/garden
+name = "garden"
+main = "Garden"
+virtual_size = [1280, 720]
+tick_rate = 60
+seed = 1105
+clear_color = "10131f"
+render_tier = "compatible"
+
+[dependencies]
+palette = "1.0.0"          # packages/palette/ inside this project
+
+[dependencies.tween]       # a package in another directory
+path = "../libs/tween"
+version = "1.2.0"
+
+[input.actions]
+more = ["Key.Space", "Key.Enter", "Pad.South"]

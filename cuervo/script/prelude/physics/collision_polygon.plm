@@ -1,0 +1,118 @@
+// A scene node that assigns a 2D polygon or chain collision shape to a parent PhysicsBody2D or Area2D.
+class CollisionPolygon2D extends Node2D {
+    // Array of vertex points defining the collision polygon.
+    @export var polygon = List<vec2>()
+    // Build mode for the polygon (0: Solids / Convex Polygon, 1: Segments / Chain).
+    @export var build_mode = 0
+    // When true, the collision polygon is disabled.
+    @export var disabled = false
+    // Debug draw outline/fill color.
+    @export var debug_color = Color { r = 0.2, g = 0.6, b = 1.0, a = 0.4 }
+    // When true, forces debug drawing regardless of global debug flag.
+    @export var debug_draw = false
+
+    // Native handle in the physics world.
+    var shape_handle = 0
+    // Parent body or area owner.
+    var body_owner: Node2D? = null
+
+    // Engine-internal tree entry hook registering collision geometry with parent body.
+    fn enter_tree() {
+        register_shape()
+        super.enter_tree()
+    }
+
+    // Registers the polygon shape with the parent physics body upon entering the tree.
+    fn ready() {
+        register_shape()
+    }
+
+    // Unregisters the polygon shape from the physics world when removed.
+    fn exit() {
+        unregister_shape()
+    }
+
+    // Searches up the hierarchy for an owning body or area and creates the native shape.
+    fn register_shape() {
+        if shape_handle != 0 {
+            return
+        }
+        var p = parent
+        while p != null {
+            if p is PhysicsBody2D b {
+                body_owner = b
+                b.ensure_body()
+                create_shape_for(b.body_handle, false)
+                return
+            } else if p is Area2D a {
+                body_owner = a
+                a.ensure_body()
+                create_shape_for(a.body_handle, true)
+                return
+            }
+            p = p.parent
+        }
+    }
+
+    // Internal helper creating native Box2D shape definition.
+    fn create_shape_for(b_handle: int, is_sensor: bool) {
+        if b_handle == 0 {
+            return
+        }
+        var lyr = 1
+        var msk = 1
+        if body_owner is PhysicsBody2D pb {
+            lyr = pb.collision_layer
+            msk = pb.collision_mask
+        } else if body_owner is Area2D pa {
+            lyr = pa.collision_layer
+            msk = pa.collision_mask
+        }
+
+        if build_mode == 0 {
+            shape_handle = _Physics.shape_create_polygon(b_handle, position, rotation, polygon, is_sensor, lyr, msk, self)
+        } else {
+            shape_handle = _Physics.shape_create_chain(b_handle, position, rotation, polygon, false, is_sensor, lyr, msk, self)
+        }
+        if disabled && shape_handle != 0 {
+            _Physics.shape_set_disabled(shape_handle, true)
+        }
+    }
+
+    // Destroys the native shape handle.
+    fn unregister_shape() {
+        if shape_handle != 0 {
+            _Physics.shape_destroy(shape_handle)
+            shape_handle = 0
+            body_owner = null
+        }
+    }
+
+    // Draws the collision polygon preview in editor or when debug shapes are toggled.
+    fn draw(g: Canvas) {
+        if !ready_done && !_Physics.get_editor_debug_shapes() {
+            return
+        }
+        if ready_done && !debug_draw && !_Physics.get_debug_shapes() {
+            return
+        }
+        if polygon.len() < 2 {
+            return
+        }
+        var pos = global_position()
+        var rot = global_rotation()
+        var fill_col = debug_color.with_alpha(debug_color.a * 0.35)
+        var stroke_col = debug_color
+
+        if build_mode == 0 && polygon.len() >= 3 {
+            g.polygon(polygon, fill = fill_col, stroke = stroke_col, width = 1.5, pos = pos, rotation = rot)
+        } else {
+            g.polyline(polygon, stroke_col, width = 2.0, closed = (build_mode == 0), pos = pos, rotation = rot)
+        }
+        for pt in polygon {
+            var world_pt = pos + pt.rotated(rot)
+            g.circle(world_pt, 2.5, fill = stroke_col)
+        }
+    }
+}
+

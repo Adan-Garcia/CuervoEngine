@@ -50,7 +50,8 @@ int usage() {
               "[--script-commands <file>] [--screenshot <file.ppm>] [--quit-after <seconds>] [--size <w>x<h>] "
               "[--font <file.ttf>] [--view <x>,<y>,<zoom>] [--jobs <n>] [--no-audio] [--tabs <Panel,...>] [--replay-verify <file.replay>] [--profile] "
               "[--theme light|dark] [--splash|--no-splash] [--layout <name>] [--screen welcome] "
-              "[--tool select|move|rotate|scale] [--select </a,/b>] [--palette [query]]\n"
+              "[--tool select|move|rotate|scale] [--select </a,/b>] [--palette [query]] "
+              "[--ui-scale <float>] [--font-scale <float>]\n"
               "       cuervo-editor --new-project <dir> [--template empty|walker] [--name <name>]");
     return EXIT_FAILURE;
 }
@@ -160,13 +161,30 @@ int main(int argc, char** argv) {
         }
         o.theme = theme;
     }
+    if (const std::string_view us = arg_value(argc, argv, "--ui-scale"); !us.empty()) {
+        float s = 1.0f;
+        if (std::from_chars(us.data(), us.data() + us.size(), s).ec != std::errc() || s <= 0.2f || s > 5.0f) {
+            LOG_ERROR("--ui-scale expects a float factor, e.g. 1.25");
+            return EXIT_FAILURE;
+        }
+        o.ui_scale = s;
+    }
+    if (const std::string_view fs = arg_value(argc, argv, "--font-scale"); !fs.empty()) {
+        float s = 1.0f;
+        if (std::from_chars(fs.data(), fs.data() + fs.size(), s).ec != std::errc() || s <= 0.2f || s > 5.0f) {
+            LOG_ERROR("--font-scale expects a float factor, e.g. 1.1");
+            return EXIT_FAILURE;
+        }
+        o.font_scale = s;
+    }
     if (const std::string_view tool = arg_value(argc, argv, "--tool"); !tool.empty()) {
         if (tool == "select") o.tool = editor::Tool::Select;
         else if (tool == "move") o.tool = editor::Tool::Move;
         else if (tool == "rotate") o.tool = editor::Tool::Rotate;
         else if (tool == "scale") o.tool = editor::Tool::Scale;
+        else if (tool == "paint") o.tool = editor::Tool::Paint;
         else {
-            LOG_ERROR("Unknown --tool '{}' (expected select, move, rotate or scale)", tool);
+            LOG_ERROR("Unknown --tool '{}' (expected select, move, rotate, scale or paint)", tool);
             return EXIT_FAILURE;
         }
     }

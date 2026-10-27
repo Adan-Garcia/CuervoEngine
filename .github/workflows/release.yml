@@ -6,8 +6,17 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Prebuilt editor, tools and export templates (milestone 10.5a, docs/WINDOWS.md
+# "Prebuilt binaries"). Every release file is listed in SHA256SUMS.txt and,
+# once the repository is public (GitHub has no attestations for user-owned
+# private repositories), gets a Sigstore build attestation
+# (`gh attestation verify <file> --repo <owner>/<repo>`); the Windows
+# executables are also Authenticode-signed when the WINDOWS_SIGNING_CERT
+# (base64 .pfx) and WINDOWS_SIGNING_PASSWORD secrets are set.
 permissions:
   contents: write
+  id-token: write      # attestations
+  attestations: write
 
 jobs:
   build-linux:
@@ -37,6 +46,10 @@ jobs:
           cp build/release/editor/cuervo-editor package/bin/
           cp build/release/tools/cuervo_tools/cuervo-tools package/bin/
           cp build/release/pluma/plm package/bin/
+          # The export template: `cuervo-tools export --platform linux` ships it
+          # from <package>/templates/linux/ (docs/EXPORT.md "Players").
+          mkdir -p package/templates/linux
+          cp build/release/runtime/cuervo package/templates/linux/
           cp -r assets package/
           mkdir -p package/assets/fonts
           cp build/release/_deps/outfit-src/fonts/ttf/Outfit-Medium.ttf package/assets/fonts/ 2>/dev/null || true
@@ -68,9 +81,19 @@ jobs:
             cuervo-linux-x86_64.tar.gz
             cuervo-vscode-pluma.vsix
 
+      - name: Upload the Linux export template
+        if: ${{ !env.ACT }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: template-linux
+          path: package/templates/linux/cuervo
+
   build-windows:
     name: Build Windows Packages
     runs-on: windows-latest
+    env:
+      SIGNING_CERT: ${{ secrets.WINDOWS_SIGNING_CERT }}
+      SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -89,30 +112,75 @@ jobs:
           }
           echo "C:\tools\glslang\bin" >> $env:GITHUB_PATH
 
-      - name: Configure CMake (Release)
-        run: cmake --preset release
+      - name: Configure CMake (MSVC, Release)
+        run: cmake --preset msvc-release
 
       - name: Build Release Binaries
-        run: cmake --build --preset release --target runtime editor cuervo_tools plm
+        run: cmake --build --preset msvc-release --target runtime player editor cuervo_tools plm
+
+      - name: Sign the executables (Authenticode)
+        if: ${{ env.SIGNING_CERT != '' }}
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGNING_CERT))
+          $exes = @("build\msvc-release\runtime\cuervo.exe", "build\msvc-release\runtime\cuervo-player.exe",
+                    "build\msvc-release\editor\cuervo-editor.exe",
+                    "build\msvc-release\tools\cuervo_tools\cuervo-tools.exe", "build\msvc-release\pluma\plm.exe")
+          signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f $pfx /p $env:SIGNING_PASSWORD $exes
+          if ($LASTEXITCODE -ne 0) { Remove-Item $pfx; exit 1 }
+          Remove-Item $pfx
+          signtool verify /pa $exes
 
       - name: Package Windows Archive
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path package\bin
-          Copy-Item build\release\runtime\cuervo.exe -Destination package\bin\
-          Copy-Item build\release\editor\cuervo-editor.exe -Destination package\bin\
-          Copy-Item build\release\tools\cuervo_tools\cuervo-tools.exe -Destination package\bin\
-          Copy-Item build\release\pluma\plm.exe -Destination package\bin\
+          Copy-Item build\msvc-release\runtime\cuervo.exe -Destination package\bin\
+          Copy-Item build\msvc-release\editor\cuervo-editor.exe -Destination package\bin\
+          Copy-Item build\msvc-release\tools\cuervo_tools\cuervo-tools.exe -Destination package\bin\
+          Copy-Item build\msvc-release\pluma\plm.exe -Destination package\bin\
+          # The export template (GUI subsystem): `cuervo-tools export --platform windows`
+          # ships it from <package>\templates\windows\ (docs/EXPORT.md "Players").
+          New-Item -ItemType Directory -Force -Path package\templates\windows
+          Copy-Item build\msvc-release\runtime\cuervo-player.exe -Destination package\templates\windows\
+          # The Visual C++ runtime, app-local (Microsoft's redistributable files): beside
+          # the tools, and beside the template so exports from any host ship it.
+          foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")) {
+              Copy-Item "$env:SystemRoot\System32\$dll" -Destination package\bin\
+              Copy-Item "$env:SystemRoot\System32\$dll" -Destination package\templates\windows\
+          }
           Copy-Item -Recurse assets -Destination package\
           if (!(Test-Path package\assets\fonts)) { New-Item -ItemType Directory -Force -Path package\assets\fonts }
-          Copy-Item build\release\_deps\outfit-src\fonts\ttf\Outfit-Medium.ttf -Destination package\assets\fonts\ -ErrorAction SilentlyContinue
-          Copy-Item build\release\_deps\figtree-src\fonts\ttf\Figtree-*.ttf -Destination package\assets\fonts\ -ErrorAction SilentlyContinue
-          Copy-Item build\release\_deps\jetbrains_mono-src\fonts\ttf\JetBrainsMono-Regular.ttf -Destination package\assets\fonts\ -ErrorAction SilentlyContinue
+          Copy-Item build\msvc-release\_deps\outfit-src\fonts\ttf\Outfit-Medium.ttf -Destination package\assets\fonts\ -ErrorAction SilentlyContinue
+          Copy-Item build\msvc-release\_deps\figtree-src\fonts\ttf\Figtree-*.ttf -Destination package\assets\fonts\ -ErrorAction SilentlyContinue
+          Copy-Item build\msvc-release\_deps\jetbrains_mono-src\fonts\ttf\JetBrainsMono-Regular.ttf -Destination package\assets\fonts\ -ErrorAction SilentlyContinue
           Copy-Item -Recurse third_party\licenses -Destination package\
           Copy-Item LICENSE.md -Destination package\
           Copy-Item README.md -Destination package\
           Copy-Item THIRD_PARTY_NOTICES.md -Destination package\
           Compress-Archive -Path package\* -DestinationPath cuervo-windows-x86_64.zip
+
+      - name: Check the package exports the shmup to the Linux state hash
+        # From the unpacked archive, not the build tree: cuervo-tools must find
+        # templates\windows\cuervo-player.exe by itself.
+        shell: pwsh
+        run: |
+          ./.github/scripts/install-mesa.ps1
+          Expand-Archive cuervo-windows-x86_64.zip -DestinationPath unpacked
+          Copy-Item C:\tools\mesa\opengl32.dll unpacked\bin\
+          $env:GALLIUM_DRIVER = "llvmpipe"
+          # The build tree's own player would win over the template: set it aside.
+          Move-Item build\msvc-release\runtime\cuervo-player.exe cuervo-player.exe.aside
+          unpacked\bin\cuervo-tools.exe export examples\shmup --platform windows --engine full -o dist-shmup
+          $code = $LASTEXITCODE
+          Move-Item cuervo-player.exe.aside build\msvc-release\runtime\cuervo-player.exe
+          if ($code -ne 0) { exit 1 }
+          if (!(Test-Path dist-shmup\vcruntime140.dll)) { Write-Output "the export shipped no Visual C++ runtime"; exit 1 }
+          Copy-Item C:\tools\mesa\opengl32.dll dist-shmup\
+          $out = & dist-shmup\shmup.exe --backend gl --no-audio --screenshot shmup.ppm 2>&1 | Out-String
+          Write-Output $out
+          if ($out -notmatch "state hash a3e57e79964421d3") { exit 1 }
 
       - name: Upload Windows Artifact
         if: ${{ !env.ACT }}
@@ -120,6 +188,13 @@ jobs:
         with:
           name: windows-release
           path: cuervo-windows-x86_64.zip
+
+      - name: Upload the Windows export template
+        if: ${{ !env.ACT }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: template-windows
+          path: package/templates/windows/
 
   publish-release:
     name: Publish GitHub Release
@@ -130,7 +205,36 @@ jobs:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
+          pattern: '*-release'
           merge-multiple: true
+
+      - name: Download the export templates
+        uses: actions/download-artifact@v4
+        with:
+          pattern: 'template-*'
+          path: templates-in
+
+      - name: Bundle every platform's export template
+        # One archive for exporting to any desktop platform from any host:
+        # unpack it next to bin/ (docs/EXPORT.md "Players").
+        run: |
+          mkdir -p bundle/templates/linux bundle/templates/windows
+          cp templates-in/template-linux/cuervo bundle/templates/linux/
+          chmod +x bundle/templates/linux/cuervo
+          cp templates-in/template-windows/* bundle/templates/windows/
+          (cd bundle && zip -r ../cuervo-export-templates.zip templates)
+          sha256sum cuervo-linux-x86_64.tar.gz cuervo-windows-x86_64.zip cuervo-export-templates.zip \
+            cuervo-vscode-pluma.vsix > SHA256SUMS.txt
+
+      - name: Attest the release files (Sigstore)
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            cuervo-linux-x86_64.tar.gz
+            cuervo-windows-x86_64.zip
+            cuervo-export-templates.zip
+            cuervo-vscode-pluma.vsix
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -138,7 +242,9 @@ jobs:
           files: |
             cuervo-linux-x86_64.tar.gz
             cuervo-windows-x86_64.zip
+            cuervo-export-templates.zip
             cuervo-vscode-pluma.vsix
+            SHA256SUMS.txt
           draft: false
           prerelease: true
           generate_release_notes: true

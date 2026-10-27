@@ -2,6 +2,7 @@ add_library(cuervo STATIC
     core/log.cpp
     core/fixed_timestep.cpp
     core/name.cpp
+    core/sha256.cpp
     core/profiler.cpp
     math/dmath.cpp
     input/input_map.cpp
@@ -18,6 +19,7 @@ add_library(cuervo STATIC
     rhi/gl/gl_device.cpp
     render/camera.cpp
     render/sdf_batcher.cpp
+    render/light_batcher.cpp
     render/mesh_batcher.cpp
     render/font.cpp
     render/font_import.cpp
@@ -38,10 +40,13 @@ add_library(cuervo STATIC
     assets/vfs.cpp
     assets/manifest.cpp
     script/features.cpp
+    script/dotnet_host.cpp
+    script/plugin_host.cpp
     script/project.cpp
     script/script_host.cpp
     script/script_host_scene.cpp
     script/anim_bindings.cpp
+    script/light_bindings.cpp
     script/scene_bridge.cpp
     script/game_runner.cpp
     script/game_session.cpp
@@ -50,6 +55,8 @@ add_library(cuervo STATIC
     script/support.cpp
     script/project_edit.cpp
 )
+# The engine version packages check their `engine` range against (docs/PACKAGES.md).
+target_compile_definitions(cuervo PRIVATE CUERVO_ENGINE_VERSION="${PROJECT_VERSION}")
 
 # docs/support.json compiled in (milestone 8.8): the tier and export checks read the support matrix.
 cuervo_generate_support_data(${CMAKE_CURRENT_BINARY_DIR}/generated/support_data.inc)
@@ -96,6 +103,22 @@ else()
     target_compile_definitions(cuervo PUBLIC CUERVO_FEATURE_UI=0)
 endif()
 
+if(CUERVO_FEATURE_PHYSICS)
+    target_sources(cuervo PRIVATE
+        physics/physics_world.cpp
+        physics/physics_shapes.cpp
+        physics/physics_joints.cpp
+        physics/physics_queries.cpp
+        physics/physics_character.cpp
+        physics/physics_step.cpp
+        script/physics_bindings.cpp
+    )
+    target_link_libraries(cuervo PUBLIC box2d)
+    target_compile_definitions(cuervo PUBLIC CUERVO_FEATURE_PHYSICS=1)
+else()
+    target_compile_definitions(cuervo PUBLIC CUERVO_FEATURE_PHYSICS=0)
+endif()
+
 if(CUERVO_PROFILING)
     target_compile_definitions(cuervo PUBLIC CUERVO_PROFILING=1)
 else()
@@ -121,6 +144,12 @@ set(CUERVO_PRELUDE_FILES
     script/prelude/scene.plm
     script/prelude/nodes.plm
     script/prelude/animation.plm
+    script/prelude/tilemap.plm
+    script/prelude/lighting.plm
+    script/prelude/navigation/nodes.plm
+    script/prelude/navigation/region.plm
+    script/prelude/navigation/dijkstra.plm
+    script/prelude/navigation/agent.plm
 )
 if(CUERVO_FEATURE_COLLISION)
     list(APPEND CUERVO_PRELUDE_FILES script/prelude/collision.plm)
@@ -129,10 +158,28 @@ if(CUERVO_FEATURE_PARTICLES)
     list(APPEND CUERVO_PRELUDE_FILES script/prelude/particles.plm)
 endif()
 if(CUERVO_FEATURE_UI)
-    list(APPEND CUERVO_PRELUDE_FILES script/prelude/ui.plm)
+    list(APPEND CUERVO_PRELUDE_FILES
+        script/prelude/ui/theme.plm
+        script/prelude/ui/control.plm
+        script/prelude/ui/containers.plm
+        script/prelude/ui/widgets.plm
+        script/prelude/ui/popups.plm
+        script/prelude/ui/ui.plm
+    )
 endif()
 if(CUERVO_FEATURE_AUDIO)
     list(APPEND CUERVO_PRELUDE_FILES script/prelude/audio.plm)
+endif()
+if(CUERVO_FEATURE_PHYSICS)
+    list(APPEND CUERVO_PRELUDE_FILES
+        script/prelude/physics/shapes.plm
+        script/prelude/physics/collision_polygon.plm
+        script/prelude/physics/bodies.plm
+        script/prelude/physics/area_raycast.plm
+        script/prelude/physics/joints.plm
+        script/prelude/physics/queries.plm
+        script/prelude/physics/tilemap_collision.plm
+    )
 endif()
 # One embedded prelude as .inc entries {"path", R"(text)"}. A file longer than
 # ~60 KB becomes several consecutive entries with the same path, split at line
@@ -152,10 +199,12 @@ function(cuervo_append_prelude out path text)
         endif()
         math(EXPR _cut "60000 + ${_nl} + 1")
         string(SUBSTRING "${text}" 0 ${_cut} _head)
-        string(APPEND _entries "{\"${path}\", R\"__prelude__(${_head})__prelude__\"},\n")
+        cuervo_raw_literal(_lit "__prelude__" "${_head}")
+        string(APPEND _entries "{\"${path}\", ${_lit}},\n")
         string(SUBSTRING "${text}" ${_cut} -1 text)
     endwhile()
-    string(APPEND _entries "{\"${path}\", R\"__prelude__(${text})__prelude__\"},\n")
+    cuervo_raw_literal(_lit "__prelude__" "${text}")
+    string(APPEND _entries "{\"${path}\", ${_lit}},\n")
     set(${out} "${_entries}" PARENT_SCOPE)
 endfunction()
 set(_prelude_inc "")
@@ -165,8 +214,8 @@ cuervo_append_prelude(_prelude_inc "pluma/math.plm" "${_text}")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/pluma/std/math.plm")
 foreach(_file IN LISTS CUERVO_PRELUDE_FILES)
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${_file}" _text)
-    get_filename_component(_name "${_file}" NAME)
-    cuervo_append_prelude(_prelude_inc "cuervo/${_name}" "${_text}")
+    file(RELATIVE_PATH _rel "${CMAKE_CURRENT_SOURCE_DIR}/script/prelude" "${CMAKE_CURRENT_SOURCE_DIR}/${_file}")
+    cuervo_append_prelude(_prelude_inc "cuervo/${_rel}" "${_text}")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${_file}")
 endforeach()
 file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/cuervo_script_preludes.inc" CONTENT "${_prelude_inc}"
@@ -174,11 +223,27 @@ file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/cuervo_script_prelu
 # Every optional prelude, compiled in or not: feature detection
 # (script/features.cpp) reports what a project needs even from a stripped engine.
 set(_optional_inc "")
-foreach(_file IN ITEMS script/prelude/collision.plm script/prelude/particles.plm script/prelude/ui.plm
-                      script/prelude/audio.plm)
+set(CUERVO_OPTIONAL_PRELUDE_FILES
+    script/prelude/collision.plm
+    script/prelude/particles.plm
+    script/prelude/audio.plm
+    script/prelude/ui/theme.plm
+    script/prelude/ui/control.plm
+    script/prelude/ui/containers.plm
+    script/prelude/ui/widgets.plm
+    script/prelude/ui/popups.plm
+    script/prelude/ui/ui.plm
+    script/prelude/physics/shapes.plm
+    script/prelude/physics/collision_polygon.plm
+    script/prelude/physics/bodies.plm
+    script/prelude/physics/area_raycast.plm
+    script/prelude/physics/joints.plm
+    script/prelude/physics/queries.plm
+)
+foreach(_file IN LISTS CUERVO_OPTIONAL_PRELUDE_FILES)
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${_file}" _text)
-    get_filename_component(_name "${_file}" NAME)
-    cuervo_append_prelude(_optional_inc "cuervo/${_name}" "${_text}")
+    file(RELATIVE_PATH _rel "${CMAKE_CURRENT_SOURCE_DIR}/script/prelude" "${CMAKE_CURRENT_SOURCE_DIR}/${_file}")
+    cuervo_append_prelude(_optional_inc "cuervo/${_rel}" "${_text}")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${_file}")
 endforeach()
 file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/cuervo_optional_preludes.inc" CONTENT "${_optional_inc}"
@@ -203,6 +268,8 @@ cuervo_add_shaders(cuervo
     render/shaders/mesh.frag
     render/shaders/text.vert
     render/shaders/text.frag
+    render/shaders/light.vert
+    render/shaders/light.frag
 )
 
 find_package(Threads REQUIRED)
@@ -234,4 +301,18 @@ if(CUERVO_VULKAN)
     endif()
     target_link_libraries(cuervo PRIVATE vulkan_deps)
     target_compile_definitions(cuervo PRIVATE CUERVO_HAS_VULKAN=1)
+endif()
+
+# WebGPU backend (milestone 10.1): wgpu-native on desktop, emdawnwebgpu in the
+# browser. The page requests the browser's device before main
+# (web/webgpu_init.js, added by cuervo_web_app), so nothing needs JSPI.
+if(CUERVO_WEBGPU)
+    target_sources(cuervo PRIVATE rhi/webgpu/webgpu_device.cpp)
+    target_compile_definitions(cuervo PRIVATE CUERVO_HAS_WEBGPU=1)
+    if(EMSCRIPTEN)
+        target_compile_options(cuervo PUBLIC --use-port=emdawnwebgpu)
+        target_link_options(cuervo PUBLIC --use-port=emdawnwebgpu)
+    else()
+        target_link_libraries(cuervo PRIVATE wgpu_native)
+    endif()
 endif()

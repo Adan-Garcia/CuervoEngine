@@ -6,11 +6,10 @@ runtime loads project.toml, scripts, scenes, sounds and the font from the pack
 through the engine's virtual file system (VFS). DESIGN.md 4.11: a release export
 packs everything into a single archive per platform.
 
-Status: **Linux and web exports built and verified**: the exported shmup reaches the
-same state hash at tick 240 as `cuervo --game examples/shmup`
+Status: **Linux, Windows and web exports built and verified**: the exported shmup
+reaches the same state hash at tick 240 as `cuervo --game examples/shmup`
 (`a3e57e79964421d3`), natively from an unrelated directory with the project
-deleted, and in headless Chrome. **Windows is experimental** (one export
-validated so far, see below). Linux exports ship a **stripped player** by default: an engine built
+deleted, and in headless Chrome. Linux exports ship a **stripped player** by default: an engine built
 with only the subsystems the game uses ("Stripped players" below), 20-40%
 smaller than the full Release player.
 
@@ -51,12 +50,29 @@ Options of `pack` and `export`:
 | `--no-verify` | (`export`) don't run a freshly built player on the exported game before shipping it (for cross builds whose player can't run here) |
 | `--name <launcher>` | the executable's name; default the project name, lowercased (`Shmup` → `shmup`) |
 
-The full Linux runtime (`--engine full`, or `auto` when no stripped player can
-be built) is the `cuervo` binary of the build tree that cuervo-tools comes from
-(`CUERVO_EXPORT_RUNTIME` overrides it). Shipping a Debug full player prints a
-note: export from a Release build, or ship a stripped player (always Release),
-for a real release. The web runtime defaults to `build/web-pack/runtime`
-(`CUERVO_EXPORT_WEB_RUNTIME` overrides it).
+## Players
+
+The full player (`--engine full`, or `auto` when no stripped player can be built) is,
+in this order:
+
+1. `--runtime <path>`;
+2. `CUERVO_EXPORT_RUNTIME` (Linux and Windows) or `CUERVO_EXPORT_WEB_RUNTIME` (web);
+3. the player of the build tree that cuervo-tools comes from: `cuervo` on Linux,
+   `cuervo-player.exe` on Windows (the GUI-subsystem build of the same runtime, which
+   opens no console window; docs/WINDOWS.md 5), `build/web-pack/runtime` for the web;
+4. the **export template** of a prebuilt package: `<package>/templates/<platform>/`
+   beside its `bin/` (`linux/cuervo`, `windows/cuervo-player.exe`).
+
+A build tree only has its own platform's player, so exporting to the other desktop
+platform takes a template. Each release ships one in its archive, and
+`cuervo-export-templates.zip` holds both (unpack it next to `bin/`). The Windows
+templates are Authenticode-signed when the release has a signing certificate. Every
+release file is listed in `SHA256SUMS.txt` and, while the repository is public, has a
+Sigstore build attestation (`gh attestation verify <file> --repo <owner>/<repo>`; GitHub
+offers none for private repositories owned by a user; `.github/workflows/release.yml`).
+
+Shipping a Debug full player prints a note: export from a Release build, or ship a
+stripped player (always Release), for a real release.
 
 ## Pipeline
 
@@ -66,8 +82,8 @@ for a real release. The web runtime defaults to `build/web-pack/runtime`
    (`cuervo-tools tier check`, DESIGN.md 4.4) against the project's tier, and the
    project must not claim support the target platform lacks ([STATUS.md](STATUS.md)):
    a `render_tier = "full"` project is refused for `--platform web`, and `--aot` is
-   refused unless the export host is the target. Errors stop the export; an experimental
-   target (Windows) warns.
+   refused unless the export host is the target. Errors stop the export; experimental
+   claims warn.
 2. **collect**: every file under the project. Hidden files and directories
    (`.import/`, `.git`, `.gitignore`...) are never packed. `--strip` also drops
    development-only files: replays (`*.replay`, `replays/`, docs/REPLAYS.md) and
@@ -98,7 +114,9 @@ for a real release. The web runtime defaults to `build/web-pack/runtime`
    before the export succeeds. Every export also gets `licenses/`: the
    engine's `THIRD_PARTY_NOTICES.md` and the license texts of
    `third_party/licenses/` (SDL3, Vulkan headers, ...), because those licenses
-   ask for their notices to travel with the binary. The
+   ask for their notices to travel with the binary. A game with packages also
+   gets `licenses/PACKAGES.md` (each package's license, as `cuervo-tools license
+   report` prints it) and their license texts in `licenses/packages/`. The
    game's own license is the developer's to add.
 
 ## Stripped players
@@ -127,19 +145,17 @@ builds a player with exactly those:
    240, a private `CUERVO_USER_DIR`) next to its `game.pak`. It must exit 0,
    run from the pack, log no `[error]` or panic (a script naming a feature the
    player lacks is a compile error, so a missed detection fails here) and its
-   state hash must equal a reference:
-   - the same pack run in cuervo-tools' own (full) engine, when the player
-     has the same script surface (audio/ui/particles/collision all on, e.g.
-     the shmup: only Vulkan, dev tools and importers are dropped);
-   - otherwise the same player's dev run (`--game` on a copy of the project,
-     with the pack's font). `ScriptHost::state_hash` hashes every numeric
-     script global, the optional preludes' among them, and the particle
-     world, so players with different features reach different (equally
-     deterministic) hashes for the same game. The frames are identical: the
-     `export_stripped_tictak` test compares the stripped export's frame at tick
-     240 with the full player's dev run byte for byte.
-   - A project with SVG/TTF/OTF sources can't have that dev run (no
-     importers): it is only checked for a clean run.
+   state hash must equal the same pack run in cuervo-tools' own (full)
+   engine. The hash doesn't depend on the features a player was built with:
+   a player without particles or the UI hashes what those hold in a game that
+   doesn't use them (an idle particle system, the UI's initial statics;
+   `ScriptHost::state_hash`, checked by `tests/cuervo/state_hash_tests.cpp`),
+   so a stripped player, native or web, reaches the full engine's hash and a
+   replay recorded on one plays on the other.
+   - Should the full engine fail to run the pack here, the reference is the
+     same player's dev run (`--game` on a copy of the project, with the pack's
+     font); a project with SVG/TTF/OTF sources can't have that dev run (no
+     importers) and is then only checked for a clean run.
    On failure the launcher is removed from the output.
 
 The **cache key** is `<platform>_<features>_<hash>` (e.g.
@@ -152,7 +168,7 @@ whichever project they come from.
 The export prints which player shipped, its size and the full player's:
 
 ```
-player: stripped, 2480896 bytes (full prebuilt player, Debug: 45279648 bytes), verified: state hash d87fd900f344e691 at tick 240 (equal to the dev run)
+player: stripped, 2480896 bytes (full prebuilt player, Debug: 45279648 bytes), verified: state hash 0b1d5dd886e8c072 at tick 240 (equal to the full engine)
 ```
 
 Limits:
@@ -169,12 +185,19 @@ Limits:
   and a host-tools build (`--host-build <dir>`, else the source tree's
   `build/host-tools`; docs/WEB.md "Building"); without them `auto` ships the
   prebuilt web runtime. The cache key adds the emscripten version. The
-  shipped player is the page directory (`index.html`, `.js`, `.wasm`), and it
+  shipped player is the page directory (`index.html`, `.js`, `.wasm`) with both
+  render backends (`CUERVO_WEBGPU=ON`: WebGPU where the browser has it, WebGL2
+  otherwise; docs/WEB.md "WebGPU"), and it
   is verified in headless Chrome (`tools/web/smoke_test.mjs`): it must run
-  the pack, and match the full engine's state hash when it has the full
-  script surface. No Chrome: the export fails unless `--no-verify`.
-- **Windows**: refused ("not supported for windows yet"); it needs a Windows host build
-  first.
+  the pack and match the full engine's state hash. No Chrome: the export
+  fails unless `--no-verify`.
+- **Windows** (on a Windows host, milestone 10.5a): the same definitions, built with the
+  tools' own generator and compilers into `%LOCALAPPDATA%\cuervo\players` (the `player`
+  target: GUI subsystem). MSVC builds need the developer prompt's environment (`INCLUDE`,
+  `LIB`); without it the toolchain counts as missing. The verification run opens a real
+  window (Windows has no offscreen GL). tictak's MSVC player is 31 % smaller than the full
+  Release player and reaches the same state hash. Building Windows players from Linux, or
+  Linux players from Windows, is refused: a native player builds on its own platform.
 
 ### Sizes
 
@@ -186,8 +209,8 @@ font import).
 | Game | Needs | Player | Size (bytes) | vs full | State hash at tick 240 |
 |---|---|---|---|---|---|
 | (any) | everything | full Release | 4,162,784 | | |
-| `examples/tictak` | nothing optional (compatible tier) | `linux_core` | 2,480,896 | -40.4% | `d87fd900f344e691` = its dev run; frame = full dev run (`0b1d5dd886e8c072`) |
-| `examples/bench` | particles, collision | `linux_collision+particles` | 2,613,968 | -37.2% | `ac8912e71a715258` = its dev run; frame = full dev run |
+| `examples/tictak` | nothing optional (compatible tier) | `linux_core` | 2,480,896 | -40.4% | `0b1d5dd886e8c072` = the full engine's dev run |
+| `examples/bench` | particles, collision | `linux_collision+particles` | 2,613,968 | -37.2% | `0d267da3c3be0700` = the full engine's dev run |
 | `examples/shmup` | audio, ui, particles, collision | `linux_audio+collision+particles+ui` | 3,343,544 | -19.7% | `a3e57e79964421d3` = the full engine's dev run (source and `--aot`) |
 
 Every stripped player also drops FreeType (and with it zlib, bzip2, libpng and
@@ -195,15 +218,19 @@ brotli) from its shared-library dependencies: it needs only SDL3 and the C/C++
 runtime.
 
 Web (emscripten 6.0.12, Release `-O2`): the payload that changes is
-`index.wasm` (`index.js` is ~195 KB either way). The full web player is the
+`index.wasm` (`index.js` is ~244 KB either way). The full web player is the
 `web-pack` preset's runtime (every subsystem a web build has; never Vulkan).
+Every web player carries both render backends, WebGPU and WebGL2 (milestone
+10.3); WebGPU (emdawnwebgpu and the backend) adds about 0.87 MB to `index.wasm`
+and 48 KB to `index.js`. The players are verified on SwiftShader, where the
+page gets no WebGPU adapter and so runs WebGL2.
 
 | Game | Needs | `index.wasm` (bytes) | vs full | State hash at tick 240 (headless Chrome) |
 |---|---|---|---|---|
-| (any) | everything | 3,030,542 | | |
-| `examples/tictak` | nothing optional | 2,489,123 | -17.9% | `d87fd900f344e691` (= its Linux stripped player) |
-| `examples/bench` | particles, collision | 2,577,915 | -14.9% | `ac8912e71a715258` (= its Linux stripped player) |
-| `examples/shmup` | audio, ui, particles, collision | 2,921,400 | -3.6% | `a3e57e79964421d3` (= the full engine) |
+| (any) | everything | 4,308,581 | | |
+| `examples/tictak` | nothing optional | 3,271,791 | -24.1% | `0b1d5dd886e8c072` (= the full engine) |
+| `examples/bench` | particles, collision | 3,379,703 | -21.6% | `0d267da3c3be0700` (= the full engine) |
+| `examples/shmup` | audio, ui, particles, collision | 3,794,264 | -11.9% | `a3e57e79964421d3` (= the full engine) |
 
 The web saves less than Linux because a web build never had Vulkan, FreeType
 or the SVG importer to drop; what goes is audio (miniaudio), UI, particles,
@@ -336,19 +363,22 @@ node tools/web/smoke_test.mjs --dir dist-web --args "--screenshot /tmp/w.ppm" --
 
 ### Windows
 
-Experimental: Windows builds of the runtime are still being validated
-(docs/WINDOWS.md, [STATUS.md](STATUS.md)). With the Clang debug player, `export_shmup`
-passes on Windows: both shmup exports (bytecode and AOT) run from another directory and
-reach the Linux state hash. Release players and other games are untested.
+Milestone 10.5a (docs/WINDOWS.md). `export --platform windows` ships `cuervo-player.exe`
+as `<game>.exe` next to `game.pak` (see "Players" above). It is the GUI-subsystem build of
+the runtime, so the game opens no console window, and its log still reaches a redirected
+stdout. `export_shmup` and `export_tutorial` pass with the MSVC and MinGW-w64 players. Both
+games, exported with source and AOT scripts, run from another directory and reach their
+dev state hashes. The release workflow repeats the shmup check from the unpacked
+Windows archive.
 
-- `export --platform windows` fails with that message unless `--runtime
-  <cuervo.exe>` names a player from a Windows build.
-- With `--runtime`, it assembles `<game>.exe` + `game.pak` and warns that the
-  result is untested.
-- `pack --platform windows` works: a pack is portable data with only a
+- AOT scripts (`--aot`) need the export host to be Windows. The C compiler is LLVM
+  `clang` with every toolchain.
+- Stripped players build on a Windows host (below). With MSVC, run `cuervo-tools` from a VS
+  developer prompt: `auto` otherwise ships the full player and says why.
+- `pack --platform windows` works on any host: a pack is portable data with only a
   platform tag.
-- The runtime code involved is portable: `SDL_GetBasePath` / `SDL_GetPrefPath`,
-  and `std::ifstream` instead of mmap.
+- The release paths are portable: `SDL_GetBasePath` / `SDL_GetPrefPath`, and
+  `std::ifstream` instead of mmap.
 
 ## Tests
 
@@ -384,11 +414,12 @@ reach the Linux state hash. Release players and other games are untested.
   - the configure command (dependency checkouts sorted), toolchain checks,
     `run_process` (output, exit codes, timeouts)
   - which player ships: `auto` without a toolchain falls back with a note,
-    `stripped` fails instead, `--runtime` wins, web/Windows are refused
+    `stripped` fails instead, `--runtime` wins, a missing toolchain is refused
 - `export_stripped_tictak` (ctest, `tests/export_stripped.cmake`, only with
   `-DCUERVO_SLOW_TESTS=ON` because it builds an engine; the player cache stays
   in the build tree, so reruns take seconds):
   1. export a copy of tictak with `--engine stripped` (which verifies itself)
   2. ship only `dist/`, run it from elsewhere: it must run from the pack
-  3. its state hash must equal the stripped player's dev run, its tick-240
-     frame the full player's dev run, and it must be smaller than the full player
+  3. its state hash must equal the stripped player's dev run and the full
+     player's, its tick-240 frame the full player's, and it must be smaller
+     than the full player

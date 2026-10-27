@@ -22,7 +22,7 @@ Session::Session(VmOptions options, const Bindings* bindings, bool compile_prelu
     for (const Bindings::Finalizer& f : bindings->finalizers()) vm_->set_native_finalizer(f.class_name, f.fn);
     if (compile_preludes && !bindings->preludes().empty()) {
         std::vector<SourceFile::Part> parts;
-        for (const Bindings::Prelude& p : bindings->preludes()) parts.push_back({p.path, p.source});
+        for (const Bindings::Prelude& p : bindings->preludes()) parts.push_back({p.path, p.source, {}, true});
         prelude_ = load_files(parts);
     }
 }
@@ -66,6 +66,7 @@ SessionResult Session::run_script(std::string name, std::string text, bool echo)
     if (diags.has_errors()) return finish(r, source, diags);
     CheckOptions opts;
     opts.echo = echo;
+    opts.tests = include_tests_;
     CheckedUnit unit = check_script(*program_, source, script, diags, opts);
     if (!unit.ok) return finish(r, source, diags);
     if (!compile(r, diags)) return finish(r, source, diags);
@@ -81,7 +82,9 @@ SessionResult Session::check_and_run_module(const SourceFile& source, bool call_
     Module module = parse_module(source, *arenas_.back(), diags);
     SessionResult r;
     if (diags.has_errors()) return finish(r, source, diags);
-    CheckedUnit unit = check_module(*program_, source, module, diags);
+    CheckOptions opts;
+    opts.tests = include_tests_;
+    CheckedUnit unit = check_module(*program_, source, module, diags, opts);
     if (!unit.ok) return finish(r, source, diags);
     if (!compile(r, diags)) return finish(r, source, diags);
     RunResult run = vm_->run(unit.chunk->index);

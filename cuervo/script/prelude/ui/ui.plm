@@ -1,0 +1,357 @@
+// Engine API: UI system manager and event dispatcher (DESIGN.md 4.10).
+//
+// Global UI event dispatch, keyboard/gamepad focus navigation, click/drag routing,
+// tooltips, and rendering.
+
+// Per-tick UI input state that is not part of the state hash: the hash covers
+// every numeric static, and widgets added after the first UI (DESIGN.md 4.17,
+// 9.3) keep their counters in this object so existing replays stay valid.
+class UIExtra {
+    // Ticks the current control has had the focus.
+    var focus_ticks = 0
+    // Ticks the focus must rest before a tooltip shows.
+    var tooltip_delay = 24
+    // Scrolling: -1 up, 1 down, 0 none, and whether it started this tick.
+    var scroll_dir = 0.0
+    // Whether a scroll press started this tick.
+    var scroll_first = false
+    // Ticks the scroll key has been held.
+    var scroll_ticks = 0
+    // Repeating edit keys (ui_backspace, ui_delete, ui_home, ui_end).
+    var backspace_pressed = false
+    // ui_delete was pressed (or repeated) this tick.
+    var delete_pressed = false
+    // ui_home was pressed this tick.
+    var home_pressed = false
+    // ui_end was pressed this tick.
+    var end_pressed = false
+    // Ticks ui_backspace has been held.
+    var bs_ticks = 0
+    // Ticks ui_delete has been held.
+    var del_ticks = 0
+}
+
+// Focus, modal state and input handling shared by every UI tree; all static.
+class UI {
+    // Ticks the focus has rested (focus_ticks), the tooltip delay, scrolling
+    // and edit-key state.
+    static var x = UIExtra()
+    // The default theme.
+    static var theme = Theme()
+    // The control with the focus, or null.
+    static var focused: Control
+    // The control being dragged (a slider, a scroll area), or null.
+    static var dragging: Control
+    // When set, only UI roots under this node take input (a modal dialog
+    // over other menus). Popup sets and restores it.
+    static var modal: Node
+    // Ticks the current control has had the focus, and how many a tooltip waits.
+
+    // Per-tick input state, computed by the first root that runs in a tick
+    // and consumed by the root that uses it.
+    static var _tick = -1
+    // The pointer position this tick; used by the UI internals.
+    static var pointer_pos = vec2(-1.0, -1.0)
+    static var _pointer_moved = false
+    // A click happened this tick and no control has taken it yet; used by the UI internals.
+    static var click_pending = false
+    static var _nav = vec2(0.0, 0.0)
+    static var _accept = false
+    static var _cancel = false
+    static var _hold_dir = vec2(0.0, 0.0)
+    static var _hold_ticks = 0
+    static var _last_focus: Control
+    // Scrolling: -1 up, 1 down, 0 none, and whether it started this tick.
+    // Text editing: the character typed this tick ("" if none) and the
+    // repeating edit keys (actions ui_backspace, ui_delete, ui_home, ui_end).
+    static var typed_text = ""
+    // Intersected clip rectangles (x, y, width, height) of the scroll areas being drawn.
+    static var _clips = List<vec4>()
+
+    // Size of `text` laid out with the game's font at `size` (one line per
+    // '\n'): the width of the widest line and the height of all lines.
+    @native static fn measure(text: str, size: float) -> vec2 {}
+    // The natural size of a vector image file in the project (Image), or
+    // (0, 0) if it can't be read.
+    @native static fn image_size(asset: str) -> vec2 {}
+    // Called while a text field is being edited, every tick: the window then
+    // delivers typed text (and raises an on-screen keyboard where there is one).
+    @native static fn wants_text(on: bool) {}
+
+    // True when `n` may take input given UI.modal.
+    static fn modal_allows(n: Node) -> bool {
+        return modal == null || !modal.is_alive() || is_under(n, modal)
+    }
+
+    // Cuts drawing to the rectangle (intersected with the clip in effect)
+    // until the matching pop_clip().
+    static fn push_clip(g: Canvas, pos: vec2, sz: vec2) {
+        var x0 = pos.x
+        var y0 = pos.y
+        var x1 = pos.x + sz.x
+        var y1 = pos.y + sz.y
+        if _clips.len() > 0 {
+            var top = _clips[_clips.len() - 1]
+            x0 = max(x0, top.x)
+            y0 = max(y0, top.y)
+            x1 = min(x1, top.x + top.z)
+            y1 = min(y1, top.y + top.w)
+        }
+        var r = vec4(x0, y0, max(x1 - x0, 0.0), max(y1 - y0, 0.0))
+        _clips.push(r)
+        g.set_clip(vec2(r.x, r.y), vec2(r.z, r.w))
+    }
+    // Ends the clip started by the matching push_clip().
+    static fn pop_clip(g: Canvas) {
+        if _clips.len() == 0 {
+            return
+        }
+        _clips.pop()
+        if _clips.len() > 0 {
+            var top = _clips[_clips.len() - 1]
+            g.set_clip(vec2(top.x, top.y), vec2(top.z, top.w))
+        } else {
+            g.clear_clip()
+        }
+    }
+
+    // UI internals, run by the UI roots: per-tick input, focus moves, clicks.
+    static fn begin_tick() {
+        if _tick == Time.tick {
+            return
+        }
+        _tick = Time.tick
+        var p = Input.pointer()
+        _pointer_moved = p != pointer_pos
+        pointer_pos = p
+        click_pending = Input.pressed(#ui_click)
+        _accept = Input.pressed(#ui_accept)
+        _cancel = Input.pressed(#ui_cancel)
+        if focused == _last_focus {
+            x.focus_ticks += 1
+        } else {
+            _last_focus = focused
+            x.focus_ticks = 0
+        }
+        var dir = vec2(0.0, 0.0)
+        if Input.held(#ui_up) {
+            dir = vec2(0.0, -1.0)
+        } else if Input.held(#ui_down) {
+            dir = vec2(0.0, 1.0)
+        } else if Input.held(#ui_left) {
+            dir = vec2(-1.0, 0.0)
+        } else if Input.held(#ui_right) {
+            dir = vec2(1.0, 0.0)
+        }
+        _nav = vec2(0.0, 0.0)
+        if dir != _hold_dir {
+            _hold_dir = dir
+            _hold_ticks = 0
+            _nav = dir
+        } else if dir != vec2(0.0, 0.0) {
+            // Key repeat: after 0.4 s, every 0.1 s (at 60 Hz).
+            _hold_ticks += 1
+            if _hold_ticks >= 24 && (_hold_ticks - 24) % 6 == 0 {
+                _nav = dir
+            }
+        }
+        // Scrolling (the wheel is "held" on the tick it moved).
+        x.scroll_dir = 0.0
+        if Input.held(#ui_scroll_down) {
+            x.scroll_dir = 1.0
+        } else if Input.held(#ui_scroll_up) {
+            x.scroll_dir = -1.0
+        }
+        if x.scroll_dir != 0.0 {
+            x.scroll_ticks += 1
+        } else {
+            x.scroll_ticks = 0
+        }
+        x.scroll_first = x.scroll_ticks == 1
+        // Text editing.
+        typed_text = Input.text()
+        x.bs_ticks = Input.held(#ui_backspace) ? x.bs_ticks + 1 : 0
+        x.backspace_pressed = x.bs_ticks == 1 || (x.bs_ticks >= 24 && (x.bs_ticks - 24) % 6 == 0)
+        x.del_ticks = Input.held(#ui_delete) ? x.del_ticks + 1 : 0
+        x.delete_pressed = x.del_ticks == 1 || (x.del_ticks >= 24 && (x.del_ticks - 24) % 6 == 0)
+        x.home_pressed = Input.pressed(#ui_home)
+        x.end_pressed = Input.pressed(#ui_end)
+    }
+
+    // Drops this tick's UI input (e.g. after the key that opened a menu, so
+    // the menu doesn't see the same press).
+    static fn consume_input() {
+        begin_tick()
+        click_pending = false
+        _accept = false
+        _cancel = false
+        _nav = vec2(0.0, 0.0)
+        x.scroll_dir = 0.0
+        typed_text = ""
+        x.backspace_pressed = false
+        x.delete_pressed = false
+        x.home_pressed = false
+        x.end_pressed = false
+    }
+
+    // True if `n` is `ancestor` or below it.
+    static fn is_under(n: Node, ancestor: Node) -> bool {
+        var x = n
+        while x != null {
+            if x == ancestor {
+                return true
+            }
+            x = x.parent
+        }
+        return false
+    }
+
+    // Handles one tick of input for the UI tree under `root`: focus moves, activation, clicks and drags.
+    static fn process(root: Control) {
+        begin_tick()
+        if modal != null && (!is_under(root, modal) || !modal.is_alive()) {
+            if modal.is_alive() {
+                return
+            }
+            modal = null
+        }
+        if focused != null && (!focused.is_alive() || !focused.can_focus() || !focused.is_visible_in_tree()) {
+            focused = null
+        }
+        root.on_root_input()
+        // Pointer: hovering focuses, clicking activates; a click on empty
+        // content of a scroll area starts dragging the content.
+        if _pointer_moved || click_pending {
+            var hit = root.focusable_at(pointer_pos)
+            if hit != null {
+                if _pointer_moved {
+                    focused = hit
+                }
+                if click_pending {
+                    click_pending = false
+                    focused = hit
+                    dragging = hit
+                    hit.pointer_down(pointer_pos)
+                }
+            } else if click_pending {
+                var area = root.find_scroll(pointer_pos, 0.0)
+                if area != null {
+                    click_pending = false
+                    dragging = area
+                    area.pointer_down(pointer_pos)
+                }
+            }
+        }
+        if dragging != null && dragging.root_control() == root {
+            if Input.held(#ui_click) && dragging.is_alive() {
+                dragging.pointer_drag(pointer_pos)
+            } else {
+                dragging = null
+            }
+        }
+        // Scrolling: the area under the pointer, else the one around the focus.
+        if x.scroll_dir != 0.0 {
+            var area = root.find_scroll(pointer_pos, x.scroll_dir)
+            if area == null && focused != null && focused.root_control() == root {
+                area = root.find_scroll(focused.center(), x.scroll_dir)
+            }
+            if area == null && focused != null && focused.root_control() == root {
+                area = root.find_any_scroll(x.scroll_dir)
+            }
+            if area != null {
+                var amount = x.scroll_dir * area.scroll_step() * (x.scroll_first ? 1.0 : 0.25)
+                x.scroll_dir = 0.0
+                area.scroll_by(vec2(0.0, amount))
+            }
+        }
+        // Keys and gamepad.
+        var inside = focused != null && focused.root_control() == root
+        if inside && focused.is_editing() {
+            focused.edit_tick()
+            if typed_text != "" {
+                // The key that typed the character isn't a command.
+                _nav = vec2(0.0, 0.0)
+                _accept = false
+                _cancel = false
+            }
+        }
+        if focused == null && (_nav != vec2(0.0, 0.0) || _accept) {
+            var list = List<Control>()
+            root.collect_focusable(list)
+            if list.len() > 0 {
+                focused = list[0]
+                _nav = vec2(0.0, 0.0)
+                _accept = false
+            }
+        } else if inside {
+            if _nav != vec2(0.0, 0.0) {
+                var dir = _nav
+                _nav = vec2(0.0, 0.0)
+                if !focused.nudge(dir) {
+                    var n = neighbor(root, focused, dir)
+                    if n != null {
+                        focused = n
+                    }
+                }
+            }
+            if _accept {
+                _accept = false
+                focused.activate()
+            }
+        }
+        if _cancel && (inside || focused == null) {
+            _cancel = false
+            var used = false
+            if inside && focused != null {
+                used = focused.on_cancel()
+            }
+            if !used {
+                root.emit_cancelled()
+            }
+        }
+    }
+
+    // The focusable control of `root` nearest to `from` in direction `dir`,
+    // wrapping to the far end when there is none that way.
+    static fn neighbor(root: Control, from: Control, dir: vec2) -> Control {
+        var list = List<Control>()
+        root.collect_focusable(list)
+        var origin = from.center()
+        var best: Control
+        var best_score = 0.0
+        for c in list {
+            if c == from {
+                continue
+            }
+            var d = c.center() - origin
+            var along = d.dot(dir)
+            if along <= 1.0 {
+                continue
+            }
+            var score = along + abs(d.x * dir.y - d.y * dir.x) * 2.0
+            if best == null || score < best_score {
+                best = c
+                best_score = score
+            }
+        }
+        if best != null {
+            return best
+        }
+        for c in list {
+            if c == from {
+                continue
+            }
+            var d = c.center() - origin
+            var along = d.dot(dir)
+            if along >= -1.0 {
+                continue
+            }
+            var score = along + abs(d.x * dir.y - d.y * dir.x) * 2.0
+            if best == null || score < best_score {
+                best = c
+                best_score = score
+            }
+        }
+        return best
+    }
+}

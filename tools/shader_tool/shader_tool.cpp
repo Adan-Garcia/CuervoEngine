@@ -4,12 +4,21 @@
 //   - GLSL 330 core and GLSL ES 300 cross-compiled by SPIRV-Cross (GL backend),
 //   - the uniform block and sampler name -> binding tables, because neither
 //     GLSL 330 nor ES 300 can declare `layout(binding = N)`; the GL backend
-//     applies them after linking (glUniformBlockBinding, glUniform1i).
+//     applies them after linking (glUniformBlockBinding, glUniform1i),
+//   - optionally the WGSL for the WebGPU backend (DESIGN.md 6, milestone 10:
+//     naga translates SPIR-V to WGSL; cmake/Shaders.cmake runs it).
 //
 // Resource conventions (rhi.hpp): uniform blocks in set 0, combined samplers
 // (sampler2D) in set 1; anything else is rejected here, at build time.
 //
-//   shader_tool <input.spv> <symbol> <output.hpp>
+//   shader_tool <input.spv> <symbol> <output.hpp> [<input.wgsl>]
+//   shader_tool --webgpu-bindings <split.spv> <output.spv>
+//
+// WGSL has no combined samplers, so the WebGPU path first splits them
+// (spirv-opt --split-combined-image-sampler leaves the image and the sampler
+// on the same binding); --webgpu-bindings then renumbers set 1 so that
+// texture binding N becomes image 2N and sampler 2N + 1, the layout the
+// WebGPU backend builds its bind groups for.
 
 #include <spirv_glsl.hpp>
 
@@ -103,18 +112,108 @@ std::string cross_compile(const std::vector<std::uint32_t>& spirv, bool es, Refl
     return source;
 }
 
-void write_raw_string(std::ostream& out, const std::string& text) {
-    if (text.find(")glsl\"") != std::string::npos) {
-        throw std::runtime_error("generated GLSL contains the raw-string delimiter");
+std::string read_text(const char* path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        throw std::runtime_error(std::string("cannot open ") + path);
     }
-    out << "R\"glsl(" << text << ")glsl\"";
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+void write_raw_string(std::ostream& out, const std::string& text, const std::string& delimiter = "glsl") {
+    if (text.find(")" + delimiter + "\"") != std::string::npos) {
+        throw std::runtime_error("generated " + delimiter + " contains the raw-string delimiter");
+    }
+    // Adjacent literals of at most ~8 KB: MSVC rejects a single one over ~16 KB (C2026)
+    // and joins adjacent ones, as every other compiler does.
+    std::size_t pos = 0;
+    while (true) {
+        std::size_t end = text.size();
+        if (end - pos > 8000) {
+            const std::size_t nl = text.find('\n', pos + 8000);
+            if (nl != std::string::npos) end = nl + 1;
+        }
+        out << "R\"" << delimiter << "(" << text.substr(pos, end - pos) << ")" << delimiter << "\"";
+        pos = end;
+        if (pos >= text.size()) break;
+        out << "\n";
+    }
+}
+
+// --webgpu-bindings: patches the Binding decorations of the set-1 images and
+// samplers in place (texture binding N -> image 2N, sampler 2N + 1).
+void renumber_webgpu_bindings(std::vector<std::uint32_t>& words) {
+    constexpr std::uint32_t op_type_image = 25, op_type_sampler = 26, op_type_pointer = 32, op_variable = 59,
+                            op_decorate = 71;
+    constexpr std::uint32_t decoration_binding = 33, decoration_set = 34;
+    const std::uint32_t bound = words[3];
+    std::vector<std::uint32_t> type_op(bound, 0);  // type id -> opcode that defined it
+    std::vector<std::uint32_t> pointee(bound, 0);  // pointer type id -> pointee type id
+    std::vector<std::uint32_t> var_type(bound, 0); // variable id -> its pointer type id
+    std::vector<std::uint32_t> set(bound, ~0u);
+    std::vector<std::size_t> binding_word(bound, 0);
+    auto id = [&](std::uint32_t v) {
+        if (v >= bound) throw std::runtime_error("SPIR-V id out of bounds");
+        return v;
+    };
+    for (std::size_t i = 5; i < words.size();) {
+        const std::uint32_t count = words[i] >> 16, op = words[i] & 0xffffu;
+        if (count == 0 || i + count > words.size()) {
+            throw std::runtime_error("malformed SPIR-V instruction stream");
+        }
+        if ((op == op_type_image || op == op_type_sampler) && count >= 2) type_op[id(words[i + 1])] = op;
+        if (op == op_type_pointer && count >= 4) pointee[id(words[i + 1])] = id(words[i + 3]);
+        if (op == op_variable && count >= 4) var_type[id(words[i + 2])] = id(words[i + 1]);
+        if (op == op_decorate && count >= 4 && words[i + 2] == decoration_set) set[id(words[i + 1])] = words[i + 3];
+        if (op == op_decorate && count >= 4 && words[i + 2] == decoration_binding) binding_word[id(words[i + 1])] = i + 3;
+        i += count;
+    }
+    for (std::uint32_t v = 0; v < bound; ++v) {
+        if (set[v] != 1 || binding_word[v] == 0 || var_type[v] == 0) continue;
+        const std::uint32_t kind = type_op[pointee[var_type[v]]];
+        std::uint32_t& binding = words[binding_word[v]];
+        if (binding >= max_texture_bindings) {
+            throw std::runtime_error("texture binding " + std::to_string(binding) + " out of range");
+        }
+        if (kind == op_type_image) {
+            binding = binding * 2;
+        } else if (kind == op_type_sampler) {
+            binding = binding * 2 + 1;
+        } else {
+            throw std::runtime_error("set 1 holds something other than split images and samplers");
+        }
+    }
+}
+
+int webgpu_bindings(const char* input, const char* output) {
+    try {
+        std::vector<std::uint32_t> words = read_spirv(input);
+        renumber_webgpu_bindings(words);
+        std::ofstream file(output, std::ios::binary | std::ios::trunc);
+        if (!file) {
+            throw std::runtime_error(std::string("cannot write ") + output);
+        }
+        for (const std::uint32_t w : words) {
+            const char bytes[4] = {static_cast<char>(w & 0xffu), static_cast<char>((w >> 8) & 0xffu),
+                                   static_cast<char>((w >> 16) & 0xffu), static_cast<char>(w >> 24)};
+            file.write(bytes, 4);
+        }
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "shader_tool: %s: %s\n", input, e.what());
+        return 1;
+    }
+    return 0;
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 4) {
-        std::fprintf(stderr, "usage: shader_tool <input.spv> <symbol> <output.hpp>\n");
+    if (argc == 4 && std::string(argv[1]) == "--webgpu-bindings") {
+        return webgpu_bindings(argv[2], argv[3]);
+    }
+    if (argc != 4 && argc != 5) {
+        std::fprintf(stderr, "usage: shader_tool <input.spv> <symbol> <output.hpp> [<input.wgsl>]\n"
+                             "       shader_tool --webgpu-bindings <split.spv> <output.spv>\n");
         return 2;
     }
     const std::string symbol = argv[2];
@@ -125,6 +224,7 @@ int main(int argc, char** argv) {
         const std::vector<UniformBlock>& blocks = reflection.blocks;
         const std::vector<UniformBlock>& textures = reflection.textures;
         const std::string glsl_es300 = cross_compile(spirv, true, nullptr);
+        const std::string wgsl = argc == 5 ? read_text(argv[4]) : std::string();
 
         std::ostringstream out;
         out << "// Generated by shader_tool from " << argv[1] << ". Do not edit.\n"
@@ -159,6 +259,14 @@ int main(int argc, char** argv) {
         write_raw_string(out, glsl330);
         out << ",\n    .glsl_es300 = ";
         write_raw_string(out, glsl_es300);
+        // Always named, even empty: GCC warns about a skipped designated member
+        // (-Wmissing-field-initializers) in builds without naga.
+        out << ",\n    .wgsl = ";
+        if (wgsl.empty()) {
+            out << "{}";
+        } else {
+            write_raw_string(out, wgsl, "wgsl");
+        }
         out << ",\n    .uniform_blocks = ";
         if (blocks.empty()) {
             out << "{}";

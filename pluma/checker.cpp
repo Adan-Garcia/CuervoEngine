@@ -1,4 +1,5 @@
 #include "pluma/checker.hpp"
+#include "pluma/ffi.hpp"
 
 #include <algorithm>
 #include <format>
@@ -235,9 +236,9 @@ public:
     CheckedUnit run_script(const Script& script) {
         std::vector<Decl*> decls;
         for (Stmt* s : script.stmts) {
-            if (auto d = as<DeclStmt>(s)) decls.push_back(d->decl);
+            if (auto d = as<DeclStmt>(s); d != nullptr && !skipped_test(d->decl)) decls.push_back(d->decl);
         }
-        begin_unit(decls);
+        begin_unit(decls, script.imports);
         // Top-level statements, with global initializers in source order.
         std::vector<ir::Stmt*> out;
         {
@@ -245,6 +246,7 @@ public:
             push_scope();
             for (Stmt* s : script.stmts) {
                 if (auto d = as<DeclStmt>(s)) {
+                    if (skipped_test(d->decl)) continue;
                     global_init_stmt(d->decl, out);
                     continue;
                 }
@@ -257,14 +259,23 @@ public:
     }
 
     CheckedUnit run_module(const Module& module) {
-        std::vector<Decl*> decls(module.decls.begin(), module.decls.end());
-        begin_unit(decls);
+        std::vector<Decl*> decls;
+        for (Decl* d : module.decls) {
+            if (!skipped_test(d)) decls.push_back(d);
+        }
+        begin_unit(decls, module.imports);
         std::vector<ir::Stmt*> out;
         for (Decl* d : decls) global_init_stmt(d, out);
         return finish_unit(out);
     }
 
 private:
+    // A top-level `@test fn` outside test mode: left out like a comment
+    // (LANGUAGE.md 9.27).
+    bool skipped_test(const Decl* d) const {
+        return !opts_.tests && d != nullptr && d->kind == DeclKind::Fn && has_attribute(d, "test");
+    }
+
     // ------------------------------------------------------------ contexts
 
     struct Entry {
@@ -398,13 +409,126 @@ private:
             error(name.span, std::format("'{}' is a built-in type name", name.name));
             return false;
         }
-        if (P.globals.find(name.name) != P.globals.end()) {
-            error(name.span, std::format("duplicate name '{}': names are global (DESIGN.md 5.11)", name.name));
+        // A package's names are keyed "pkg.Name" (LANGUAGE.md 9.26).
+        std::string_view module = src_.module_at(name.span.begin);
+        std::string key = own_key(name);
+        if (P.globals.find(key) != P.globals.end()) {
+            if (module.empty()) {
+                error(name.span, std::format("duplicate name '{}': names are global (DESIGN.md 5.11)", name.name));
+            } else {
+                error(name.span, std::format("duplicate name '{}' in package '{}'", name.name, module));
+            }
             return false;
         }
-        P.globals.emplace(std::string(name.name), Program::Symbol{kind, ptr});
-        added_names_.emplace_back(name.name);
+        const Decl* d = decl_of(kind, ptr);
+        Program::Symbol sym{kind, ptr};
+        sym.module = *P.modules.emplace(module).first;
+        sym.is_pub = d != nullptr && d->is_pub;
+        sym.prelude = src_.prelude_at(name.span.begin);
+        P.globals.emplace(key, sym);
+        added_names_.push_back(std::move(key));
         return true;
+    }
+
+    // The global key of a declaration's own name.
+    std::string own_key(Ident name) const {
+        std::string_view module = src_.module_at(name.span.begin);
+        return module.empty() ? std::string(name.name) : std::format("{}.{}", module, name.name);
+    }
+    // The name a declared entity carries (type names, diagnostics, the VM).
+    std::string_view own_name(Ident name) {
+        return src_.module_at(name.span.begin).empty() ? name.name : A.str(own_key(name));
+    }
+
+    static const Decl* decl_of(Program::SymKind kind, void* ptr) {
+        switch (kind) {
+            case Program::SymKind::Class: return static_cast<ClassInfo*>(ptr)->decl;
+            case Program::SymKind::Struct: return static_cast<StructInfo*>(ptr)->decl;
+            case Program::SymKind::Enum: return static_cast<EnumInfo*>(ptr)->decl;
+            case Program::SymKind::Trait: return static_cast<TraitInfo*>(ptr)->decl;
+            case Program::SymKind::Function: return static_cast<Function*>(ptr)->decl;
+            case Program::SymKind::Global: return static_cast<GlobalVar*>(ptr)->decl;
+        }
+        return nullptr;
+    }
+
+    const Program::Symbol* symbol_of_key(std::string_view key) const {
+        if (key.empty()) return nullptr;
+        auto it = P.globals.find(key);
+        return it != P.globals.end() ? &it->second : nullptr;
+    }
+
+    // ------------------------------------------------------------ imports (LANGUAGE.md 9.26)
+
+    struct ImportBinding {
+        std::string_view name;    // bound in the importing file
+        std::string_view package;
+        std::string_view item;    // empty: `name` is the package itself
+        Span span;
+    };
+
+    // Registers the unit's packages; called before its names are declared.
+    void note_modules() {
+        imports_.assign(src_.part_count(), {});
+        for (std::size_t i = 0; i < src_.part_count(); ++i) {
+            if (src_.part_module(i).empty() || P.modules.count(src_.part_module(i)) != 0) continue;
+            P.modules.emplace(src_.part_module(i));
+            added_modules_.emplace_back(src_.part_module(i));
+        }
+    }
+
+    // Binds each file's imports; called after the unit's names are declared.
+    void bind_imports(const List<ImportDecl*>& imports) {
+        for (const ImportDecl* im : imports) {
+            if (im == nullptr || im->package.empty()) continue;
+            std::string_view self = src_.module_at(im->span.begin);
+            auto known = P.modules.find(im->package.name);
+            if (known == P.modules.end() || known->empty()) {
+                error(im->package.span, std::format("unknown package '{}' (add it to [dependencies] in project.toml)",
+                                                    im->package.name));
+                continue;
+            }
+            std::string_view pkg = *known;
+            if (pkg == self) {
+                error(im->package.span, std::format("package '{}' cannot import itself", pkg));
+                continue;
+            }
+            std::vector<ImportBinding>& file = imports_[src_.part_index(im->span.begin)];
+            auto bind = [&](Ident name, std::string_view item) {
+                for (const ImportBinding& b : file) {
+                    if (b.name == name.name) {
+                        error(name.span, std::format("'{}' is already imported in this file", name.name));
+                        return;
+                    }
+                }
+                if (global_symbol(name.name, name.span) != nullptr) {
+                    error(name.span, std::format("import '{}' clashes with a declaration of the same name; rename "
+                                                 "it with 'as'",
+                                                 name.name));
+                    return;
+                }
+                file.push_back(ImportBinding{name.name, pkg, item, name.span});
+            };
+            if (!im->has_items) {
+                bind(im->alias.empty() ? im->package : im->alias, {});
+                continue;
+            }
+            for (const ImportItem& item : im->items) {
+                if (package_key(pkg, item.name).empty()) continue;
+                bind(item.alias.empty() ? item.name : item.alias, item.name.name);
+            }
+        }
+    }
+
+    // `tween.Tween` in a type: its qualified key (empty after an error).
+    std::string_view qualified_type_key(const NamedType* n) {
+        const ImportBinding* b = import_binding(n->qualifier.name, n->qualifier.span);
+        if (b == nullptr || !b->item.empty()) {
+            error(n->qualifier.span, std::format("unknown package '{}' (import it with 'import {}')",
+                                                 n->qualifier.name, n->qualifier.name));
+            return {};
+        }
+        return package_key(b->package, n->name);
     }
 
     void declare(Decl* d) {
@@ -413,7 +537,7 @@ private:
                 auto* cd = as<ClassDecl>(d);
                 auto c = std::make_unique<ClassInfo>();
                 c->is_class = true;
-                c->name = cd->name.name;
+                c->name = own_name(cd->name);
                 c->decl = cd;
                 c->source = &src_;
                 c->span = cd->name.span;
@@ -428,7 +552,7 @@ private:
             case DeclKind::Struct: {
                 auto* sd = as<StructDecl>(d);
                 auto s = std::make_unique<StructInfo>();
-                s->name = sd->name.name;
+                s->name = own_name(sd->name);
                 s->decl = sd;
                 s->source = &src_;
                 s->span = sd->name.span;
@@ -441,7 +565,7 @@ private:
             case DeclKind::Enum: {
                 auto* ed = as<EnumDecl>(d);
                 auto e = std::make_unique<EnumInfo>();
-                e->name = ed->name.name;
+                e->name = own_name(ed->name);
                 e->decl = ed;
                 e->source = &src_;
                 e->span = ed->name.span;
@@ -455,7 +579,7 @@ private:
             case DeclKind::Trait: {
                 auto* td = as<TraitDecl>(d);
                 auto t = std::make_unique<TraitInfo>();
-                t->name = td->name.name;
+                t->name = own_name(td->name);
                 t->decl = td;
                 t->source = &src_;
                 t->span = td->name.span;
@@ -466,16 +590,17 @@ private:
             }
             case DeclKind::Fn: {
                 auto* fd = as<FnDecl>(d);
-                Function* f = new_function(std::string(fd->name.name), FnKind::Free, fd->span);
+                Function* f = new_function(own_key(fd->name), FnKind::Free, fd->span);
                 f->decl = fd;
                 register_name(fd->name, Program::SymKind::Function, f);
                 new_free_fns_.push_back(f);
-                if (fd->name.name == "main") main_ = f;
+                if (has_attribute(fd, "test")) new_tests_.push_back(f);
+                if (fd->name.name == "main" && src_.module_at(fd->name.span.begin).empty()) main_ = f;
                 break;
             }
             case DeclKind::Var:
             case DeclKind::Const: {
-                GlobalVar* g = new_global(d, std::string(d->name.name));
+                GlobalVar* g = new_global(d, own_key(d->name));
                 register_name(d->name, Program::SymKind::Global, g);
                 break;
             }
@@ -546,24 +671,28 @@ private:
         }
     }
 
-    void begin_unit(const std::vector<Decl*>& decls) {
+    void begin_unit(const std::vector<Decl*>& decls, const List<ImportDecl*>& imports) {
         chunk_ = new_function("<top level>", FnKind::Chunk, Span{});
         chunk_->ret = T.void_();
         chunk_->signature_done = true;
         chunk_ctx_.fn = chunk_;
         chunk_ctx_.ret = T.void_();
+        note_modules();
         for (Decl* d : decls) declare(d);
+        bind_imports(imports);
         for (TraitInfo* t : new_traits_) ensure_trait(t);
         for (EnumInfo* e : new_enums_) ensure_enum(e);
         for (RecordInfo* r : new_records_) ensure_header(r);
         for (RecordInfo* r : new_records_) ensure_members(r);
         for (RecordInfo* r : new_records_) check_struct_size(r);
         for (Function* f : new_free_fns_) ensure_signature(f);
+        for (Function* f : new_tests_) check_test(f);
         for (GlobalVar* g : new_globals_) ensure_global(g);
         for (RecordInfo* r : new_records_) build_record_inits(r);
         for (RecordInfo* r : new_records_) check_exports(r);
         for (RecordInfo* r : new_records_) check_memory_decls(r);
         for (Decl* d : decls) {
+            reject_test_attribute(d);
             bool type = d->kind == DeclKind::Class || d->kind == DeclKind::Struct || d->kind == DeclKind::Enum ||
                         d->kind == DeclKind::Trait;
             reject_export(d, type ? "type declarations" : "top-level declarations");
@@ -604,8 +733,43 @@ private:
         return result;
     }
 
+    // `@test fn name() { ... }`: top level, no parameters, no result
+    // (LANGUAGE.md 9.27).
+    void check_test(Function* f) {
+        Span at = f->decl->name.span;
+        if (!f->params.empty() || !f->generics.empty() || (f->ret != nullptr && !f->ret->is_void())) {
+            error(at, std::format("test '{}' must take no parameters and return nothing", f->decl->name.name));
+            return;
+        }
+        if (f->is_native || f->is_coroutine) {
+            error(at, std::format("a test cannot be {}", f->is_native ? "'@native'" : "a coroutine"));
+            return;
+        }
+        P.tests.push_back(f);
+    }
+
+    void reject_test_attribute(const Decl* d) {
+        auto reject = [&](const Decl* x) {
+            if (const Attribute* a = find_attribute(x, "test")) {
+                error(a->span, "'@test' applies only to top-level functions");
+            }
+        };
+        if (d->kind != DeclKind::Fn) reject(d);
+        const List<Decl*>* members = nullptr;
+        if (auto* c = as<ClassDecl>(d)) members = &c->members;
+        if (auto* s = as<StructDecl>(d)) members = &s->members;
+        if (auto* t = as<TraitDecl>(d)) members = &t->members;
+        if (members != nullptr) {
+            for (const Decl* m : *members) {
+                if (m != nullptr) reject(m);
+            }
+        }
+    }
+
     void rollback() {
+        std::erase_if(P.tests, [&](const Function* f) { return f->index >= start_functions_; });
         for (const std::string& n : added_names_) P.globals.erase(n);
+        for (const std::string& m : added_modules_) P.modules.erase(m);
         bury(graveyard_, P.classes, start_classes_);
         bury(graveyard_, P.structs, start_structs_);
         bury(graveyard_, P.enums, start_enums_);
@@ -627,13 +791,13 @@ private:
             out.push_back(a);
         };
         if (d->kind == DeclKind::Var) {
-            auto it = P.globals.find(d->name.name);
+            auto it = P.globals.find(own_key(d->name));
             if (it != P.globals.end() && it->second.kind == Program::SymKind::Global) {
                 auto* g = static_cast<GlobalVar*>(it->second.ptr);
                 if (g->decl == d) emit(g);
             }
         } else if (d->kind == DeclKind::Class || d->kind == DeclKind::Struct) {
-            auto it = P.globals.find(d->name.name);
+            auto it = P.globals.find(own_key(d->name));
             if (it == P.globals.end()) return;
             if (it->second.kind != Program::SymKind::Class && it->second.kind != Program::SymKind::Struct) return;
             auto* r = static_cast<RecordInfo*>(it->second.ptr);
@@ -681,6 +845,11 @@ private:
         }
         auto* n = as<NamedType>(te);
         std::string_view name = n->name.name;
+        const Program::Symbol* qualified = nullptr; // `pkg.Type`
+        if (!n->qualifier.empty()) {
+            qualified = symbol_of_key(qualified_type_key(n));
+            if (qualified == nullptr) return T.error();
+        }
         std::vector<const Type*> args;
         for (TypeExpr* a : n->args) args.push_back(resolve_type(a));
         auto no_args = [&](const Type* t) {
@@ -689,7 +858,7 @@ private:
             }
             return t;
         };
-        if (tparams_ != nullptr) {
+        if (tparams_ != nullptr && qualified == nullptr) {
             for (auto it = tparams_->rbegin(); it != tparams_->rend(); ++it) {
                 if ((*it)->name == name) return no_args(T.param(*it));
             }
@@ -733,15 +902,15 @@ private:
             return name == "Deque" ? T.deque(args[0]) : T.pqueue(args[0]);
         }
         if (name == "StrBuilder") return no_args(T.str_builder());
-        auto it = P.globals.find(name);
-        if (it == P.globals.end()) {
+        const Program::Symbol* sym = qualified != nullptr ? qualified : global_symbol(name, n->name.span);
+        if (sym == nullptr) {
             error(n->name.span, std::format("unknown type '{}'", name));
             return T.error();
         }
-        switch (it->second.kind) {
+        switch (sym->kind) {
             case Program::SymKind::Class:
             case Program::SymKind::Struct: {
-                auto* r = static_cast<RecordInfo*>(it->second.ptr);
+                auto* r = static_cast<RecordInfo*>(sym->ptr);
                 ensure_header(r);
                 if (args.size() != r->generics.size()) {
                     if (r->generics.empty()) {
@@ -756,9 +925,9 @@ private:
                 if (r->is_class) return T.class_(static_cast<ClassInfo*>(r), std::move(args));
                 return T.struct_(static_cast<StructInfo*>(r), std::move(args));
             }
-            case Program::SymKind::Enum: return no_args(static_cast<EnumInfo*>(it->second.ptr)->type);
+            case Program::SymKind::Enum: return no_args(static_cast<EnumInfo*>(sym->ptr)->type);
             case Program::SymKind::Trait: {
-                auto* t = static_cast<TraitInfo*>(it->second.ptr);
+                auto* t = static_cast<TraitInfo*>(sym->ptr);
                 if (t->builtin != BuiltinTrait::None) {
                     error(n->name.span, std::format("built-in trait '{}' can only be used as a bound", name));
                     return T.error();
@@ -835,9 +1004,10 @@ private:
         for (std::size_t i = 0; i < gps.size(); ++i) {
             for (TypeExpr* b : gps[i].bounds) {
                 if (auto* n = as<NamedType>(b); n != nullptr && n->args.empty()) {
-                    auto it = P.globals.find(n->name.name);
-                    if (it != P.globals.end() && it->second.kind == Program::SymKind::Trait) {
-                        out[i]->bounds.push_back(static_cast<TraitInfo*>(it->second.ptr));
+                    const Program::Symbol* sym = n->qualifier.empty() ? global_symbol(n->name.name, n->name.span)
+                                                                      : symbol_of_key(qualified_type_key(n));
+                    if (sym != nullptr && sym->kind == Program::SymKind::Trait) {
+                        out[i]->bounds.push_back(static_cast<TraitInfo*>(sym->ptr));
                         continue;
                     }
                 }
@@ -995,9 +1165,10 @@ private:
         }
         for (TypeExpr* te : *traits) {
             if (auto* n = as<NamedType>(te); n != nullptr) {
-                auto it = P.globals.find(n->name.name);
-                if (it != P.globals.end() && it->second.kind == Program::SymKind::Trait) {
-                    auto* tr = static_cast<TraitInfo*>(it->second.ptr);
+                const Program::Symbol* sym = n->qualifier.empty() ? global_symbol(n->name.name, n->name.span)
+                                                                  : symbol_of_key(qualified_type_key(n));
+                if (sym != nullptr && sym->kind == Program::SymKind::Trait) {
+                    auto* tr = static_cast<TraitInfo*>(sym->ptr);
                     if (tr->builtin == BuiltinTrait::Iterable) {
                         error(te->span, "the 'Iterable' trait is not supported yet");
                     }
@@ -1426,6 +1597,92 @@ private:
         }
         f->ret = d->ret != nullptr ? resolve_type(d->ret) : T.void_();
         tparams_ = saved;
+        if (const Attribute* ext = find_attribute(d, "extern")) check_extern(f, *ext);
+    }
+
+    // `@extern("library", "symbol") fn name(...) -> T {}`: a C function
+    // called through the FFI (pluma/ffi.hpp, LANGUAGE.md 9.28).
+    void check_extern(Function* f, const Attribute& ext) {
+        FnDecl* d = f->decl;
+        if (f->is_native) {
+            error(ext.span, "a function cannot be both '@native' and '@extern'");
+            return;
+        }
+        f->is_native = true;
+        if (f->kind != FnKind::Free) {
+            error(ext.span, "'@extern' applies only to top-level functions");
+            return;
+        }
+        if (!d->generics.empty()) error(d->name.span, "an '@extern' function cannot be generic");
+        auto text = [&](std::size_t i, std::string& out) {
+            if (i >= ext.args.size()) return false;
+            auto* s = as<StringLit>(ext.args[i].value);
+            if (s == nullptr || !ext.args[i].name.empty()) return false;
+            out.clear();
+            for (const StringPart& p : s->parts) {
+                if (p.expr != nullptr) return false;
+                out += p.text;
+            }
+            return true;
+        };
+        std::string library;
+        std::string symbol;
+        if (ext.args.empty() || ext.args.size() > 2 || !text(0, library) ||
+            (ext.args.size() == 2 && !text(1, symbol))) {
+            error(ext.span, "'@extern' takes a library and an optional symbol, as string literals: "
+                            "@extern(\"libm.so.6\", \"cbrt\")");
+            return;
+        }
+        if (symbol.empty()) symbol = std::string(d->name.name);
+        if (library.find('|') != std::string::npos || symbol.find('|') != std::string::npos) {
+            error(ext.span, "'@extern' names cannot contain '|'");
+            return;
+        }
+        if (f->params.size() > ffi_max_params) {
+            error(d->name.span, std::format("an '@extern' function takes at most {} parameters", ffi_max_params));
+            return;
+        }
+        auto code = [](const Type* t) -> char {
+            if (t == nullptr || t->is_error()) return '?';
+            if (t->is_void()) return 'v';
+            if (t->tag == TypeTag::Bool) return 'z';
+            if (t->tag == TypeTag::Str) return 'p';
+            if (t->tag == TypeTag::Num) {
+                switch (t->num) {
+                    case NumKind::I8: return 'b';
+                    case NumKind::I16: return 's';
+                    case NumKind::I32: return 'i';
+                    case NumKind::I64: return 'l';
+                    case NumKind::U8: return 'B';
+                    case NumKind::U16: return 'S';
+                    case NumKind::U32: return 'I';
+                    case NumKind::U64: return 'L';
+                    case NumKind::F32: return 'f';
+                    case NumKind::F64: return 'd';
+                }
+            }
+            return 0;
+        };
+        std::string sig;
+        for (const ParamInfo& p : f->params) {
+            const char c = code(p.type);
+            if (c == '?') return;
+            if (c == 0 || c == 'v') {
+                error(p.span, std::format("an '@extern' parameter must be a number, bool or str, not {}", q(p.type)));
+                return;
+            }
+            sig += c;
+        }
+        const char r = code(f->ret);
+        if (r == '?') return;
+        if (r == 0) {
+            error(d->name.span,
+                  std::format("an '@extern' function must return a number, bool, str or nothing, not {}", q(f->ret)));
+            return;
+        }
+        sig += '>';
+        sig += r;
+        f->native_name = ffi_key(library, symbol, sig);
     }
 
     // Type for a variable inferred from an initializer.
@@ -1864,6 +2121,9 @@ private:
     std::vector<Function*> new_free_fns_;
     std::vector<GlobalVar*> new_globals_;
     std::vector<std::string> added_names_;
+    std::vector<std::string> added_modules_;
+    std::vector<Function*> new_tests_;
+    std::vector<std::vector<ImportBinding>> imports_; // by source part (LANGUAGE.md 9.26)
     std::set<RecordInfo*> members_resolving_;
     std::map<const GlobalVar*, RecordInfo*> static_owner_;
     std::vector<LocalVar*>* cond_binds_ = nullptr; // set while checking an `if` condition

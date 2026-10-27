@@ -1,0 +1,35 @@
+// Exercises every orbit native in the simulation. The results are globals:
+// the state hash covers a game's numeric and vector globals.
+
+import orbit
+
+var energy = 0.0
+var whole = 0
+var laps = 0
+var lead = vec2(0.0, 0.0)
+
+class Conformance extends Node {
+    var orbiters = List<orbit.Orbiter>()
+
+    fn ready() {
+        for i in 0..5 {
+            var o = orbit.Orbiter()
+            o.center = vec2(320.0, 180.0)
+            o.radius = 20.0 + 25.0 * (i as float)
+            o.speed = 0.7 + 0.9 * (i as float)
+            add_child(o)
+            orbiters.push(o)
+        }
+    }
+
+    fn update(dt: float) {
+        energy = 0.0
+        laps = 0
+        for o in orbiters {
+            energy += o.energy()
+            laps += o.laps
+        }
+        whole = orbit.orbits_in(energy, 0.25)
+        lead = orbiters[4].position
+    }
+}

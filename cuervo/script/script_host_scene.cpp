@@ -3,6 +3,7 @@
 // Canvas.new_layer. Kept apart from script_host.cpp so the scene/UI side
 // stays in one place.
 
+#include <algorithm>
 #include <format>
 #include <system_error>
 

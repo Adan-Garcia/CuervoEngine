@@ -12,7 +12,9 @@
 #  - Native WASM exceptions (-fwasm-exceptions) everywhere: the language
 #    compiler reports its limits with C++ exceptions, and the default
 #    (exceptions abort) would turn a script error into a crash.
-#  - GL only (CUERVO_VULKAN forced off); WebGL2 = the GL backend's GLES 3.0 path.
+#  - No Vulkan (CUERVO_VULKAN forced off); WebGL2 = the GL backend's GLES 3.0 path.
+#    With CUERVO_WEBGPU (the default when naga is found) the same build also has
+#    the WebGPU backend and uses it when the page got a device (web/webgpu_init.js).
 #  - No runtime font import (FreeType + msdf-atlas-gen are threaded and big):
 #    fonts ship as .efont atlases converted by the host build at build time.
 #  - Release-only in practice: a Debug WASM build works but runs the VM ~10x slower.
@@ -61,6 +63,15 @@ set(CUERVO_WEB_FONT_SOURCE "${PROJECT_SOURCE_DIR}/assets/fonts/LiberationSans-Re
 #   <file>    preload that .pak as /game.pak (one self-contained build)
 set(CUERVO_WEB_PACK "" CACHE STRING "Web build runs a pack: empty (raw project), 'fetch', or a .pak path")
 
+# With the WebGPU backend the page requests the browser's device before main
+# (web/webgpu_init.js, milestone 10.3). Called after LINK_DEPENDS is set, which it extends.
+function(_cuervo_web_webgpu target)
+    if(CUERVO_WEBGPU)
+        set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS "${PROJECT_SOURCE_DIR}/web/webgpu_init.js")
+        target_link_options(${target} PRIVATE "--pre-js=${PROJECT_SOURCE_DIR}/web/webgpu_init.js")
+    endif()
+endfunction()
+
 # cuervo_web_app(<target>): turns an executable into index.html + .js + .wasm
 # + .data (the preloaded project and font, or the pack).
 function(cuervo_web_app target)
@@ -75,7 +86,8 @@ function(cuervo_web_app target)
             -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=67108864
             -sSTACK_SIZE=2097152
             -sEXIT_RUNTIME=0
-            -sEXPORTED_RUNTIME_METHODS=callMain
+            # FS: smoke_test.mjs --pull reads captures out of MEMFS (docs/WEB.md "Verifying").
+            -sEXPORTED_RUNTIME_METHODS=callMain,FS
             # The runtime opens /game.pak; the file system must exist even
             # with nothing preloaded.
             -sFORCE_FILESYSTEM=1
@@ -89,6 +101,7 @@ function(cuervo_web_app target)
             set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS "${CUERVO_WEB_PACK}")
             target_link_options(${target} PRIVATE "--preload-file=${CUERVO_WEB_PACK}@/game.pak")
         endif()
+        _cuervo_web_webgpu(${target})
         return()
     endif()
     set(out_dir "${CMAKE_CURRENT_BINARY_DIR}")
@@ -128,10 +141,12 @@ function(cuervo_web_app target)
         -sSTACK_SIZE=2097152
         # The page outlives main() (emscripten_set_main_loop); see main_loop.hpp.
         -sEXIT_RUNTIME=0
-        -sEXPORTED_RUNTIME_METHODS=callMain
+        # FS: smoke_test.mjs --pull reads captures out of MEMFS (docs/WEB.md "Verifying").
+        -sEXPORTED_RUNTIME_METHODS=callMain,FS
         "--shell-file=${PROJECT_SOURCE_DIR}/web/shell.html"
         "--preload-file=${CUERVO_WEB_GAME}@/game"
         "--preload-file=${efont}@/fonts/default.efont"
         # Development-only files never ship.
         "--exclude-file=*.import*")
+    _cuervo_web_webgpu(${target})
 endfunction()

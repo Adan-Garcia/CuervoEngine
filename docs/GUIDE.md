@@ -16,6 +16,9 @@ Reference material:
 | [SCENES.md](SCENES.md) | Scene files and their text form |
 | [REPLAYS.md](REPLAYS.md) | Recording and verifying runs |
 | [EXPORT.md](EXPORT.md) | Packing and exporting a game |
+| [PACKAGES.md](PACKAGES.md) | Script packages: `import`, `package.toml` and project dependencies |
+| [ROADMAP.md](ROADMAP.md) | Where the engine is going: every milestone and its status |
+| [PLUGINS.md](PLUGINS.md) | Native plugins in C++, Rust and C#, the `@extern` FFI, and embedding Pluma in other programs |
 | [editor/README.md](../editor/README.md) | The editor |
 | [tools/vscode-pluma](../tools/vscode-pluma/README.md) | The VS Code extension |
 | [DESIGN.md](DESIGN.md) | How the engine works inside, and why |
@@ -132,6 +135,7 @@ starfall/
 | `render_tier` | `"compatible"` (default) or `"full"`; what each promises and refuses is in [STATUS.md](STATUS.md) "Render tiers" |
 | `[input.actions]` | Named actions and the keys/buttons that trigger them |
 | `[input.axes]` | Named 2D axes: `Keys.Arrows`, `Keys.WASD`, `Pad.LeftStick`, `Pad.RightStick`, `Pad.Dpad` |
+| `[dependencies]` | Script packages the game imports, each with a pinned version ([PACKAGES.md](PACKAGES.md)) |
 
 Bindings are spelled `Key.Z`, `Key.Space`, `Key.LeftShift`, `Pad.South` (the A/cross
 button), `Pad.Start`, `Pad.LeftStickUp`, `Mouse.Left`, `Wheel.Up`. Scripts only ever
@@ -842,6 +846,41 @@ they can be built in code and saved, or written in the scene's text view
 other side's value while blending, so give the animations of one character the same set
 of tracks. The rules, and how other track kinds (cutout, skeletal, morph) plug in, are in
 DESIGN.md 4.17.
+
+In the editor, the **Animation** panel (bottom dock) edits the clips of the selected
+`AnimationPlayer`: add clips, set their length and loop mode, add tracks by path
+(`"Visual/Arm:rotation"`), press **Key** to record the track's current value at the
+playhead, drag keys along the ruler, right-click to delete one, and tick **Preview** to see
+the pose in the scene view while you scrub. Each change is one undo step and is saved with
+the scene.
+
+### 2D lighting
+
+Lights are nodes too. A `PointLight2D` lights a circle of `radius` (a cone when
+`spot_angle` is below a full turn, pointing along the node's rotation), a
+`DirectionalLight2D` lights the whole view along its rotation, and an `AmbientLight2D`
+darkens everything the lights don't reach (`darkness` 0..1). `LightOccluder2D` nodes
+(circle, rectangle, capsule or polygon walls) cast shadows; `shadow_softness` is the
+size of the glowing source (0 = hard shadows that stay sharp; larger ones widen toward the
+light). Occluders are normal mapped: their face bends outward over `bevel` pixels, so an
+edge turned to a light (hung `height` pixels above the plane) catches it and one turned
+away goes dark; only other occluders shadow a wall's face. A `TileMapLayer` with `light_occluders = true` makes its solid tiles
+(`walkable = false`) occluders, and a `TileMapCollision2D` child gives them physics
+collision. Lights shade the world, never the `CanvasLayer`s above it, and they are render
+only: turning them off never changes a replay.
+
+```
+var lamp = PointLight2D()
+lamp.radius = 260.0
+lamp.color = Color.hex("ffd9a0")
+lamp.shadow_softness = 12.0
+player.add_child(lamp)          // follows the player
+level.add_child(AmbientLight2D()) // night
+```
+
+`examples/lantern_cave` is a small platformer built this way (tiles, physics, an animated
+explorer with a lantern, flickering torches); View > Lighting Preview toggles the lights in
+the editor's scene view. Limits and the shading method are in DESIGN.md 4.17.
 
 ## 8. Debugging and profiling
 

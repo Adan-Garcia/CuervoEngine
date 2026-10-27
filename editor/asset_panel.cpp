@@ -142,6 +142,9 @@ private:
                 app.report(app.doc().instance_scene(parent, e.path, std::nullopt, self) != 0);
             }
             if (e.kind == AssetKind::Replay && ImGui::MenuItem("Play Replay")) app.start_replay(e.path);
+            if ((e.kind == AssetKind::Script || folder) && ImGui::MenuItem("Open in Code Editor")) {
+                app.open_in_external_editor(app.env().resolve(e.path));
+            }
             if (ImGui::MenuItem("New Folder")) begin_new_folder(folder ? e.path : folder_of(app.assets(), e.path));
             if (ImGui::MenuItem("Rename...")) {
                 op_ = Op::Rename;
@@ -174,6 +177,7 @@ private:
         switch (e.kind) {
             case AssetKind::Scene: app.request_open_scene(e.path); break;
             case AssetKind::Replay: app.start_replay(e.path); break;
+            case AssetKind::Script: app.open_in_external_editor(app.env().resolve(e.path)); break;
             default: app.open_location(e.path, 0); break;
         }
     }

@@ -21,6 +21,9 @@ else()
     # Third-party code: its warnings aren't ours to fix (zero-warning rule).
     if(TARGET SDL3-static AND NOT MSVC)
         target_compile_options(SDL3-static PRIVATE -w)
+    elseif(TARGET SDL3-static)
+        # SDL sets /W3 itself, and /w on top of it would warn (D9025): drop the one it trips.
+        target_compile_options(SDL3-static PRIVATE /wd5286)
     endif()
 endif()
 
@@ -81,6 +84,52 @@ if(CUERVO_VULKAN)
     target_compile_definitions(vulkan_deps PUBLIC VK_NO_PROTOTYPES)
     set_target_properties(vulkan_deps PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_link_libraries(vulkan_deps PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
+# --- WebGPU (wgpu-native; the web build uses Emscripten's emdawnwebgpu port) ---
+# Milestone 10.1 (DESIGN.md 4.4): native WebGPU is wgpu-native, the same
+# wgpu/naga 29 release line as the pinned naga-cli, so the WGSL the build
+# generates is parsed by the naga it came from. Prebuilt release archives,
+# pinned by tag and hash; linked statically.
+if(CUERVO_WEBGPU)
+    execute_process(COMMAND "${CUERVO_NAGA}" --version OUTPUT_VARIABLE _naga_version
+        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(NOT CUERVO_NAGA OR NOT CUERVO_SPIRV_OPT OR NOT _naga_version STREQUAL CUERVO_NAGA_VERSION)
+        message(FATAL_ERROR
+            "CUERVO_WEBGPU needs naga-cli ${CUERVO_NAGA_VERSION} and spirv-opt (found naga: "
+            "'${CUERVO_NAGA}' ${_naga_version}, spirv-opt: '${CUERVO_SPIRV_OPT}').\n"
+            "Install them with `cargo install naga-cli --version ${CUERVO_NAGA_VERSION} --locked` and "
+            "SPIRV-Tools (Arch: pacman -S spirv-tools), or configure with -DCUERVO_WEBGPU=OFF.")
+    endif()
+endif()
+if(CUERVO_WEBGPU AND NOT EMSCRIPTEN)
+    set(CUERVO_WGPU_NATIVE_TAG v29.0.1.1)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+        set(_wgpu_archive wgpu-linux-x86_64-release.zip)
+        set(_wgpu_hash 95a4d90c071005a98d03eab348beaa6b07e16eb00d1dcdb9f8348f75eb97ec5a)
+        set(_wgpu_lib lib/libwgpu_native.a)
+        set(_wgpu_system_libs ${CMAKE_DL_LIBS} pthread m)
+    elseif(WIN32 AND MSVC AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+        # Not validated yet (milestone 10.5a).
+        set(_wgpu_archive wgpu-windows-x86_64-msvc-release.zip)
+        set(_wgpu_hash 7e67d7445c42aeb85e30f88930fd8d7d83ee769e3390aeb1ada75ebf3cf78132)
+        set(_wgpu_lib lib/wgpu_native.lib)
+        set(_wgpu_system_libs d3dcompiler ws2_32 userenv bcrypt ntdll opengl32 propsys runtimeobject)
+    else()
+        message(FATAL_ERROR "CUERVO_WEBGPU: no pinned wgpu-native build for ${CMAKE_SYSTEM_NAME} "
+            "${CMAKE_SYSTEM_PROCESSOR}; configure with -DCUERVO_WEBGPU=OFF")
+    endif()
+    FetchContent_Declare(wgpu_native
+        URL https://github.com/gfx-rs/wgpu-native/releases/download/${CUERVO_WGPU_NATIVE_TAG}/${_wgpu_archive}
+        URL_HASH SHA256=${_wgpu_hash}
+        SOURCE_SUBDIR _none
+    )
+    FetchContent_MakeAvailable(wgpu_native)
+    add_library(wgpu_native STATIC IMPORTED GLOBAL)
+    set_target_properties(wgpu_native PROPERTIES
+        IMPORTED_LOCATION "${wgpu_native_SOURCE_DIR}/${_wgpu_lib}"
+        INTERFACE_INCLUDE_DIRECTORIES "${wgpu_native_SOURCE_DIR}/include" # SYSTEM: imported
+        INTERFACE_LINK_LIBRARIES "${_wgpu_system_libs}")
 endif()
 
 # --- SPIRV-Cross (build-time shader tool only) --------------------------------
@@ -164,7 +213,11 @@ if(CUERVO_FONT_IMPORT)
         set(FT_DISABLE_HARFBUZZ ON CACHE BOOL "" FORCE)
         set(FT_DISABLE_BROTLI ON CACHE BOOL "" FORCE)
         set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
-        if(WIN32)
+        # FreeType's ftver.rc includes <windows.h>. rc.exe finds it through the
+        # developer prompt's INCLUDE and windres has MinGW's own; only clang's
+        # llvm-rc (Clang targeting the MSVC runtime, the `debug` preset) needs
+        # the SDK path.
+        if(WIN32 AND NOT MSVC AND CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
             find_path(WINDOWS_SDK_UM_INCLUDE "windows.h"
                 PATHS
                 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um"
@@ -174,7 +227,8 @@ if(CUERVO_FONT_IMPORT)
             )
             if(WINDOWS_SDK_UM_INCLUDE)
                 cmake_path(GET WINDOWS_SDK_UM_INCLUDE PARENT_PATH _sdk_inc_root)
-                set(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -I \"${WINDOWS_SDK_UM_INCLUDE}\" -I \"${_sdk_inc_root}/shared\"" CACHE STRING "" FORCE)
+                # Not cached: appending to the cache entry grew it on every reconfigure.
+                string(APPEND CMAKE_RC_FLAGS " -I \"${WINDOWS_SDK_UM_INCLUDE}\" -I \"${_sdk_inc_root}/shared\"")
             endif()
         endif()
         FetchContent_Declare(freetype
@@ -272,6 +326,31 @@ if(CUERVO_FEATURE_AUDIO)
     endif()
     if(NOT WIN32)
         target_link_libraries(miniaudio PRIVATE m)
+    endif()
+endif()
+
+# --- Box2D (2D rigid-body physics, DESIGN.md 4.17, 7.2, milestone 9.6) -------
+if(CUERVO_FEATURE_PHYSICS)
+    set(BOX2D_SAMPLES OFF CACHE BOOL "" FORCE)
+    set(BOX2D_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+    set(BOX2D_BENCHMARKS OFF CACHE BOOL "" FORCE)
+    set(BOX2D_DOCS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(box2d
+        URL https://github.com/erincatto/box2d/archive/refs/tags/v3.2.0.tar.gz
+        URL_HASH SHA256=ffec747b27a2267016f8d0240d658c82d187fb2271fa0f69fcbe53fbc067180d
+    )
+    FetchContent_MakeAvailable(box2d)
+    if(TARGET box2d AND NOT MSVC)
+        target_compile_options(box2d PRIVATE -w)
+    endif()
+    if(TARGET box2d AND MINGW AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
+        # Box2D picks its AVX2 solver at run time. GCC on Win64 doesn't align the
+        # stack for 32-byte spills (GCC bug 54412), so its vmovaps faults; have the
+        # assembler emit unaligned moves instead (same results, docs/WINDOWS.md).
+        target_compile_options(box2d PRIVATE -Wa,-muse-unaligned-vector-move)
+    endif()
+    if(TARGET box2d)
+        set_target_properties(box2d PROPERTIES POSITION_INDEPENDENT_CODE ON)
     endif()
 endif()
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(cuervo VERSION 0.1.0 LANGUAGES C CXX)
+project(cuervo VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -23,11 +23,35 @@ else()
     option(CUERVO_VULKAN "Build the Vulkan render backend" ON)
 endif()
 
+# WebGPU (DESIGN.md 6, milestone 10; experimental). Shaders are translated
+# SPIR-V -> WGSL by naga, a pinned host tool (`cargo install naga-cli --version
+# 29.0.4 --locked`), after spirv-opt splits combined samplers. On by default
+# for web builds and native Linux x86_64 builds that have both tools; a web
+# build with it runs WebGPU where the browser has it and WebGL2 otherwise
+# (milestone 10.3, docs/WEB.md "WebGPU").
+set(CUERVO_NAGA_VERSION 29.0.4)
+find_program(CUERVO_NAGA NAMES naga HINTS "$ENV{CARGO_HOME}/bin" "$ENV{HOME}/.cargo/bin"
+    DOC "naga-cli ${CUERVO_NAGA_VERSION} (SPIR-V -> WGSL for the WebGPU backend)")
+find_program(CUERVO_SPIRV_OPT NAMES spirv-opt HINTS "$ENV{VULKAN_SDK}/bin"
+    DOC "spirv-opt from SPIRV-Tools (splits combined samplers for WGSL)")
+set(_cuervo_webgpu_default OFF)
+if(CUERVO_NAGA AND CUERVO_SPIRV_OPT AND (EMSCRIPTEN OR (CMAKE_SYSTEM_NAME STREQUAL "Linux"
+        AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")))
+    execute_process(COMMAND "${CUERVO_NAGA}" --version OUTPUT_VARIABLE _cuervo_naga_version
+        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(_cuervo_naga_version STREQUAL CUERVO_NAGA_VERSION)
+        set(_cuervo_webgpu_default ON)
+    endif()
+endif()
+option(CUERVO_WEBGPU "Build the WebGPU render backend (experimental; needs naga-cli ${CUERVO_NAGA_VERSION} and spirv-opt)"
+    ${_cuervo_webgpu_default})
+
 # Modular footprint feature options (Milestone 7.5, DESIGN.md 6).
 option(CUERVO_FEATURE_AUDIO "Build audio subsystem" ON)
 option(CUERVO_FEATURE_UI "Build UI subsystem" ON)
 option(CUERVO_FEATURE_PARTICLES "Build particle system" ON)
 option(CUERVO_FEATURE_COLLISION "Build collision world" ON)
+option(CUERVO_FEATURE_PHYSICS "Build physics subsystem" ON)
 option(CUERVO_FEATURE_DEV "Build dev tools into runtime (demos, viewer, benchmarks)" ON)
 
 # Profiling (DESIGN.md 5.14 "Clarified (Phase 8 -- Profiler)", 7.2): engine
@@ -51,6 +75,8 @@ if(EMSCRIPTEN)
     include(Web) # before any target: global WASM flags, host tools (docs/WEB.md)
 endif()
 include(CompilerFlags)
+include(RawLiteral)
+include(Windows)
 include(Dependencies)
 include(Shaders)
 include(License)
@@ -60,6 +86,9 @@ add_subdirectory(pluma)
 add_subdirectory(cuervo)
 add_subdirectory(runtime)
 add_subdirectory(tools/cuervo_tools)
+if(NOT EMSCRIPTEN)
+    add_subdirectory(examples/plugins) # milestone 10.5c, docs/PLUGINS.md
+endif()
 # The editor is desktop-only (DESIGN.md 4.13); the web build never sees it.
 if(CUERVO_BUILD_EDITOR AND NOT EMSCRIPTEN)
     add_subdirectory(editor)

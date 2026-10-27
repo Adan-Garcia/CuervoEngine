@@ -33,8 +33,8 @@ void write_text(const fs::path& p, std::string_view text) {
 }
 
 script::FeatureSet tictak_features() {
-    script::FeatureSet f; // compatible tier, no audio/ui/particles/collision
-    f.audio = f.ui = f.particles = f.collision = f.vulkan = false;
+    script::FeatureSet f; // compatible tier, no audio/ui/particles/collision/physics
+    f.audio = f.ui = f.particles = f.collision = f.physics = f.vulkan = false;
     return f;
 }
 
@@ -67,11 +67,11 @@ TEST_CASE("player: --engine choices") {
 TEST_CASE("player: feature set -> cmake definitions") {
     const auto defs = tools::player_cmake_definitions(tictak_features());
     CHECK(std::is_sorted(defs.begin(), defs.end()));
-    CHECK(defs.size() == 12);
+    CHECK(defs.size() == 14);
     for (std::string_view d : {"CMAKE_BUILD_TYPE=Release", "CUERVO_BUILD_TESTS=OFF", "CUERVO_BUILD_EDITOR=OFF",
                                "CUERVO_FEATURE_AUDIO=OFF", "CUERVO_FEATURE_UI=OFF", "CUERVO_FEATURE_PARTICLES=OFF",
-                               "CUERVO_FEATURE_COLLISION=OFF", "CUERVO_FEATURE_DEV=OFF", "CUERVO_VULKAN=OFF",
-                               "CUERVO_SVG_IMPORT=OFF", "CUERVO_FONT_IMPORT=OFF", "CUERVO_PROFILING=OFF"}) {
+                               "CUERVO_FEATURE_COLLISION=OFF", "CUERVO_FEATURE_PHYSICS=OFF", "CUERVO_FEATURE_DEV=OFF",
+                               "CUERVO_VULKAN=OFF", "CUERVO_SVG_IMPORT=OFF", "CUERVO_FONT_IMPORT=OFF", "CUERVO_PROFILING=OFF"}) {
         CHECK_MESSAGE(has(defs, d), d);
     }
     // examples/bench: particles + collision on, the rest off.
@@ -86,6 +86,7 @@ TEST_CASE("player: feature set -> cmake definitions") {
     full.dev = full.svg_import = true;
     const auto fdefs = tools::player_cmake_definitions(full);
     CHECK(has(fdefs, "CUERVO_VULKAN=ON"));
+    CHECK(has(fdefs, "CUERVO_WEBGPU=OFF")); // experimental natively: not in desktop players
     CHECK(has(fdefs, "CUERVO_FEATURE_DEV=ON"));
     CHECK(has(fdefs, "CUERVO_SVG_IMPORT=ON"));
     CHECK(has(fdefs, "CUERVO_FONT_IMPORT=OFF"));
@@ -127,6 +128,7 @@ TEST_CASE("player: cache keys are stable and change with every input") {
     b.set("vulkan", false);
     b.set("audio", false);
     b.set("particles", true);
+    b.set("physics", false);
     const std::string ka = tools::player_cache_key(a, t, lin);
     CHECK(ka == tools::player_cache_key(b, t, lin));
     CHECK(ka.starts_with("linux_collision+particles_"));
@@ -208,6 +210,25 @@ TEST_CASE("player: run_process captures output, exit codes and timeouts") {
     CHECK_FALSE(
         tools::run_process({"/nonexistent/program"}, dir, {}, dir / "none.txt", std::chrono::seconds(5), error));
 }
+#else
+TEST_CASE("player: run_process captures output, exit codes and timeouts (Windows)") {
+    // CreateProcessW with a job object (tools/cuervo_tools/player.cpp).
+    const fs::path dir = temp_dir("process");
+    std::string error;
+    auto r = tools::run_process({"cmd.exe", "/d", "/c", "echo hi %CUERVO_T%& cd& exit /b 3"}, dir,
+                                {{"CUERVO_T", "there"}}, dir / "log.txt", std::chrono::seconds(30), error);
+    REQUIRE_MESSAGE(r, error);
+    CHECK(r->exit_code == 3);
+    CHECK_FALSE(r->timed_out);
+    CHECK(r->output.find("hi there") != std::string::npos);
+    CHECK(r->output.find("process") != std::string::npos);
+    auto slow = tools::run_process({"cmd.exe", "/d", "/c", "ping -n 20 127.0.0.1"}, dir, {}, dir / "slow.txt",
+                                   std::chrono::seconds(1), error);
+    REQUIRE(slow);
+    CHECK(slow->timed_out);
+    CHECK_FALSE(tools::run_process({"C:/nonexistent/program.exe"}, dir, {}, dir / "none.txt", std::chrono::seconds(5),
+                                   error));
+}
 #endif
 
 TEST_CASE("export: which player ships") {
@@ -251,7 +272,7 @@ TEST_CASE("export: which player ships") {
         REQUIRE_MESSAGE(tools::export_project(tictak, o, s, error), error);
         CHECK(s.player.kind == tools::ShippedPlayer::Kind::Explicit);
     }
-    SUBCASE("web stripped players need an emsdk; Windows ones aren't supported yet") {
+    SUBCASE("web stripped players need an emsdk; Windows ones a toolchain") {
         o.engine = tools::EngineChoice::Stripped;
         o.out_dir = dir / "web";
         tools::ExportSummary s;
@@ -261,11 +282,37 @@ TEST_CASE("export: which player ships") {
         CHECK(error.find("no emsdk") != std::string::npos);
         o.pack.platform = assets::PackPlatform::Windows;
         CHECK_FALSE(tools::export_project(tictak, o, s, error));
-        CHECK(error.find("not supported for windows yet") != std::string::npos);
+        CHECK(error.find("can't build a stripped player") != std::string::npos);
+    }
+    SUBCASE("Windows ships the full player it is given, and needs one") {
+        o.pack.platform = assets::PackPlatform::Windows;
+        o.engine = tools::EngineChoice::Auto;
+        o.out_dir = dir / "windows";
+        tools::ExportSummary s;
+        REQUIRE_MESSAGE(tools::export_project(tictak, o, s, error), error);
+        CHECK(s.player.kind == tools::ShippedPlayer::Kind::Full);
+        CHECK(fs::exists(dir / "windows/tictak.exe"));
+        CHECK_FALSE(fs::exists(dir / "windows/vcruntime140.dll")); // this player imports no MSVC runtime
+
+        // An MSVC-runtime player ships the Visual C++ runtime DLLs it imports, from beside it.
+        fs::create_directories(dir / "msvc-template");
+        write_text(dir / "msvc-template/cuervo-player.exe", std::string("MZ...VCRUNTIME140.dll\0KERNEL32.dll", 34));
+        write_text(dir / "msvc-template/vcruntime140.dll", "runtime");
+        o.full_runtime = dir / "msvc-template/cuervo-player.exe";
+        o.out_dir = dir / "windows-msvc";
+        tools::ExportSummary s2;
+        REQUIRE_MESSAGE(tools::export_project(tictak, o, s2, error), error);
+        CHECK(fs::exists(dir / "windows-msvc/vcruntime140.dll"));
+        CHECK_FALSE(fs::exists(dir / "windows-msvc/msvcp140.dll")); // not imported
+
+        o.full_runtime.clear();
+        o.out_dir = dir / "windows-none";
+        CHECK_FALSE(tools::export_project(tictak, o, s, error));
+        CHECK(error.find("no Windows player") != std::string::npos);
     }
 }
 
-#if CUERVO_FEATURE_AUDIO && CUERVO_FEATURE_UI && CUERVO_FEATURE_PARTICLES && CUERVO_FEATURE_COLLISION
+#if CUERVO_FEATURE_AUDIO && CUERVO_FEATURE_UI && CUERVO_FEATURE_PARTICLES && CUERVO_FEATURE_COLLISION && CUERVO_FEATURE_PHYSICS
 TEST_CASE("player: whose state hash and AOT module match this engine") {
     CHECK(tools::script_surface_matches(script::FeatureSet{})); // Vulkan/dev/importers don't count
     script::FeatureSet shmup;
@@ -283,6 +330,7 @@ TEST_CASE("player: web players (emsdk toolchain, pack-fetching runtime)") {
     CHECK(std::is_sorted(defs.begin(), defs.end()));
     CHECK(has(defs, "CUERVO_WEB_PACK=fetch"));
     CHECK(has(defs, "CUERVO_VULKAN=OFF"));
+    CHECK(has(defs, "CUERVO_WEBGPU=ON")); // WebGPU with the WebGL2 fallback in one .wasm (milestone 10.3)
     CHECK_FALSE(has(tools::player_cmake_definitions(everything), "CUERVO_WEB_PACK=fetch"));
 
     // The configure command: emscripten's toolchain file and the host tools,
@@ -302,7 +350,7 @@ TEST_CASE("player: web players (emsdk toolchain, pack-fetching runtime)") {
     std::ofstream(emsdk / "upstream" / "emscripten" / "emcc") << "";
     t.emsdk = emsdk;
     CHECK(t.missing(assets::PackPlatform::Web).find("no host-tools build") != std::string::npos);
-    CHECK(t.missing(assets::PackPlatform::Windows).find("isn't supported") != std::string::npos);
+    CHECK(t.missing(assets::PackPlatform::Any).find("isn't supported") != std::string::npos); // Linux, Windows and web only
 
     // The build environment puts the emsdk tools first.
     const auto env = tools::web_build_environment(emsdk);

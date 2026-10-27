@@ -6,6 +6,8 @@
     python3 -I tools/bench.py compare  docs/perf/baseline-<id>.json new.json     # exit 1 on a regression
     python3 -I tools/bench.py check    docs/perf/baseline-<id>.json              # validate the schema
     python3 -I tools/bench.py report   docs/perf/baseline-<id>.json              # Markdown tables
+    python3 -I tools/bench.py record   --build-dir build/release --web build/web-pack-threads/runtime \
+                                       --backends webgpu webgl2 --out docs/perf/baseline-<id>.json
 
 `record` runs examples/bench (`cuervo --game examples/bench --bench N`) at the
 1k/10k/50k/100k workloads on a backend, several times, and keeps the median of
@@ -15,6 +17,12 @@ thread counts and backends) and the export sizes. `capacity` searches for the
 largest particle count that holds 60 fps. Both merge into one JSON file per
 machine, keyed by build type, so a baseline file holds debug and release.
 `compare` checks two such files against THRESHOLDS below.
+
+`--web <runtime dir>` (milestone 10.4) runs the same workloads in headless
+Chrome on the real GPU instead (tools/web/smoke_test.mjs --gpu): the web
+runtime in that directory plays a pack of the project, on WebGPU or on the
+WebGL2 fallback (`--backends webgpu webgl2`), and the results go under
+`builds.web`. `--build-dir` then only provides cuervo-tools (to pack).
 
 Standard library only; POSIX-only parts (peak RSS) are skipped on Windows.
 """
@@ -47,6 +55,9 @@ THRESHOLDS = {
     "capacity_frame_drop_pct": 25.0,  # fewer particles within the frame budget (GPU and driver: loose)
     # Timings below this floor (ms) are noise: a percentage of nothing.
     "floor_ms": 0.05,
+    # Frame-time cliffs (absolute, every record that has them): the slowest one-second window of a
+    # run over the median one, worst run of a workload. A steady run stays near 1.
+    "frame_cliff_ratio": 1.5,
 }
 BUDGET_MS = 1000.0 / 60.0
 FAILED_MS = 1.0e9  # recorded for a probe whose run crashed or timed out
@@ -64,8 +75,10 @@ BENCH_RE = re.compile(
     r"frame ms avg (?P<avg>[\d.]+) p50 (?P<p50>[\d.]+) p95 (?P<p95>[\d.]+) p99 (?P<p99>[\d.]+) max (?P<max>[\d.]+) \| "
     r"sim (?P<sim>[\d.]+) ms/tick \(p95 (?P<sim_p95>[\d.]+) max (?P<sim_max>[\d.]+), (?P<ticks>\d+) ticks\) \| "
     r"render CPU (?P<render>[\d.]+) ms/frame")
+WINDOWS_RE = re.compile(r"bench windows \| (?P<count>\d+) x 1 s \| frame ms mean (?P<means>[\d. ]+?) \| "
+                        r"worst / median (?P<ratio>[\d.]+)")
 HASH_RE = re.compile(r"at tick (\d+) \(state hash ([0-9a-f]{16})\)")
-DEVICE_RE = re.compile(r"(?:OpenGL|Vulkan) device: (.+)")
+DEVICE_RE = re.compile(r"(?:OpenGL|Vulkan|WebGPU) device: (.+)")
 JOBS_RE = re.compile(r"Job system: (\d+) thread")
 
 
@@ -77,7 +90,7 @@ def parse_bench_line(text):
     if not m:
         return None
     g = m.groupdict()
-    return {
+    out = {
         "backend": g["backend"].strip(), "resolution": g["res"], "msaa": int(g["msaa"]),
         "particles": float(g["particles"]), "frames": int(g["frames"]), "seconds": float(g["secs"]),
         "fps": float(g["fps"]),
@@ -86,6 +99,11 @@ def parse_bench_line(text):
         "sim_tick_ms": {"mean": float(g["sim"]), "p95": float(g["sim_p95"]), "max": float(g["sim_max"])},
         "sim_ticks": int(g["ticks"]), "render_cpu_ms": float(g["render"]),
     }
+    w = WINDOWS_RE.search(text)
+    if w:  # engines from milestone 10.4 on
+        out["frame_windows_ms"] = [float(v) for v in w.group("means").split()]
+        out["cliff_ratio"] = float(w.group("ratio"))
+    return out
 
 
 def parse_hash(text):
@@ -112,6 +130,8 @@ def median_stats(samples):
         out[key] = med([s[key] for s in samples])
     for group in ("frame_ms", "sim_tick_ms"):
         out[group] = {k: med([s[group][k] for s in samples]) for k in samples[0][group]}
+    if all("cliff_ratio" in s for s in samples):
+        out["cliff_ratio"] = round(max(s["cliff_ratio"] for s in samples), 3)  # the worst run
     out["spread"] = {
         "frame_p95_ms": [min(s["frame_ms"]["p95"] for s in samples), max(s["frame_ms"]["p95"] for s in samples)],
         "sim_tick_mean_ms": [min(s["sim_tick_ms"]["mean"] for s in samples),
@@ -284,6 +304,11 @@ def compare_records(base, new, thresholds=None, allow_machine_mismatch=False):
                     floor=t["floor_ms"])
                 if "peak_rss_mb" in bw and "peak_rss_mb" in nw:
                     add(scope, "peak_rss_mb", bw["peak_rss_mb"], nw["peak_rss_mb"], t["peak_rss_pct"])
+                if "cliff_ratio" in nw:  # an absolute limit: no baseline value needed
+                    cliff = nw["cliff_ratio"] > t["frame_cliff_ratio"]
+                    failed |= cliff
+                    rows.append((scope, "frame_cliff_ratio", bw.get("cliff_ratio"), nw["cliff_ratio"], None,
+                                 f"<={t['frame_cliff_ratio']:g}", "FAIL" if cliff else "ok"))
             for scene, bc in (bd.get("capacity_60fps") or {}).items():
                 nc = (nd.get("capacity_60fps") or {}).get(scene)
                 if not nc:
@@ -403,6 +428,114 @@ class Engine:
         return h[1]
 
 
+def find_node():
+    """Node 22+ for tools/web/smoke_test.mjs: $CUERVO_NODE, emsdk's, then PATH."""
+    if os.environ.get("CUERVO_NODE"):
+        return os.environ["CUERVO_NODE"]
+    emsdk = Path(os.environ.get("EMSDK") or Path.home() / "emsdk")
+    found = sorted(emsdk.glob("node/*/bin/node"))
+    return str(found[-1]) if found else (shutil.which("node") or "node")
+
+
+def browser_version():
+    for name in ("google-chrome-stable", "google-chrome", "chromium", "chromium-browser"):
+        path = shutil.which(name)
+        if path:
+            try:
+                return subprocess.run([path, "--version"], capture_output=True, text=True, timeout=30).stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                return name
+    return "unknown"
+
+
+def web_smoke_command(node, dist, backend, args, seconds, expect):
+    """The smoke_test.mjs command that runs `args` in the page on the real GPU, on `backend`."""
+    cmd = [node, str(ROOT / "tools" / "web" / "smoke_test.mjs"), "--dir", str(dist), "--gpu",
+           "--expect-backend", "webgpu" if backend == "webgpu" else "gl", "--seconds", str(int(seconds)),
+           "--args", " ".join(args), "--expect", expect]
+    if backend == "webgl2":
+        cmd.append("--no-webgpu")  # the page then behaves as in a browser without WebGPU
+    return cmd
+
+
+class WebEngine:
+    """Engine's interface for a web runtime directory in headless Chrome (milestone 10.4).
+
+    Each project is packed (cuervo-tools pack --platform web) next to a copy of the runtime's page, and
+    every run is one page load: the runtime arguments go in `?args=`. Peak memory is the browser's, so
+    it is not recorded.
+    """
+
+    def __init__(self, build_dir, web_dir, backend, jobs=None):
+        exe = "cuervo-tools.exe" if os.name == "nt" else "cuervo-tools"
+        self.tool = Path(build_dir).resolve() / "tools" / "cuervo_tools" / exe
+        if not self.tool.exists():
+            raise SystemExit(f"bench: {self.tool} not found; --web packs projects with the build dir's cuervo-tools")
+        self.web_dir = Path(web_dir).resolve()
+        if not all((self.web_dir / f).exists() for f in ("index.html", "index.js", "index.wasm")):
+            raise SystemExit(f"bench: {self.web_dir} is not a web runtime (index.html, .js, .wasm; "
+                             "the web-pack or web-pack-threads preset)")
+        self.backend = backend
+        self.jobs = jobs
+        self.video = "browser"
+        self.node = find_node()
+        self.env = dict(os.environ)
+        self.work = Path(tempfile.mkdtemp(prefix="cuervo-bench-web-"))
+        self.dists = {}
+
+    def dist(self, project):
+        key = str(Path(project).resolve())
+        if key not in self.dists:
+            d = self.work / f"d{len(self.dists)}"
+            d.mkdir()
+            for f in ("index.html", "index.js", "index.wasm"):
+                shutil.copy2(self.web_dir / f, d / f)
+            p = subprocess.run([str(self.tool), "pack", key, "--platform", "web", "-o", str(d / "game.pak")],
+                               capture_output=True, text=True, timeout=600)
+            if p.returncode != 0:
+                raise RuntimeError(f"packing {key} failed:\n{(p.stderr or p.stdout)[-1500:]}")
+            self.dists[key] = d
+        return self.dists[key]
+
+    def run(self, project, args, seconds, expect, timeout):
+        cmd = web_smoke_command(self.node, self.dist(project), self.backend, args, seconds, expect)
+        out, rc, _ = run_child(cmd, self.env, timeout)
+        return cmd, out, rc
+
+    def base(self, jobs=None):
+        j = jobs if jobs is not None else self.jobs
+        return ["--jobs", str(j)] if j else []
+
+    def bench(self, project, presses, duration, warmup, timeout=300):
+        args = self.base() + ["--bench", str(duration), "--bench-warmup", str(warmup)]
+        if presses:
+            args += ["--press", presses]
+        cmd, out, rc = self.run(project, args, duration + warmup + 30, "bench |", timeout)
+        parsed = parse_bench_line(out)
+        if rc != 0 or parsed is None:
+            raise RuntimeError(f"web bench run failed (exit {rc}): {' '.join(cmd)}\n{out[-1500:]}")
+        parsed["_rss"] = None
+        parsed["_gpu"] = parse_device(out)
+        parsed["_threads"] = parse_threads(out)
+        return parsed
+
+    def state_hash(self, project, presses, jobs, tick=HASH_TICK, timeout=300):
+        args = self.base(jobs) + ["--screenshot", "/tmp/h.ppm", "--screenshot-tick", str(tick)]
+        if presses:
+            args += ["--press", presses]
+        cmd, out, rc = self.run(project, args, 120, "state hash", timeout)
+        h = parse_hash(out)
+        if rc != 0 or h is None or h[0] != tick:
+            raise RuntimeError(f"web hash run failed (exit {rc}): {' '.join(cmd)}\n{out[-1500:]}")
+        return h[1]
+
+
+def make_engine(a, backend):
+    if a.web:
+        return WebEngine(a.build_dir, a.web, backend, a.jobs)
+    return Engine(a.build_dir, backend, a.video, a.jobs)
+
+
 def capacity_project(source, particles, dest):
     """A copy of examples/bench whose every step is `particles` (the bench script stays the one workload)."""
     shutil.copytree(source, dest, dirs_exist_ok=True)
@@ -454,13 +587,25 @@ def compiler_version(path):
         return path or "unknown"
 
 
+def emscripten_version(cache):
+    """'emscripten 6.0.12' for a build configured with emscripten's toolchain file, else ''."""
+    toolchain = cache.get("CMAKE_TOOLCHAIN_FILE", "")
+    if "emscripten" not in toolchain.lower():
+        return ""
+    try:  # <emsdk>/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake
+        version = (Path(toolchain).parents[3] / "emscripten-version.txt").read_text().strip().strip('"')
+        return f"emscripten {version}"
+    except (OSError, IndexError):
+        return "emscripten"
+
+
 def build_facts(build_dir):
     cache = cmake_cache(build_dir)
     return {
         "commit": git("rev-parse", "--short=12", "HEAD") + ("+dirty" if git("status", "--porcelain", "--", ".", ":!docs/perf") else ""),
         "build_type": cache.get("CMAKE_BUILD_TYPE", "unknown"),
         "preset": Path(build_dir).resolve().name,
-        "compiler": compiler_version(cache.get("CMAKE_CXX_COMPILER", "")),
+        "compiler": emscripten_version(cache) or compiler_version(cache.get("CMAKE_CXX_COMPILER", "")),
     }
 
 
@@ -474,15 +619,15 @@ def load_record(path):
     return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
 
 
-def merge_target(path, machine_id, build_dir):
-    """The record being extended (or a new one) and this build's entry in it."""
+def merge_target(path, machine_id, build_dir, key=None):
+    """The record being extended (or a new one) and this build's entry in it (`key`: its build type)."""
     rec = load_record(path) or {"schema_version": SCHEMA_VERSION, "machine_id": machine_id, "builds": {}}
     if rec.get("machine_id") != machine_id:
         raise SystemExit(f"bench: {path} is for machine '{rec.get('machine_id')}', not '{machine_id}'")
     rec["host"] = host_facts()
     rec["timestamp"] = int(time.time())
     facts = build_facts(build_dir)
-    entry = rec["builds"].setdefault(facts["build_type"].lower(), {"backends": {}})
+    entry = rec["builds"].setdefault(key or facts["build_type"].lower(), {"backends": {}})
     entry.update(facts)
     return rec, entry
 
@@ -528,11 +673,27 @@ def export_sizes(build_dir, projects, work, engines, player_cache=None):
 
 # --- commands ---------------------------------------------------------------------------------------
 
+def check_backends(a):
+    web = {"webgpu", "webgl2"}
+    if a.web and not set(a.backends) <= web:
+        raise SystemExit("bench: --web measures the webgpu and webgl2 backends")
+    if not a.web and set(a.backends) & web:
+        raise SystemExit("bench: the webgpu and webgl2 backends need --web <web runtime dir>")
+
+
+def web_target(a):
+    """With --web: the record's `web` entry, described by the web build (one directory up from runtime/)."""
+    rec, entry = merge_target(a.out, a.machine_id, Path(a.web).resolve().parent, key="web")
+    entry["browser"] = browser_version()
+    return rec, entry
+
+
 def cmd_record(a):
-    rec, entry = merge_target(a.out, a.machine_id, a.build_dir)
+    check_backends(a)
+    rec, entry = web_target(a) if a.web else merge_target(a.out, a.machine_id, a.build_dir)
     project = ROOT / "examples" / "bench"
     for backend in a.backends:
-        eng = Engine(a.build_dir, backend, a.video, a.jobs)
+        eng = make_engine(a, backend)
         data = entry["backends"].setdefault(backend, {})
         data["video_driver"] = eng.video
         data["bench"] = {"runs": a.runs, "warmup_s": a.warmup, "duration_s": a.duration}
@@ -557,7 +718,7 @@ def cmd_record(a):
             w["hash_tick"] = HASH_TICK
             workloads[str(n)] = w
         data["workloads"] = workloads
-    if not a.no_export:
+    if not a.no_export and not a.web:  # web export sizes: docs/EXPORT.md "Sizes"
         with tempfile.TemporaryDirectory(prefix="cuervo-export-") as work:
             entry["exports"] = export_sizes(a.build_dir, ["shmup", "bench"], work, ["full", "stripped"],
                                             a.player_cache)
@@ -570,9 +731,10 @@ def cmd_record(a):
 
 
 def cmd_capacity(a):
-    rec, entry = merge_target(a.out, a.machine_id, a.build_dir)
+    check_backends(a)
+    rec, entry = web_target(a) if a.web else merge_target(a.out, a.machine_id, a.build_dir)
     for backend in a.backends:
-        eng = Engine(a.build_dir, backend, a.video, a.jobs)
+        eng = make_engine(a, backend)
         data = entry["backends"].setdefault(backend, {})
         for scene in a.scenes:
             result = capacity_for_scene(eng, scene, a, rec["host"], entry)
@@ -697,7 +859,10 @@ def main(argv=None):
         s.add_argument("--build-dir", required=True, help="a configured and built tree (runtime + cuervo-tools)")
         s.add_argument("--out", required=True, help="baseline JSON to create or extend")
         s.add_argument("--machine-id", default=os.environ.get("CUERVO_BENCH_MACHINE", "5800x3d-rtx3060ti-linux"))
-        s.add_argument("--backends", nargs="+", default=["gl"], choices=["gl", "vulkan"])
+        s.add_argument("--backends", nargs="+", default=None, choices=["gl", "vulkan", "webgpu", "webgl2"],
+                       help="default: gl, or webgpu with --web")
+        s.add_argument("--web", metavar="DIR", help="a web runtime directory (index.html/.js/.wasm): measure in "
+                       "headless Chrome on the real GPU; results go under builds.web")
         s.add_argument("--video", choices=["offscreen", "auto"], help="SDL video driver (default: offscreen for gl)")
         s.add_argument("--jobs", type=int, help="job threads (default: the engine's auto)")
 
@@ -739,6 +904,8 @@ def main(argv=None):
     rp.set_defaults(fn=cmd_report)
 
     a = p.parse_args(argv)
+    if hasattr(a, "backends") and a.backends is None:
+        a.backends = ["webgpu"] if a.web else ["gl"]
     return a.fn(a)
 
 

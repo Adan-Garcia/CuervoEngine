@@ -64,6 +64,10 @@ public:
     // Attaches a compiled AOT module to this session's already-compiled VM.
     bool bind_aot(std::unique_ptr<AotModule> module, std::string& error);
 
+    // Units loaded from now on keep their `@test` functions (Program::tests;
+    // LANGUAGE.md 9.27). Off by default, as in release builds.
+    void include_tests(bool on) { include_tests_ = on; }
+
     // Globals by qualified name ("Time.tick"); the setter assigns (retains).
     bool set_global(std::string_view qualified, const Value& v);
     Value global(std::string_view qualified) const;
@@ -84,6 +88,7 @@ private:
     std::unique_ptr<VM> vm_;
     std::unique_ptr<AotModule> aot_;
     SessionResult prelude_;
+    bool include_tests_ = false;
 };
 
 } // namespace pluma

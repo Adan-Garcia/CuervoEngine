@@ -1,7 +1,8 @@
-# Web export (WebGL2 / WASM)
+# Web export (WebGPU / WebGL2 / WASM)
 
-The engine runs a script project in the browser through Emscripten: the GL
-backend's GLES 3.0 path *is* WebGL2, the frame loop is driven by the browser,
+The engine runs a script project in the browser through Emscripten: it renders
+with WebGPU where the browser has it and otherwise with the GL backend, whose
+GLES 3.0 path *is* WebGL2 (see "WebGPU"); the frame loop is driven by the browser,
 and the project is preloaded into an in-memory file system. Only projects with
 `render_tier = "compatible"` can be exported; a `full` project is refused ([STATUS.md](STATUS.md) "Render tiers").
 
@@ -97,7 +98,10 @@ The script serves the directory, starts headless Chrome/Chromium with
 SwiftShader WebGL2 and remote debugging, loads `index.html?args=--quit-after 5`
 and reads the console over the DevTools protocol. It passes when the engine
 logs `--quit-after reached` with no `[error]` line, abort or page exception,
-and saves a mid-game screenshot. Determinism against a native build:
+and saves a mid-game screenshot. `--expect-backend webgpu|gl` also requires that
+device, `--no-webgpu` hides `navigator.gpu` to run the WebGL2 fallback, and
+`--pull <memfs path>=<file>` copies a file the engine wrote (its `--screenshot`
+PPM) out of the page for `rhi_parity compare`. Determinism against a native build:
 
 ```sh
 ./build/<native>/runtime/cuervo --game examples/shmup --backend gl --screenshot /tmp/n.ppm   # logs "state hash H"
@@ -114,7 +118,7 @@ keyboard and gamepad, and watch the console.
 | Area | Desktop | Web | Where |
 |---|---|---|---|
 | Frame loop | `while (loop->frame())` | `emscripten_set_main_loop_arg`, one `frame()` per animation frame; `run_main_loop` never returns | `cuervo/platform/main_loop.hpp` |
-| Graphics | Vulkan or GL 3.3 core | GL backend on a WebGL2 context (GLES 3.0 path, GLSL ES 300); Vulkan not compiled | `cuervo/platform/window.cpp`, `cmake/Web.cmake` |
+| Graphics | Vulkan or GL 3.3 core | WebGPU when the browser has it (with `CUERVO_WEBGPU`, the default), else the GL backend on a WebGL2 context (GLES 3.0 path, GLSL ES 300); Vulkan not compiled (see "WebGPU") | `cuervo/platform/window.cpp`, `cmake/Web.cmake`, `web/webgpu_init.js` |
 | Threads | yes | default: none (no `-pthread`, no SharedArrayBuffer, so no COOP/COEP headers needed), job system inline (DESIGN.md 4.14); `CUERVO_WEB_THREADS=ON`: WASM threads, a real job system (see "Threads") | `cuervo/platform/platform.hpp`, `cmake/Web.cmake` |
 | Audio | miniaudio device thread | miniaudio's Web Audio backend (ScriptProcessorNode, main thread); browsers start audio after the first click/key | `cuervo/audio/` |
 | Files | real file system | Emscripten MEMFS: the project at `/game` and the font at `/fonts/default.efont`, or an exported `/game.pak`; writes (e.g. `Scene.save`, which goes to SDL's pref path in release) vanish on reload | `cmake/Web.cmake` |
@@ -156,6 +160,69 @@ on desktop). Threads halve the simulation time; the frame rate is set by the GPU
 side at this load. Emscripten warns that `-pthread` with memory growth slows
 JavaScript-side memory access (WebGL calls go through JS); the render CPU time
 above shows no visible cost.
+
+## WebGPU (experimental)
+
+Milestone 10.3 (DESIGN.md 4.4 "Clarified (Milestone 10.3)"): a web build made
+with `CUERVO_WEBGPU` (the default when the host has naga-cli 29.0.4 and
+spirv-opt) carries both backends in one `.wasm`. The page runs WebGPU when the
+browser has it and WebGL2 otherwise; the game cannot tell (render only: the
+state hash is the same).
+
+- **Before `main`**, `web/webgpu_init.js` (linked with `--pre-js`) asks
+  `navigator.gpu` for an adapter (`high-performance`, then any) and a device, and
+  hands the device to emdawnwebgpu as `Module.preinitializedWebGPUDevice`. The
+  engine never waits on a browser promise, so the build needs neither JSPI nor
+  Asyncify and loads in any browser.
+- **Choice**: `rhi::default_backend()` is WebGPU when the page got a device and GL
+  (WebGL2) otherwise; if the WebGPU device still fails to open, the player falls
+  back to WebGL2 like a desktop falls back from Vulkan. `?args=--backend gl`
+  forces WebGL2 (the page then requests no device); `--backend webgpu` insists
+  on WebGPU and fails without it.
+- **Errors**: a device made by the page can't take the engine's error callback,
+  so `webgpu_init.js` logs uncaptured errors and device loss to the console as
+  `[error] WebGPU ...`, which the smoke test treats as a failure.
+- **Threads**: works with `CUERVO_WEB_THREADS` (WebGPU calls stay on the page's
+  thread; workers skip the device request).
+- **Exports**: `cuervo-tools export --platform web` builds web players with
+  `CUERVO_WEBGPU=ON` (docs/EXPORT.md "Web"); the prebuilt `web-pack` runtimes
+  have it whenever their build found naga.
+
+```sh
+# Host tools as above (they need naga-cli 29.0.4 and spirv-opt for the WGSL:
+#   cargo install naga-cli --version 29.0.4 --locked; pacman -S spirv-tools)
+cmake --preset web-pack && cmake --build --preset web-pack       # CUERVO_WEBGPU defaults on
+cuervo-tools pack examples/shmup --platform web -o build/web-pack/runtime/game.pak
+# WebGPU on the real GPU, then the WebGL2 fallback (navigator.gpu hidden):
+node tools/web/smoke_test.mjs --dir build/web-pack/runtime --gpu --expect-backend webgpu \
+    --args "--screenshot /tmp/w.ppm" --expect "state hash a3e57e79964421d3"
+node tools/web/smoke_test.mjs --dir build/web-pack/runtime --gpu --no-webgpu --expect-backend gl \
+    --args "--screenshot /tmp/w.ppm" --expect "state hash a3e57e79964421d3"
+```
+
+Verified in headless Chrome 156 on the RTX 3060 Ti, for the `web-pack` and
+`web-pack-threads` (`--jobs 4`) runtimes, on WebGPU and on the WebGL2 fallback:
+`examples/shmup` reaches `a3e57e79964421d3` and `examples/lantern_cave` (with the
+`10-114:move_right,60:jump,124:jump,138-240:move_right` presses of its sweep)
+`2dd8beccd71bc67e` at tick 240, both their native hashes. The engine's own
+captures (`--pull`) of the two backends match on the shmup up to anti-aliased
+edges; `lantern_cave` differs in 0.013 % of its pixels (at most 26/255) inside
+the raymarched soft shadows, where ANGLE's GL and Dawn's Vulkan round differently.
+
+- Headless Chrome on Linux only offers SwiftShader to WebGPU unless it is told not
+  to want a Vulkan surface (`--disable-vulkan-surface`, part of the smoke test's
+  `--gpu`), and then it answers `high-performance` with no adapter (hence the
+  second request). Its page screenshots (`--screenshot`) of a WebGPU canvas come
+  out blank in that mode; the frames themselves are right (check them with `--pull`).
+- `capture_frame` maps its readback asynchronously (a main-loop callback cannot
+  block): the file lands a frame or so after the log line.
+- The canvas is configured with `COPY_SRC` (emdawnwebgpu reports no surface usages;
+  the WebGPU spec allows it) so screenshots work.
+- Firefox and Safari are untested; any browser without WebGPU gets WebGL2.
+- Benchmarks (milestone 10.4): `tools/bench.py record --web <runtime dir> --backends webgpu
+  webgl2` ([PERFORMANCE.md](PERFORMANCE.md) "Web"). With the threaded runtime, `examples/bench`
+  at 100k shapes runs at 390 FPS on WebGPU and 210 on WebGL2 (Chrome presents WebGL2 at most 240
+  times a second); `--bench` (VSync off) runs web frames back to back on `setImmediate`.
 
 ## Decisions (recorded in DESIGN.md 4.4 and 4.14)
 

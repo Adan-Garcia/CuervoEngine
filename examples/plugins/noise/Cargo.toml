@@ -1,0 +1,17 @@
+[package]
+name = "noise"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+# A shared library for the VM, a static one for AOT exports (docs/PLUGINS.md).
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+cuervo-plugin = { path = "../../../bindings/rust/cuervo-plugin" }
+
+[profile.release]
+panic = "unwind" # natives catch panics and report them as script panics

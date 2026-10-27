@@ -1,0 +1,359 @@
+// A precomputed flow field and distance heat map from one or more targets across a NavigationRegion2D.
+// Enables instantaneous path extraction and mass flocking/crowd navigation with zero search overhead.
+class DijkstraMap {
+    // Reference to the originating NavigationRegion2D.
+    var region: NavigationRegion2D = null
+    // Map of packed cell coordinates to their traversal cost/distance to the nearest goal.
+    var costs = Map<int, float>()
+    // Target grid coordinates used as the 0-cost origins of the flood.
+    var targets = List<ivec2>()
+    // World target positions used when computing this map.
+    var world_targets = List<vec2>()
+    // Maximum traversal cost encountered in the reachable region.
+    var max_cost = 0.0
+
+    // Returns the number of reachable cells stored in the map.
+    fn count() -> int {
+        return costs.len()
+    }
+
+    // Returns true if no cells were reached or the map is empty.
+    fn is_empty() -> bool {
+        return costs.is_empty()
+    }
+
+    // Returns the list of target grid coordinates.
+    fn get_targets() -> List<ivec2> {
+        return targets
+    }
+
+    // Returns the list of world target positions.
+    fn get_world_targets() -> List<vec2> {
+        return world_targets
+    }
+
+    // Returns the maximum cost among all reached cells.
+    fn get_max_cost() -> float {
+        return max_cost
+    }
+
+    // Returns true if the grid cell coordinate was reached by the Dijkstra flood.
+    fn has_cell(cell: ivec2) -> bool {
+        return costs.has(tile_pack_coord(cell.x, cell.y))
+    }
+
+    // Returns true if the global world position maps to a reached cell.
+    fn has_position(pos: vec2) -> bool {
+        if region == null {
+            return false
+        }
+        return has_cell(region.global_to_map(pos))
+    }
+
+    // Returns the distance/cost to the nearest goal for grid cell `cell`, or -1.0 if unreachable.
+    fn get_cell_cost(cell: ivec2) -> float {
+        var pk = tile_pack_coord(cell.x, cell.y)
+        if costs.has(pk) {
+            return costs[pk]
+        }
+        return -1.0
+    }
+
+    // Returns the distance/cost to the nearest goal for global position `pos`, or -1.0 if unreachable.
+    fn get_cost_at(pos: vec2) -> float {
+        if region == null {
+            return -1.0
+        }
+        return get_cell_cost(region.global_to_map(pos))
+    }
+
+    // Returns the downhill neighbor offset (best step toward goal) from `cell`, or null if at goal or trapped.
+    fn _best_downhill_step(cell: ivec2) -> ivec2? {
+        var pk = tile_pack_coord(cell.x, cell.y)
+        if !costs.has(pk) {
+            return null
+        }
+        var cur_cost = costs[pk]
+        if cur_cost <= 0.0 {
+            return null
+        }
+
+        var best_dx = 0
+        var best_dy = 0
+        var best_slope = 0.0
+
+        // 4 Cardinal neighbors
+        var card_x = [0, 1, 0, -1]
+        var card_y = [-1, 0, 1, 0]
+        for i in 0..4 {
+            var nx = cell.x + card_x[i]
+            var ny = cell.y + card_y[i]
+            if region != null && !region.is_cell_walkable(nx, ny) {
+                continue
+            }
+            var npk = tile_pack_coord(nx, ny)
+            if costs.has(npk) {
+                var n_cost = costs[npk]
+                var step_cost = region != null ? (region.default_cost * region.get_cell_cost(nx, ny)) : 1.0
+                var slope = (cur_cost - n_cost) / step_cost
+                if slope > best_slope {
+                    best_slope = slope
+                    best_dx = card_x[i]
+                    best_dy = card_y[i]
+                }
+            }
+        }
+
+        // 4 Diagonal neighbors
+        if region == null || region.allow_diagonal {
+            var diag_x = [1, 1, -1, -1]
+            var diag_y = [-1, 1, 1, -1]
+            var d_cost = region != null ? region.diagonal_cost : 1.41421356
+            for i in 0..4 {
+                var nx = cell.x + diag_x[i]
+                var ny = cell.y + diag_y[i]
+                if region != null {
+                    if !region.is_cell_walkable(nx, ny) {
+                        continue
+                    }
+                    if !region.is_cell_walkable(cell.x + diag_x[i], cell.y) ||
+                       !region.is_cell_walkable(cell.x, cell.y + diag_y[i]) {
+                        continue
+                    }
+                }
+                var npk = tile_pack_coord(nx, ny)
+                if costs.has(npk) {
+                    var n_cost = costs[npk]
+                    var step_cost = region != null ? (d_cost * region.get_cell_cost(nx, ny)) : d_cost
+                    var slope = (cur_cost - n_cost) / step_cost
+                    if slope > best_slope {
+                        best_slope = slope
+                        best_dx = diag_x[i]
+                        best_dy = diag_y[i]
+                    }
+                }
+            }
+        }
+
+        if best_dx == 0 && best_dy == 0 {
+            return null
+        }
+        return ivec2.of(best_dx, best_dy)
+    }
+
+    // Returns the uphill neighbor offset (best step away from goal) from `cell`, or null if trapped.
+    fn _best_uphill_step(cell: ivec2) -> ivec2? {
+        var pk = tile_pack_coord(cell.x, cell.y)
+        if !costs.has(pk) {
+            return null
+        }
+        var cur_cost = costs[pk]
+
+        var best_dx = 0
+        var best_dy = 0
+        var best_slope = 0.0
+
+        // 4 Cardinal neighbors
+        var card_x = [0, 1, 0, -1]
+        var card_y = [-1, 0, 1, 0]
+        for i in 0..4 {
+            var nx = cell.x + card_x[i]
+            var ny = cell.y + card_y[i]
+            if region != null && !region.is_cell_walkable(nx, ny) {
+                continue
+            }
+            var npk = tile_pack_coord(nx, ny)
+            if costs.has(npk) {
+                var n_cost = costs[npk]
+                if n_cost > cur_cost {
+                    var step_cost = region != null ? (region.default_cost * region.get_cell_cost(nx, ny)) : 1.0
+                    var slope = (n_cost - cur_cost) / step_cost
+                    if slope > best_slope {
+                        best_slope = slope
+                        best_dx = card_x[i]
+                        best_dy = card_y[i]
+                    }
+                }
+            }
+        }
+
+        // 4 Diagonal neighbors
+        if region == null || region.allow_diagonal {
+            var diag_x = [1, 1, -1, -1]
+            var diag_y = [-1, 1, 1, -1]
+            var d_cost = region != null ? region.diagonal_cost : 1.41421356
+            for i in 0..4 {
+                var nx = cell.x + diag_x[i]
+                var ny = cell.y + diag_y[i]
+                if region != null {
+                    if !region.is_cell_walkable(nx, ny) {
+                        continue
+                    }
+                    if !region.is_cell_walkable(cell.x + diag_x[i], cell.y) ||
+                       !region.is_cell_walkable(cell.x, cell.y + diag_y[i]) {
+                        continue
+                    }
+                }
+                var npk = tile_pack_coord(nx, ny)
+                if costs.has(npk) {
+                    var n_cost = costs[npk]
+                    if n_cost > cur_cost {
+                        var step_cost = region != null ? (d_cost * region.get_cell_cost(nx, ny)) : d_cost
+                        var slope = (n_cost - cur_cost) / step_cost
+                        if slope > best_slope {
+                            best_slope = slope
+                            best_dx = diag_x[i]
+                            best_dy = diag_y[i]
+                        }
+                    }
+                }
+            }
+        }
+
+        if best_dx == 0 && best_dy == 0 {
+            return null
+        }
+        return ivec2.of(best_dx, best_dy)
+    }
+
+    // Returns the normalized downhill direction vector for grid cell `cell`.
+    fn get_cell_direction(cell: ivec2) -> vec2 {
+        if _best_downhill_step(cell)? down_step {
+            return vec2(down_step.x as float, down_step.y as float).normalized()
+        }
+        return vec2(0.0, 0.0)
+    }
+
+    // Returns the normalized downhill direction vector for global position `pos`.
+    fn get_direction_at(pos: vec2) -> vec2 {
+        if region == null {
+            return vec2(0.0, 0.0)
+        }
+        var c = region.global_to_map(pos)
+        var pk = tile_pack_coord(c.x, c.y)
+        if costs.has(pk) && costs[pk] <= 0.0 {
+            var target_pos = region.map_to_global(c)
+            if world_targets.len() == 1 {
+                var tc = region.global_to_map(world_targets[0])
+                if tc.x == c.x && tc.y == c.y && region.is_cell_walkable(tc.x, tc.y) {
+                    target_pos = world_targets[0]
+                }
+            }
+            var delta = target_pos - pos
+            if delta.length() > 2.0 {
+                return delta.normalized()
+            }
+            return vec2(0.0, 0.0)
+        }
+        return get_cell_direction(c)
+    }
+
+    // Returns the normalized uphill fleeing direction vector for grid cell `cell`.
+    fn get_cell_flee_direction(cell: ivec2) -> vec2 {
+        if _best_uphill_step(cell)? up_step {
+            return vec2(up_step.x as float, up_step.y as float).normalized()
+        }
+        return vec2(0.0, 0.0)
+    }
+
+    // Returns the normalized uphill fleeing direction vector for global position `pos`.
+    fn get_flee_direction_at(pos: vec2) -> vec2 {
+        if region == null {
+            return vec2(0.0, 0.0)
+        }
+        return get_cell_flee_direction(region.global_to_map(pos))
+    }
+
+    // Extracts an instantaneous waypoint path from `start_pos` to the nearest goal using flow gradient.
+    fn get_path_from(start_pos: vec2, max_steps = 256, smooth = false) -> List<vec2> {
+        if region == null {
+            return List<vec2>()
+        }
+        var curr = region.global_to_map(start_pos)
+        var c_pk = tile_pack_coord(curr.x, curr.y)
+        var start_adjusted = false
+        if !costs.has(c_pk) {
+            if region.find_nearest_walkable(curr.x, curr.y)? adj {
+                var adj_pk = tile_pack_coord(adj.x, adj.y)
+                if costs.has(adj_pk) {
+                    curr = adj
+                    start_adjusted = true
+                } else {
+                    return List<vec2>()
+                }
+            } else {
+                return List<vec2>()
+            }
+        }
+
+        if costs[tile_pack_coord(curr.x, curr.y)] <= 0.0 {
+            var p = List<vec2>()
+            if world_targets.len() == 1 {
+                var tc = region.global_to_map(world_targets[0])
+                if tc.x == curr.x && tc.y == curr.y && region.is_cell_walkable(tc.x, tc.y) {
+                    p.push(world_targets[0])
+                    return p
+                }
+            }
+            p.push(region.map_to_global(curr))
+            return p
+        }
+
+        var path = List<vec2>()
+        if start_adjusted {
+            path.push(region.map_to_global(curr))
+        }
+        var visited = Set<int>()
+        var steps = 0
+
+        while steps < max_steps {
+            var curr_pk = tile_pack_coord(curr.x, curr.y)
+            if visited.contains(curr_pk) {
+                break
+            }
+            visited.add(curr_pk)
+
+            if costs.has(curr_pk) && costs[curr_pk] <= 0.0 {
+                break
+            }
+
+            if _best_downhill_step(curr)? next_step {
+                curr = ivec2.of(curr.x + next_step.x, curr.y + next_step.y)
+                path.push(region.map_to_global(curr))
+                steps += 1
+            } else {
+                break
+            }
+        }
+
+        if path.is_empty() {
+            return List<vec2>()
+        }
+
+        if world_targets.len() == 1 && costs.has(tile_pack_coord(curr.x, curr.y)) && costs[tile_pack_coord(curr.x, curr.y)] <= 0.0 {
+            var tc = region.global_to_map(world_targets[0])
+            if tc.x == curr.x && tc.y == curr.y && region.is_cell_walkable(tc.x, tc.y) {
+                path[path.len() - 1] = world_targets[0]
+            }
+        }
+
+        if smooth && path.len() > 1 {
+            if !start_adjusted {
+                var full_path = List<vec2>()
+                full_path.push(start_pos)
+                for wp in path {
+                    full_path.push(wp)
+                }
+                var smoothed = region.smooth_path(full_path)
+                path.clear()
+                for i in 1..smoothed.len() {
+                    path.push(smoothed[i])
+                }
+            } else {
+                path = region.smooth_path(path)
+            }
+        }
+        return path
+    }
+}
+

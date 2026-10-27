@@ -15,6 +15,9 @@
 
 #include "tests/pluma/aot_helpers.hpp"
 
+// The reference model needs a 128-bit integer, which MSVC lacks: the test runs on GCC/Clang builds.
+#if defined(__SIZEOF_INT128__)
+
 namespace {
 
 __extension__ typedef __int128 i128;
@@ -222,3 +225,5 @@ TEST_CASE("semantics: development mode panics exactly when the exact result leav
     }
     CHECK(cases > 1000);
 }
+
+#endif // __SIZEOF_INT128__

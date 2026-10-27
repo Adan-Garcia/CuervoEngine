@@ -29,6 +29,7 @@ const char* tool_name(Tool tool) {
         case Tool::Move: return "Move";
         case Tool::Rotate: return "Rotate";
         case Tool::Scale: return "Scale";
+        case Tool::Paint: return "Paint";
     }
     return "Move";
 }
@@ -89,6 +90,8 @@ void EditorApp::save_current_scene() {
         LOG_INFO("Saved '{}'", rel);
         assets_.poll();
         notify_ok(std::format("Saved {}.", rel));
+        settings_.set_last_scene(env_.project_dir(), rel);
+        save_user_state();
     } else {
         LOG_ERROR("{}", error);
         notify(message_save_failed(rel, error));
@@ -142,6 +145,14 @@ void EditorApp::save_layout_as(const std::string& name) {
 }
 
 void EditorApp::restore_user_state() {
+    settings_.load(EditorSettings::user_file());
+    const float init_ui_scale = options_.ui_scale.value_or(settings_.ui_scale());
+    const float init_font_scale = options_.font_scale.value_or(settings_.font_scale());
+    settings_.set_ui_scale(init_ui_scale);
+    settings_.set_font_scale(init_font_scale);
+    theme::set_ui_scale(init_ui_scale);
+    theme::set_font_scale(init_font_scale);
+
     std::string error;
     if (!layouts_.load(LayoutStore::user_file(), error)) {
         UserMessage m;
@@ -167,6 +178,40 @@ void EditorApp::save_user_state() {
     if (!layouts_.save(LayoutStore::user_file(), error)) LOG_WARN("{}", error);
     if (env_.has_project()) recents_.add(env_.project_dir());
     if (!recents_.save(RecentProjects::user_file(), error)) LOG_WARN("{}", error);
+    if (!settings_.save(EditorSettings::user_file(), error)) LOG_WARN("{}", error);
+}
+
+void EditorApp::zoom_in() {
+    set_ui_scale(std::min(theme::ui_scale() + 0.10f, 3.0f));
+}
+
+void EditorApp::zoom_out() {
+    set_ui_scale(std::max(theme::ui_scale() - 0.10f, 0.50f));
+}
+
+void EditorApp::reset_zoom() {
+    set_ui_scale(1.0f);
+    set_font_scale(1.0f);
+}
+
+void EditorApp::set_ui_scale(float scale) {
+    theme::set_ui_scale(scale);
+    settings_.set_ui_scale(scale);
+    save_user_state();
+}
+
+void EditorApp::set_font_scale(float scale) {
+    theme::set_font_scale(scale);
+    settings_.set_font_scale(scale);
+    save_user_state();
+}
+
+float EditorApp::ui_scale() const {
+    return theme::ui_scale();
+}
+
+float EditorApp::font_scale() const {
+    return theme::font_scale();
 }
 
 // ------------------------------------------------------------ actions
@@ -224,6 +269,14 @@ void EditorApp::add_app_actions() {
         running_ = false;
         return true;
     });
+    add("file.open_code_editor", "Open Project in Code Editor", "File", "", {}, [this] {
+        open_in_external_editor(env_.project_dir());
+        return true;
+    });
+    add("file.open_scripts_editor", "Open Scripts Folder in Code Editor", "File", "", {}, [this] {
+        open_in_external_editor(env_.project_dir() / "scripts");
+        return true;
+    });
     // ---- play
     add("play.play", "Play", "Play", "F5", [this] { return !play_.active() || play_.state() == PlayState::Paused; },
         [this] {
@@ -268,6 +321,18 @@ void EditorApp::add_app_actions() {
         camera_.zoom = 1.0f;
         return true;
     });
+    add("view.zoom_in", "Zoom In", "View", "Ctrl+=", {}, [this] {
+        zoom_in();
+        return true;
+    });
+    add("view.zoom_out", "Zoom Out", "View", "Ctrl+-", {}, [this] {
+        zoom_out();
+        return true;
+    });
+    add("view.zoom_reset", "Reset Zoom", "View", "Ctrl+0", {}, [this] {
+        reset_zoom();
+        return true;
+    });
     add("view.theme_light", "Light Theme", "View", "", {}, [] {
         theme::apply(brand::Theme::Light);
         return true;
@@ -280,7 +345,22 @@ void EditorApp::add_app_actions() {
         snap_ = !snap_;
         return true;
     });
-    const std::pair<Tool, const char*> tools[] = {{Tool::Select, "Q"}, {Tool::Move, "W"}, {Tool::Rotate, "E"}, {Tool::Scale, "R"}};
+    add("view.collision_shapes", "Toggle Collision Shapes", "View", "F3", {}, [this] {
+        collision_shapes_ = !collision_shapes_;
+#if CUERVO_FEATURE_PHYSICS
+        env_.host().physics_world().set_editor_debug_shapes(collision_shapes_);
+        if (play_.active() && play_.session()) {
+            play_.session()->host().physics_world().set_debug_shapes(collision_shapes_);
+        }
+#endif
+        return true;
+    });
+    add("view.lighting", "Toggle Lighting Preview", "View", "", {}, [this] {
+        preview_lighting_ = !preview_lighting_;
+        return true;
+    });
+    const std::pair<Tool, const char*> tools[] = {
+        {Tool::Select, "Q"}, {Tool::Move, "W"}, {Tool::Rotate, "E"}, {Tool::Scale, "R"}, {Tool::Paint, "B"}};
     for (const auto& [tool, key] : tools) {
         const Tool t = tool;
         add(std::string("tool.") + tool_name(t), std::string(tool_name(t)) + " Tool", "Tool", key, {}, [this, t] {
@@ -349,6 +429,19 @@ void EditorApp::handle_shortcuts() {
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_D, global)) run_action("edit.duplicate");
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_G, global)) run_action("edit.group");
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_A, global)) run_action("edit.add_child");
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Equal, global) ||
+        ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Equal, global) ||
+        ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_KeypadAdd, global)) {
+        zoom_in();
+    }
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Minus, global) ||
+        ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_KeypadSubtract, global)) {
+        zoom_out();
+    }
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_0, global) ||
+        ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Keypad0, global)) {
+        reset_zoom();
+    }
     const ImGuiIO& io = ImGui::GetIO();
     if (io.WantTextInput) return;
     // Delete, tool keys and framing only when no text field has the keyboard.
@@ -358,6 +451,7 @@ void EditorApp::handle_shortcuts() {
         if (ImGui::IsKeyPressed(ImGuiKey_W, false)) tool_ = Tool::Move;
         if (ImGui::IsKeyPressed(ImGuiKey_E, false)) tool_ = Tool::Rotate;
         if (ImGui::IsKeyPressed(ImGuiKey_R, false)) tool_ = Tool::Scale;
+        if (ImGui::IsKeyPressed(ImGuiKey_B, false)) tool_ = Tool::Paint;
         if (ImGui::IsKeyPressed(ImGuiKey_F, false)) frame_scene();
     }
 }
@@ -387,6 +481,9 @@ void EditorApp::draw_menu_bar() {
             }
             ImGui::EndMenu();
         }
+        ImGui::Separator();
+        item("Open Project in Code Editor", "file.open_code_editor");
+        item("Open Scripts Folder in Code Editor", "file.open_scripts_editor");
         ImGui::Separator();
         item("Quit", "file.quit");
         ImGui::EndMenu();
@@ -430,6 +527,16 @@ void EditorApp::draw_menu_bar() {
         item("Frame Scene", "view.frame");
         item("Zoom to 100%", "view.zoom100");
         if (ImGui::MenuItem("Snapping", nullptr, snap_)) snap_ = !snap_;
+        if (ImGui::MenuItem("Collision Shapes", "F3", collision_shapes_)) {
+            collision_shapes_ = !collision_shapes_;
+#if CUERVO_FEATURE_PHYSICS
+            env_.host().physics_world().set_editor_debug_shapes(collision_shapes_);
+            if (play_.active() && play_.session()) {
+                play_.session()->host().physics_world().set_debug_shapes(collision_shapes_);
+            }
+#endif
+        }
+        if (ImGui::MenuItem("Lighting Preview", nullptr, preview_lighting_)) preview_lighting_ = !preview_lighting_;
         ImGui::Separator();
         // The brand's light (Bone) and dark (Raven) themes (DESIGN.md 4.16).
         if (ImGui::BeginMenu("Theme")) {
@@ -437,6 +544,32 @@ void EditorApp::draw_menu_bar() {
             if (ImGui::MenuItem("Dark", nullptr, theme::current() == brand::Theme::Dark)) theme::apply(brand::Theme::Dark);
             ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("UI Scale")) {
+            const float scales[] = {0.75f, 0.90f, 1.0f, 1.10f, 1.25f, 1.50f, 1.75f, 2.0f};
+            for (float s : scales) {
+                const std::string label = std::format("{}%", static_cast<int>(std::round(s * 100.0f)));
+                const bool selected = std::abs(theme::ui_scale() - s) < 0.02f;
+                if (ImGui::MenuItem(label.c_str(), nullptr, selected)) {
+                    set_ui_scale(s);
+                }
+            }
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Font Scale")) {
+            const float fscales[] = {0.80f, 0.90f, 1.0f, 1.10f, 1.20f, 1.30f, 1.40f, 1.50f};
+            for (float s : fscales) {
+                const std::string label = std::format("{}%", static_cast<int>(std::round(s * 100.0f)));
+                const bool selected = std::abs(theme::font_scale() - s) < 0.02f;
+                if (ImGui::MenuItem(label.c_str(), nullptr, selected)) {
+                    set_font_scale(s);
+                }
+            }
+            ImGui::EndMenu();
+        }
+        ImGui::Separator();
+        item("Zoom In", "view.zoom_in");
+        item("Zoom Out", "view.zoom_out");
+        item("Reset Zoom", "view.zoom_reset");
         if (ImGui::BeginMenu("Layout")) {
             for (const std::string& name : layouts_.names()) {
                 if (ImGui::MenuItem(name.c_str(), nullptr, layouts_.active() == name)) apply_layout(name);
@@ -507,6 +640,7 @@ void EditorApp::draw_toolbar() {
         action_button("move", "tool.Move", "Move tool", tool_ == Tool::Move);
         action_button("rotate", "tool.Rotate", "Rotate tool", tool_ == Tool::Rotate);
         action_button("scale", "tool.Scale", "Scale tool", tool_ == Tool::Scale);
+        action_button("paint", "tool.Paint", "Paint tool", tool_ == Tool::Paint);
         if (ui::icon_button("snap", "grid", "Snap to the grid, 15 degrees and steps of 0.1 (Ctrl while dragging inverts)",
                             snap_)) {
             snap_ = !snap_;
@@ -634,7 +768,24 @@ void EditorApp::draw_docks() {
     // dock's edge to split, or pull it out to float. The close button hides it (View menu).
     for (const auto& p : panels_.all()) {
         if (!p->visible) continue;
-        if (std::exchange(p->select, false)) ImGui::SetNextWindowFocus();
+        // Focus once the window exists (a new panel docks on its first frame).
+        if (p->select && ImGui::FindWindowByName(p->title()) != nullptr) {
+            p->select = false;
+            ImGui::SetNextWindowFocus();
+        }
+        // A panel newer than the saved layout (ImGui has no settings for it)
+        // joins the dock of a panel with the same default dock, as a tab,
+        // instead of floating over the editor.
+        if (ImGui::FindWindowByName(p->title()) == nullptr &&
+            ImGui::FindWindowSettingsByID(ImHashStr(p->title())) == nullptr) {
+            for (const auto& q : panels_.all()) {
+                if (q.get() == p.get() || q->dock() != p->dock()) continue;
+                if (const ImGuiWindow* w = ImGui::FindWindowByName(q->title()); w != nullptr && w->DockId != 0) {
+                    ImGui::SetNextWindowDockID(w->DockId);
+                    break;
+                }
+            }
+        }
         ImGui::SetNextWindowSizeConstraints({120.0f, 60.0f}, {FLT_MAX, FLT_MAX});
         // Each tab has its own close button; the dock node's extra one would only repeat it.
         ImGuiWindowClass window_class;

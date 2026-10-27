@@ -28,6 +28,7 @@
 
 #include "cuervo/core/log.hpp"
 #include "editor/app.hpp"
+#include "editor/commands.hpp"
 #include "editor/panels.hpp"
 #include "editor/theme.hpp"
 #include "editor/ui.hpp"
@@ -40,6 +41,59 @@ constexpr float arm_length = 76.0f;  // pixels, the move and scale arms
 constexpr float ring_radius = 60.0f; // pixels, the rotate ring
 constexpr float pick_slop = 7.0f;
 constexpr float pi = 3.14159265f;
+
+void paint_cell(EditorDocument& doc, NodeId id, int cx, int cy, int tile_id, bool erase) {
+    bool stored = false;
+    scene::Value before = doc.field_value(id, "cells", &stored);
+    scene::Value after = before;
+    if (after.kind != scene::ValueKind::List) {
+        after.kind = scene::ValueKind::List;
+        after.items.clear();
+    }
+    int found_idx = -1;
+    for (std::size_t i = 0; i < after.items.size(); ++i) {
+        const auto& item = after.items[i];
+        if (item.kind == scene::ValueKind::Struct) {
+            int ix = 0, iy = 0;
+            for (const auto& f : item.fields) {
+                if (f.name == "x" && f.value.kind == scene::ValueKind::Int) ix = static_cast<int>(f.value.i);
+                if (f.name == "y" && f.value.kind == scene::ValueKind::Int) iy = static_cast<int>(f.value.i);
+            }
+            if (ix == cx && iy == cy) {
+                found_idx = static_cast<int>(i);
+                break;
+            }
+        }
+    }
+    if (erase) {
+        if (found_idx >= 0) {
+            after.items.erase(after.items.begin() + found_idx);
+            doc.set_field(id, "cells", after, true);
+        }
+    } else {
+        scene::Value cell_val;
+        cell_val.kind = scene::ValueKind::Struct;
+        cell_val.type = "TileCell";
+        cell_val.fields.push_back({"x", {}, scene::Value::integer(cx)});
+        cell_val.fields.push_back({"y", {}, scene::Value::integer(cy)});
+        cell_val.fields.push_back({"tile_id", {}, scene::Value::integer(tile_id)});
+        cell_val.fields.push_back({"terrain", {}, scene::Value::integer(-1)});
+
+        if (found_idx >= 0) {
+            int cur_tid = -1;
+            for (const auto& f : after.items[static_cast<std::size_t>(found_idx)].fields) {
+                if (f.name == "tile_id" && f.value.kind == scene::ValueKind::Int) cur_tid = static_cast<int>(f.value.i);
+            }
+            if (cur_tid != tile_id) {
+                after.items[static_cast<std::size_t>(found_idx)] = cell_val;
+                doc.set_field(id, "cells", after, true);
+            }
+        } else {
+            after.items.push_back(cell_val);
+            doc.set_field(id, "cells", after, true);
+        }
+    }
+}
 
 float segment_distance(vec2 p, vec2 a, vec2 b) {
     const vec2 ab = b - a;
@@ -173,67 +227,99 @@ public:
             const NodeBounds* b = bounds_of(id);
             if (b != nullptr && b->has_position && !b->has_rect) can_turn = true;
         }
-        const bool show_gizmo = pivot.has_value() && !targets.empty() &&
+        const bool show_gizmo = pivot.has_value() && !targets.empty() && tool != Tool::Paint &&
                                 (tool == Tool::Move || ((tool == Tool::Rotate || tool == Tool::Scale) && can_turn));
         const vec2 a = pivot ? to_screen(*pivot) : vec2{0.0f, 0.0f};
         const bool snap = app.snap() != io.KeyCtrl;
 
-        // ---- pressing the mouse: a handle, a node, or the empty view
-        if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-            drag_ = hit_handle(tool, show_gizmo, a, mouse);
-            if (drag_ == Handle::None) {
-                const int picked = pick_node(bounds, to_world(mouse), 14.0f / cam.zoom * scale.x());
-                const NodeId id = picked >= 0 && static_cast<std::size_t>(picked) < order.size()
-                                      ? order[static_cast<std::size_t>(picked)]
-                                      : 0;
-                const bool additive = io.KeyCtrl || io.KeyShift;
-                if (id != 0 && additive) {
-                    doc.select_toggle(id);
-                } else if (id != 0) {
-                    // Clicking a selected node keeps the selection, so the group can be dragged.
-                    if (!doc.is_selected(id)) doc.select(id);
-                    if (tool == Tool::Move || tool == Tool::Select) drag_ = Handle::MoveFree;
-                } else {
-                    drag_ = Handle::Marquee;
-                    marquee_additive_ = additive;
-                    marquee_a_ = mouse;
-                }
+        const NodeId sel_id = doc.selection();
+        const ModelNode* sel_node = doc.model().get(sel_id);
+        const bool is_tilemap = sel_node != nullptr && sel_node->type == "TileMapLayer";
+
+        vec2 tile_sz{32.0f, 32.0f};
+        vec2 layer_origin{0.0f, 0.0f};
+        if (is_tilemap) {
+            bool stored_ts = false;
+            scene::Value ts_val = doc.field_value(sel_id, "tile_size", &stored_ts);
+            if (ts_val.kind == scene::ValueKind::Vec && ts_val.vec.size() >= 2) {
+                tile_sz = vec2{ts_val.vec[0], ts_val.vec[1]};
             }
-            drag_start_ = to_world(mouse);
-            applied_ = {0.0f, 0.0f};
-            applied_angle_ = 0.0f;
-            applied_factor_ = 1.0f;
-            marquee_moved_ = false;
-            if (drag_ != Handle::None && drag_ != Handle::Marquee && pivot) {
-                pivot_ = *pivot;
-                const vec2 p = a;
-                last_mouse_angle_ = std::atan2(mouse.y() - p.y(), mouse.x() - p.x());
-                total_angle_ = 0.0f;
-                start_distance_ = std::max(8.0f, length_of(mouse - p));
-                start_axis_distance_ = std::max(8.0f, drag_ == Handle::ScaleY ? std::abs(mouse.y() - p.y())
-                                                                              : std::abs(mouse.x() - p.x()));
+            if (tile_sz.x() <= 0.0f || tile_sz.y() <= 0.0f) tile_sz = vec2{32.0f, 32.0f};
+            if (const NodeBounds* b = bounds_of(sel_id); b != nullptr && b->has_position) {
+                layer_origin = b->position;
             }
         }
-        // ---- dragging
-        if (drag_ != Handle::None) {
-            if (active && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-                // The drag is in world units; each node's `position` is
-                // parent-relative (DESIGN.md 4.17): undo its parent's rotation and scale.
-                to_local_ = [&bounds_of](NodeId id, vec2 d) {
-                    const NodeBounds* b = bounds_of(id);
-                    if (b == nullptr) return d;
-                    const float c = std::cos(-b->parent_rotation);
-                    const float s = std::sin(-b->parent_rotation);
-                    const float sx = b->parent_scale.x() != 0.0f ? b->parent_scale.x() : 1.0f;
-                    const float sy = b->parent_scale.y() != 0.0f ? b->parent_scale.y() : 1.0f;
-                    return vec2{(d.x() * c - d.y() * s) / sx, (d.x() * s + d.y() * c) / sy};
-                };
-                drag(app, doc, cam, drag_, mouse, a, snap, io.KeyShift, to_world(mouse));
-                to_local_ = {};
-            } else {
-                if (drag_ == Handle::Marquee) finish_marquee(doc, order, bounds, to_world(mouse));
-                drag_ = Handle::None;
-                doc.seal(); // one drag, one undo step
+        const vec2 world_m = to_world(mouse);
+        const int cell_x = is_tilemap ? static_cast<int>(std::floor((world_m.x() - layer_origin.x()) / tile_sz.x())) : 0;
+        const int cell_y = is_tilemap ? static_cast<int>(std::floor((world_m.y() - layer_origin.y()) / tile_sz.y())) : 0;
+
+        if (tool == Tool::Paint && is_tilemap) {
+            if (hovered && (ImGui::IsMouseDown(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Left))) {
+                paint_cell(doc, sel_id, cell_x, cell_y, app.paint_tile_id(), false);
+            } else if (hovered && (ImGui::IsMouseDown(ImGuiMouseButton_Right) || ImGui::IsMouseClicked(ImGuiMouseButton_Right))) {
+                paint_cell(doc, sel_id, cell_x, cell_y, 0, true);
+            }
+            if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) || ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
+                doc.seal();
+            }
+        } else {
+            // ---- pressing the mouse: a handle, a node, or the empty view
+            if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                drag_ = hit_handle(tool, show_gizmo, a, mouse);
+                if (drag_ == Handle::None) {
+                    const int picked = pick_node(bounds, to_world(mouse), 14.0f / cam.zoom * scale.x());
+                    const NodeId id = picked >= 0 && static_cast<std::size_t>(picked) < order.size()
+                                          ? order[static_cast<std::size_t>(picked)]
+                                          : 0;
+                    const bool additive = io.KeyCtrl || io.KeyShift;
+                    if (id != 0 && additive) {
+                        doc.select_toggle(id);
+                    } else if (id != 0) {
+                        // Clicking a selected node keeps the selection, so the group can be dragged.
+                        if (!doc.is_selected(id)) doc.select(id);
+                        if (tool == Tool::Move || tool == Tool::Select) drag_ = Handle::MoveFree;
+                    } else {
+                        drag_ = Handle::Marquee;
+                        marquee_additive_ = additive;
+                        marquee_a_ = mouse;
+                    }
+                }
+                drag_start_ = to_world(mouse);
+                applied_ = {0.0f, 0.0f};
+                applied_angle_ = 0.0f;
+                applied_factor_ = 1.0f;
+                marquee_moved_ = false;
+                if (drag_ != Handle::None && drag_ != Handle::Marquee && pivot) {
+                    pivot_ = *pivot;
+                    const vec2 p = a;
+                    last_mouse_angle_ = std::atan2(mouse.y() - p.y(), mouse.x() - p.x());
+                    total_angle_ = 0.0f;
+                    start_distance_ = std::max(8.0f, length_of(mouse - p));
+                    start_axis_distance_ = std::max(8.0f, drag_ == Handle::ScaleY ? std::abs(mouse.y() - p.y())
+                                                                                  : std::abs(mouse.x() - p.x()));
+                }
+            }
+            // ---- dragging
+            if (drag_ != Handle::None) {
+                if (active && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+                    // The drag is in world units; each node's `position` is
+                    // parent-relative (DESIGN.md 4.17): undo its parent's rotation and scale.
+                    to_local_ = [&bounds_of](NodeId id, vec2 d) {
+                        const NodeBounds* b = bounds_of(id);
+                        if (b == nullptr) return d;
+                        const float c = std::cos(-b->parent_rotation);
+                        const float s = std::sin(-b->parent_rotation);
+                        const float sx = b->parent_scale.x() != 0.0f ? b->parent_scale.x() : 1.0f;
+                        const float sy = b->parent_scale.y() != 0.0f ? b->parent_scale.y() : 1.0f;
+                        return vec2{(d.x() * c - d.y() * s) / sx, (d.x() * s + d.y() * c) / sy};
+                    };
+                    drag(app, doc, cam, drag_, mouse, a, snap, io.KeyShift, to_world(mouse));
+                    to_local_ = {};
+                } else {
+                    if (drag_ == Handle::Marquee) finish_marquee(doc, order, bounds, to_world(mouse));
+                    drag_ = Handle::None;
+                    doc.seal(); // one drag, one undo step
+                }
             }
         }
 
@@ -241,6 +327,11 @@ public:
         dl->PushClipRect(im(origin), im(origin + size), true);
         draw_selection(dl, doc, order, bounds, to_screen);
         if (show_gizmo) draw_gizmo(dl, tool, a, mouse, hovered);
+        if (is_tilemap && (tool == Tool::Paint || doc.is_selected(sel_id))) {
+            const vec2 cell_min = to_screen(layer_origin + vec2{cell_x * tile_sz.x(), cell_y * tile_sz.y()});
+            const vec2 cell_max = to_screen(layer_origin + vec2{(cell_x + 1) * tile_sz.x(), (cell_y + 1) * tile_sz.y()});
+            dl->AddRect(im(cell_min), im(cell_max), IM_COL32(80, 200, 255, 220), 0.0f, 2.0f);
+        }
         if (drag_ == Handle::Marquee && marquee_moved_) {
             const ImVec2 lo{std::min(marquee_a_.x(), mouse.x()), std::min(marquee_a_.y(), mouse.y())};
             const ImVec2 hi{std::max(marquee_a_.x(), mouse.x()), std::max(marquee_a_.y(), mouse.y())};

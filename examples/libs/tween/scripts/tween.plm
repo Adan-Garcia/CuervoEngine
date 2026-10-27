@@ -1,0 +1,52 @@
+// Easing curves and tweens. Only `pub` names are visible to the games and
+// packages that import this one (LANGUAGE.md 9.26).
+
+pub enum Ease { Linear, InQuad, OutQuad, InOutCubic }
+
+// `t` in 0..1 eased by `curve`.
+pub fn ease(curve: Ease, t: float) -> float {
+    var x = clamp01(t)
+    match curve {
+        Ease.Linear => return x
+        Ease.InQuad => return x * x
+        Ease.OutQuad => return 1.0 - (1.0 - x) * (1.0 - x)
+        Ease.InOutCubic => {
+            if x < 0.5 {
+                return 4.0 * x * x * x
+            }
+            var y = -2.0 * x + 2.0
+            return 1.0 - y * y * y / 2.0
+        }
+    }
+}
+
+// A value that moves from `from` to `to` over `ticks` fixed ticks, then
+// back again (ping-pong), so it is deterministic and frame-rate independent.
+pub class Tween {
+    var from: float
+    var to: float
+    var ticks: int
+    var curve: Ease
+    var elapsed = 0
+
+    fn init(from: float, to: float, ticks: int, curve: Ease = Ease.InOutCubic) {
+        self.from = from
+        self.to = to
+        self.ticks = ticks
+        self.curve = curve
+    }
+
+    fn advance() {
+        elapsed = (elapsed + 1) % (ticks * 2)
+    }
+
+    fn value() -> float {
+        var phase = elapsed < ticks ? elapsed : ticks * 2 - elapsed
+        return from + (to - from) * ease(curve, (phase as float) / (ticks as float))
+    }
+}
+
+// Package-private: games cannot call it, and their own `clamp01` won't clash.
+fn clamp01(x: float) -> float {
+    return x < 0.0 ? 0.0 : (x > 1.0 ? 1.0 : x)
+}

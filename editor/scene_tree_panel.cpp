@@ -147,12 +147,33 @@ private:
             const std::string label = n->name.empty() ? std::string("(unnamed)") : n->name;
             const float ty = cy - ImGui::GetTextLineHeight() * 0.5f;
             dl->AddText({x + 22.0f, ty}, theme::im32(t.text), label.c_str());
-            dl->AddText({x + 22.0f + ImGui::CalcTextSize(label.c_str()).x + 8.0f, ty}, theme::im32(t.text_muted),
-                        n->type.c_str());
+            const float label_w = ImGui::CalcTextSize(label.c_str()).x;
+            dl->AddText({x + 22.0f + label_w + 8.0f, ty}, theme::im32(t.text_muted), n->type.c_str());
+            const float type_w = ImGui::CalcTextSize(n->type.c_str()).x;
+
+            const auto [script_path, script_line] = app.find_class_script(n->type);
+            const bool has_script = !script_path.empty();
+            if (has_script) {
+                const float badge_x = x + 22.0f + label_w + 8.0f + type_w + 10.0f;
+                ui::draw_icon(dl, "script", {badge_x, cy}, 12.0f, theme::im32(t.accent));
+            }
+
+            if (ImGui::IsItemHovered()) {
+                if (has_script) {
+                    ImGui::SetItemTooltip("%s (%s)\nScript: %s:%d\n(Right-click to manage script)",
+                                          label.c_str(), n->type.c_str(), script_path.c_str(), script_line);
+                } else {
+                    ImGui::SetItemTooltip("%s (%s)\n(Right-click to attach script)", label.c_str(), n->type.c_str());
+                }
+            }
+
             if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && n->children.empty()) {
                 begin_rename(doc, id);
             }
         }
+
+        const auto [script_path, script_line] = app.find_class_script(n->type);
+        const bool has_script = !script_path.empty();
 
         if (ImGui::BeginPopupContextItem("##ctx")) {
             if (!doc.is_selected(id)) doc.select(id);
@@ -163,6 +184,22 @@ private:
             if (ImGui::MenuItem("Group", "Ctrl+G", false, !is_root)) pending_ = {Pending::Kind::Group, id, 0, std::nullopt};
             if (ImGui::MenuItem("Move Up", nullptr, false, !is_root)) pending_ = {Pending::Kind::MoveUp, id, 0, std::nullopt};
             if (ImGui::MenuItem("Move Down", nullptr, false, !is_root)) pending_ = {Pending::Kind::MoveDown, id, 0, std::nullopt};
+            ImGui::Separator();
+            if (has_script) {
+                if (ImGui::MenuItem("Open Script")) {
+                    app.open_in_external_editor(app.env().resolve(script_path), script_line);
+                }
+                if (ImGui::MenuItem("Change Script...")) {
+                    app.request_attach_script(id);
+                }
+                if (ImGui::MenuItem("Detach Script")) {
+                    app.detach_script(id);
+                }
+            } else {
+                if (ImGui::MenuItem("Attach Script...")) {
+                    app.request_attach_script(id);
+                }
+            }
             ImGui::Separator();
             if (ImGui::MenuItem("Delete", "Del", false, !is_root)) pending_ = {Pending::Kind::Delete, id, 0, std::nullopt};
             ImGui::EndPopup();
@@ -175,6 +212,17 @@ private:
             ImGui::EndDragDropSource();
         }
         if (renaming_ != id && ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("CUERVO_ASSET")) {
+                const char* asset_path = static_cast<const char*>(p->Data);
+                if (std::string_view(asset_path).ends_with(".plm")) {
+                    std::string error;
+                    if (app.attach_script_file(id, app.env().resolve(asset_path), error)) {
+                        app.notify_ok(std::format("Bound '{}' to '{}'.", asset_path, n->name));
+                    } else {
+                        app.report_failure(error);
+                    }
+                }
+            }
             // Upper quarter: before this node; lower quarter (if it has no
             // open children): after it; else: into it as the last child.
             const float y = ImGui::GetMousePos().y;

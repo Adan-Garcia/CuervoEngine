@@ -222,11 +222,17 @@ void collect_set(bool check_acyclic, CollectResult& result) {
         }
         finalize(g);
     }
+    // Gathered before any is released: a release can free a live object
+    // that a later garbage object still points at (its count was already
+    // lowered by MarkGray), and reading its flags then would be a
+    // use-after-free.
+    std::vector<Value> untraced;
     for (Object* g : garbage) {
-        for_each_child(g, [](const Value& v) {
-            if (v.tag == Tag::Obj && (v.o->flags & objflag::Untraced) != 0) release(v);
+        for_each_child(g, [&](const Value& v) {
+            if (v.tag == Tag::Obj && (v.o->flags & objflag::Untraced) != 0) untraced.push_back(v);
         });
     }
+    for (const Value& v : untraced) release(v);
     for (Object* g : garbage) {
         delete_object(g);
         --g_heap.live;

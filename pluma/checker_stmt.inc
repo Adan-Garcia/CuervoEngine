@@ -234,7 +234,8 @@
 
     ir::Stmt* assign(AssignStmt* a) {
         if (auto* m = as<MemberExpr>(a->target); m != nullptr && !m->safe && as<SuperExpr>(m->object) == nullptr &&
-                                                  type_target(m->object) == nullptr) {
+                                                  type_target(m->object) == nullptr &&
+                                                  !package_member(m->object, m->member, false)) {
             ir::Expr* obj = expr(m->object);
             if (obj->type->is_vec()) return vec_component_assign(a, m, obj);
             bool saved = raw_field_;
@@ -433,7 +434,7 @@
             }
             x = member_value(id->name, id->span);
             if (x == nullptr) {
-                if (const Program::Symbol* s = global_symbol(id->name);
+                if (const Program::Symbol* s = global_symbol(id->name, id->span);
                     s != nullptr && s->kind == Program::SymKind::Global) {
                     x = global_ref(static_cast<GlobalVar*>(s->ptr), id->span);
                 } else {
@@ -451,6 +452,17 @@
             }
             if (const Program::Symbol* s = type_target(m->object)) {
                 return check_assignable_place(static_member(*s, m->member, m->span), m->span, m->member.name);
+            }
+            if (auto key = package_member(m->object, m->member)) {
+                if (key->empty()) return error_node(m->span);
+                const Program::Symbol* s = global_symbol(*key, m->span);
+                if (s != nullptr && s->kind == Program::SymKind::Global) {
+                    return check_assignable_place(global_ref(static_cast<GlobalVar*>(s->ptr), m->span), m->span,
+                                                  m->member.name);
+                }
+                ir::Expr* x = resolve_value(*key, m->span);
+                if (!x->type->is_error()) error(m->span, std::format("cannot assign to '{}'", *key));
+                return error_node(m->span);
             }
             return member_lvalue(m, expr(m->object));
         }
@@ -696,12 +708,13 @@
     // ------------------------------------------------------------ patterns
 
     ir::Pattern* class_pattern(Pattern* p, const Type* subject, Ident binding, std::vector<LocalVar*>& binds) {
+        p = fold_package_path(p);
         auto* path = as<PathPattern>(p);
         if (path == nullptr || path->has_args || path->path.size() != 1) {
             error(p->span, "a binding after 'is' needs a class name: 'x is Boss b'");
             return mkp<ir::WildcardPat>(p->span, subject);
         }
-        const Program::Symbol* s = global_symbol(path->path[0].name);
+        const Program::Symbol* s = global_symbol(path->path[0].name, path->path[0].span);
         if (s == nullptr || s->kind != Program::SymKind::Class) {
             error(p->span, std::format("'{}' is not a class", path->path[0].name));
             return mkp<ir::WildcardPat>(p->span, subject);
@@ -742,7 +755,34 @@
         return *v;
     }
 
+    // `tween.Mode.Fast` / `tween.Boss b`: the pattern with its package
+    // alias folded into a qualified first name (LANGUAGE.md 9.26).
+    Pattern* fold_package_path(Pattern* p) {
+        auto* path = as<PathPattern>(p);
+        if (path == nullptr || path->path.size() < 2) return p;
+        const Ident& alias = path->path[0];
+        const ImportBinding* b = import_binding(alias.name, alias.span);
+        if (b == nullptr || !b->item.empty() || has_local(alias.name)) return p;
+        std::string_view key = package_key(b->package, path->path[1]);
+        if (key.empty()) return mks_pattern<ErrorPattern>(p->span);
+        std::vector<Ident> rest{Ident{key, Span::cover(alias.span, path->path[1].span)}};
+        for (std::size_t i = 2; i < path->path.size(); ++i) rest.push_back(path->path[i]);
+        auto* folded = A.make<PathPattern>();
+        *folded = *path;
+        folded->path = A.list(rest);
+        return folded;
+    }
+
+    template <class N>
+    N* mks_pattern(Span span) {
+        N* n = A.make<N>();
+        n->kind = N::node_kind;
+        n->span = span;
+        return n;
+    }
+
     ir::Pattern* pattern(Pattern* p, const Type* subject, std::vector<LocalVar*>& binds, bool in_or) {
+        p = fold_package_path(p);
         const Type* st = T.non_null(subject);
         switch (p->kind) {
             case PatternKind::Error: return mkp<ir::WildcardPat>(p->span, subject);
@@ -807,7 +847,7 @@
             std::string_view name = path->path[0].name;
             // A constant or a class name; otherwise a new binding.
             if (!has_local(name)) {
-                if (const Program::Symbol* s = global_symbol(name)) {
+                if (const Program::Symbol* s = global_symbol(name, path->path[0].span)) {
                     if (s->kind == Program::SymKind::Class) {
                         return make_class_pat(static_cast<ClassInfo*>(s->ptr), subject, p->span, nullptr, binds);
                     }
@@ -835,7 +875,7 @@
         }
         // `Enum.Variant` / `Enum.Variant(p, ...)`
         if (path->path.size() == 2) {
-            const Program::Symbol* s = global_symbol(path->path[0].name);
+            const Program::Symbol* s = global_symbol(path->path[0].name, path->path[0].span);
             if (s != nullptr && s->kind == Program::SymKind::Enum) {
                 auto* e = static_cast<EnumInfo*>(s->ptr);
                 if (!st->is_error() && st->en() != e) {

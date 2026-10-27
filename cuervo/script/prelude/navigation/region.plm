@@ -1,0 +1,795 @@
+// A 2D navigation region defining traversable space and pathfinding (milestone 9.5).
+class NavigationRegion2D extends Node2D {
+    // Navigation grid cell size in pixels.
+    @export var cell_size = vec2(32.0, 32.0)
+    // Minimum cell bounds for pathfinding search.
+    @export var bounds_min = ivec2 { x = -64, y = -64 }
+    // Maximum cell bounds for pathfinding search.
+    @export var bounds_max = ivec2 { x = 64, y = 64 }
+    // Whether 8-way diagonal movement is allowed.
+    @export var allow_diagonal = true
+    // Traversal cost for diagonal steps (standard: ~1.41421356).
+    @export var diagonal_cost = 1.41421356
+    // Default cardinal step cost.
+    @export var default_cost = 1.0
+    // Active pathfinding method (AStar, Dijkstra, or Greedy).
+    @export var method = PathMethod.AStar
+    // Active heuristic metric for A* and Greedy search.
+    @export var heuristic = PathHeuristic.Octile
+    // Weight multiplier for the heuristic (1.0 = standard, > 1.0 = weighted A*).
+    @export var heuristic_weight = 1.0
+    // Whether generated paths are automatically smoothed via line-of-sight pruning.
+    @export var enable_path_smoothing = false
+
+    // Set of non-walkable obstacle cell coordinates (packed keys).
+    var _obstacles = Set<int>()
+    // Custom movement costs per cell coordinate.
+    var _costs = Map<int, float>()
+
+    // Returns valid positive pixel dimensions of a navigation cell.
+    fn _effective_cell_size() -> vec2 {
+        var sx = cell_size.x > 0.0 ? cell_size.x : 32.0
+        var sy = cell_size.y > 0.0 ? cell_size.y : 32.0
+        return vec2(sx, sy)
+    }
+
+    // Marks a cell as walkable or obstacle.
+    fn set_cell_walkable(x: int, y: int, walkable: bool) {
+        var pk = tile_pack_coord(x, y)
+        if walkable {
+            _obstacles.remove(pk)
+        } else {
+            _obstacles.add(pk)
+        }
+    }
+
+    // Checks whether a grid cell is traversable.
+    fn is_cell_walkable(x: int, y: int) -> bool {
+        var min_x = min(bounds_min.x, bounds_max.x)
+        var max_x = max(bounds_min.x, bounds_max.x)
+        var min_y = min(bounds_min.y, bounds_max.y)
+        var max_y = max(bounds_min.y, bounds_max.y)
+        if x < min_x || x > max_x || y < min_y || y > max_y {
+            return false
+        }
+        return !_obstacles.contains(tile_pack_coord(x, y))
+    }
+
+    // Sets a custom traversal cost for a cell (clamped to > 0).
+    fn set_cell_cost(x: int, y: int, cost: float) {
+        _costs[tile_pack_coord(x, y)] = max(0.001, cost)
+    }
+
+    // Returns the traversal cost for a cell.
+    fn get_cell_cost(x: int, y: int) -> float {
+        var pk = tile_pack_coord(x, y)
+        if _costs.has(pk) {
+            return max(0.001, _costs[pk])
+        }
+        return max(0.001, default_cost)
+    }
+
+    // Bakes walkable and non-walkable cells from a TileMapLayer.
+    fn bake_from_tilemap(layer: TileMapLayer) {
+        _obstacles.clear()
+        _costs.clear()
+        var tx = layer.tile_size.x > 0.0001 ? layer.tile_size.x : 32.0
+        var ty = layer.tile_size.y > 0.0001 ? layer.tile_size.y : 32.0
+        cell_size = vec2(tx, ty)
+        var used = layer.get_used_rect()
+        if used.size.x > 0.0 && used.size.y > 0.0 {
+            bounds_min = ivec2.of(used.pos.x as int, used.pos.y as int)
+            bounds_max = ivec2.of((used.pos.x + used.size.x - 1.0) as int,
+                                  (used.pos.y + used.size.y - 1.0) as int)
+        }
+        for c in layer.cells {
+            if layer.tileset.find_tile(c.tile_id)? tile {
+                set_cell_walkable(c.x, c.y, tile.walkable)
+                if tile.nav_cost > 0.0 && tile.nav_cost != 1.0 {
+                    set_cell_cost(c.x, c.y, tile.nav_cost)
+                }
+            }
+        }
+    }
+
+    // Clears all marked obstacle cells, restoring full grid traversability.
+    fn clear_obstacles() {
+        _obstacles.clear()
+    }
+
+    // Clears all custom cell costs, restoring default movement costs.
+    fn clear_costs() {
+        _costs.clear()
+    }
+
+    // Sets custom movement cost for all cells in a grid coordinate rectangle.
+    fn set_cost_rect(min_coord: ivec2, max_coord: ivec2, cost: float) {
+        var x0 = min(min_coord.x, max_coord.x)
+        var x1 = max(min_coord.x, max_coord.x)
+        var y0 = min(min_coord.y, max_coord.y)
+        var y1 = max(min_coord.y, max_coord.y)
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                set_cell_cost(x, y, cost)
+            }
+        }
+    }
+
+    // Sets walkability for all cells in a grid coordinate rectangle.
+    fn set_walkable_rect(min_coord: ivec2, max_coord: ivec2, walkable: bool) {
+        var x0 = min(min_coord.x, max_coord.x)
+        var x1 = max(min_coord.x, max_coord.x)
+        var y0 = min(min_coord.y, max_coord.y)
+        var y1 = max(min_coord.y, max_coord.y)
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                set_cell_walkable(x, y, walkable)
+            }
+        }
+    }
+
+    // Expands all obstacle cells outward by `radius` cells to provide agent clearance.
+    fn inflate_obstacles(radius: int) {
+        if radius <= 0 {
+            return
+        }
+        var orig = List<int>()
+        for pk in _obstacles {
+            orig.push(pk)
+        }
+        for pk in orig {
+            var ox = tile_unpack_x(pk)
+            var oy = tile_unpack_y(pk)
+            for dy in -radius..=radius {
+                for dx in -radius..=radius {
+                    set_cell_walkable(ox + dx, oy + dy, false)
+                }
+            }
+        }
+    }
+
+    // Converts a grid cell coordinate to local pixel center.
+    fn map_to_local(coord: ivec2) -> vec2 {
+        var sz = _effective_cell_size()
+        return vec2((coord.x as float + 0.5) * sz.x, (coord.y as float + 0.5) * sz.y)
+    }
+
+    // Converts local pixel position to a grid cell coordinate.
+    fn local_to_map(pos: vec2) -> ivec2 {
+        var sz = _effective_cell_size()
+        return ivec2.of(floor(pos.x / sz.x) as int, floor(pos.y / sz.y) as int)
+    }
+
+    // Converts a grid cell coordinate to global world coordinates.
+    fn map_to_global(coord: ivec2) -> vec2 {
+        return to_global(map_to_local(coord))
+    }
+
+    // Converts global world coordinates to a grid cell coordinate.
+    fn global_to_map(pos: vec2) -> ivec2 {
+        return local_to_map(to_local(pos))
+    }
+
+    // Computes heuristic distance between two cells according to the specified metric.
+    fn calc_heuristic(ax: int, ay: int, bx: int, by: int, h: PathHeuristic) -> float {
+        var dx = abs(ax - bx) as float
+        var dy = abs(ay - by) as float
+        if h == PathHeuristic.Euclidean {
+            return sqrt(dx * dx + dy * dy)
+        }
+        if h == PathHeuristic.Manhattan {
+            return dx + dy
+        }
+        if h == PathHeuristic.Chebyshev {
+            return max(dx, dy)
+        }
+        // Octile
+        if allow_diagonal {
+            var f = min(dx, dy)
+            return (dx + dy) + (diagonal_cost - 2.0) * f
+        }
+        return dx + dy
+    }
+
+    // Default heuristic for region configuration.
+    fn _heuristic(ax: int, ay: int, bx: int, by: int) -> float {
+        return calc_heuristic(ax, ay, bx, by, heuristic)
+    }
+
+    // Finds the closest walkable neighbor to (tx, ty) within a search radius, preferring minimal Euclidean distance.
+    fn find_nearest_walkable(tx: int, ty: int, radius = 5) -> ivec2? {
+        if is_cell_walkable(tx, ty) {
+            return ivec2.of(tx, ty)
+        }
+        var best: ivec2? = null
+        var best_dist_sq = 999999999
+        for r in 1..=radius {
+            if r * r > best_dist_sq {
+                break
+            }
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if abs(dx) == r || abs(dy) == r {
+                        var dist_sq = dx * dx + dy * dy
+                        if dist_sq < best_dist_sq {
+                            var nx = tx + dx
+                            var ny = ty + dy
+                            if is_cell_walkable(nx, ny) {
+                                best = ivec2.of(nx, ny)
+                                best_dist_sq = dist_sq
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return best
+    }
+
+    // Checks if a continuous straight line segment between two world positions is free of obstacles (supercover DDA).
+    fn is_straight_walkable(from: vec2, to: vec2) -> bool {
+        var sz = _effective_cell_size()
+        var p0 = to_local(from)
+        var p1 = to_local(to)
+        var u0 = p0.x / sz.x
+        var v0 = p0.y / sz.y
+        var u1 = p1.x / sz.x
+        var v1 = p1.y / sz.y
+
+        var x = floor(u0) as int
+        var y = floor(v0) as int
+        var end_x = floor(u1) as int
+        var end_y = floor(v1) as int
+
+        if !is_cell_walkable(x, y) || !is_cell_walkable(end_x, end_y) {
+            return false
+        }
+        if x == end_x && y == end_y {
+            return true
+        }
+        if !allow_diagonal && x != end_x && y != end_y {
+            return false
+        }
+
+        var du = u1 - u0
+        var dv = v1 - v0
+        var step_x = du > 0.0 ? 1 : (du < 0.0 ? -1 : 0)
+        var step_y = dv > 0.0 ? 1 : (dv < 0.0 ? -1 : 0)
+
+        var t_delta_x = step_x != 0 ? (1.0 / abs(du)) : 1.0e30
+        var t_delta_y = step_y != 0 ? (1.0 / abs(dv)) : 1.0e30
+
+        var t_max_x = 1.0e30
+        if step_x > 0 {
+            t_max_x = ((x as float + 1.0) - u0) * t_delta_x
+        } else if step_x < 0 {
+            t_max_x = (u0 - (x as float)) * t_delta_x
+        }
+
+        var t_max_y = 1.0e30
+        if step_y > 0 {
+            t_max_y = ((y as float + 1.0) - v0) * t_delta_y
+        } else if step_y < 0 {
+            t_max_y = (v0 - (y as float)) * t_delta_y
+        }
+
+        var max_steps = abs(end_x - x) + abs(end_y - y) + 2
+        var steps = 0
+
+        while (x != end_x || y != end_y) && steps < max_steps {
+            steps += 1
+            if abs(t_max_x - t_max_y) < 1.0e-5 {
+                if !is_cell_walkable(x + step_x, y) || !is_cell_walkable(x, y + step_y) {
+                    return false
+                }
+                x += step_x
+                y += step_y
+                t_max_x += t_delta_x
+                t_max_y += t_delta_y
+            } else if t_max_x < t_max_y {
+                x += step_x
+                t_max_x += t_delta_x
+            } else {
+                y += step_y
+                t_max_y += t_delta_y
+            }
+
+            if !is_cell_walkable(x, y) {
+                return false
+            }
+        }
+        return x == end_x && y == end_y
+    }
+
+    // Smooths a path by removing redundant waypoints with clear line of sight.
+    fn smooth_path(path: List<vec2>) -> List<vec2> {
+        if path.len() <= 2 {
+            return path
+        }
+        var res = List<vec2>()
+        res.push(path[0])
+        var cur_idx = 0
+        while cur_idx < path.len() - 1 {
+            var next_idx = cur_idx + 1
+            var best_idx = next_idx
+            var check_idx = path.len() - 1
+            while check_idx > next_idx {
+                if is_straight_walkable(path[cur_idx], path[check_idx]) {
+                    best_idx = check_idx
+                    break
+                }
+                check_idx -= 1
+            }
+            res.push(path[best_idx])
+            cur_idx = best_idx
+        }
+        return res
+    }
+
+    // Simplifies a waypoint path by pruning redundant collinear waypoints.
+    fn simplify_path(path: List<vec2>) -> List<vec2> {
+        if path.len() <= 2 {
+            return path
+        }
+        var res = List<vec2>()
+        res.push(path[0])
+        for i in 1..(path.len() - 1) {
+            var prev = res[res.len() - 1]
+            var curr = path[i]
+            var next = path[i + 1]
+            var d1 = curr - prev
+            var d2 = next - curr
+            var cross = abs(d1.x * d2.y - d1.y * d2.x)
+            if cross > 0.001 {
+                res.push(curr)
+            }
+        }
+        res.push(path[path.len() - 1])
+        return res
+    }
+
+    // Computes all grid cells reachable from `origin` within `max_cost`.
+    fn get_reachable_cells(origin: vec2, max_cost: float) -> List<ivec2> {
+        var c_start = global_to_map(origin)
+        if !is_cell_walkable(c_start.x, c_start.y) {
+            return List<ivec2>()
+        }
+        var reachable = List<ivec2>()
+        var cost_map = Map<int, float>()
+        var start_pk = tile_pack_coord(c_start.x, c_start.y)
+        cost_map[start_pk] = 0.0
+
+        var open_set = PriorityQueue<_NavNode>((a, b) => _nav_node_less(a, b))
+        open_set.push(_NavNode {
+            x = c_start.x,
+            y = c_start.y,
+            g = 0.0,
+            f = 0.0,
+            id = c_start.y * 65536 + c_start.x,
+        })
+
+        while !open_set.is_empty() {
+            var curr = open_set.pop()
+            var curr_pk = tile_pack_coord(curr.x, curr.y)
+            if curr.g > cost_map[curr_pk] {
+                continue
+            }
+            reachable.push(ivec2.of(curr.x, curr.y))
+
+            var card_x = [0, 1, 0, -1]
+            var card_y = [-1, 0, 1, 0]
+            for i in 0..4 {
+                var nx = curr.x + card_x[i]
+                var ny = curr.y + card_y[i]
+                if !is_cell_walkable(nx, ny) { continue }
+                var step_cost = default_cost * get_cell_cost(nx, ny)
+                var new_cost = curr.g + step_cost
+                if new_cost <= max_cost {
+                    var npk = tile_pack_coord(nx, ny)
+                    if !cost_map.has(npk) || new_cost < cost_map[npk] {
+                        cost_map[npk] = new_cost
+                        open_set.push(_NavNode {
+                            x = nx,
+                            y = ny,
+                            g = new_cost,
+                            f = new_cost,
+                            id = ny * 65536 + nx,
+                        })
+                    }
+                }
+            }
+            if allow_diagonal {
+                var diag_x = [1, 1, -1, -1]
+                var diag_y = [-1, 1, 1, -1]
+                for i in 0..4 {
+                    var nx = curr.x + diag_x[i]
+                    var ny = curr.y + diag_y[i]
+                    if !is_cell_walkable(nx, ny) { continue }
+                    if !is_cell_walkable(curr.x + diag_x[i], curr.y) ||
+                       !is_cell_walkable(curr.x, curr.y + diag_y[i]) {
+                        continue
+                    }
+                    var step_cost = diagonal_cost * get_cell_cost(nx, ny)
+                    var new_cost = curr.g + step_cost
+                    if new_cost <= max_cost {
+                        var npk = tile_pack_coord(nx, ny)
+                        if !cost_map.has(npk) || new_cost < cost_map[npk] {
+                            cost_map[npk] = new_cost
+                            open_set.push(_NavNode {
+                                x = nx,
+                                y = ny,
+                                g = new_cost,
+                                f = new_cost,
+                                id = ny * 65536 + nx,
+                            })
+                        }
+                    }
+                }
+            }
+        }
+        return reachable
+    }
+
+    // Computes the shortest path to the closest reachable destination among candidates.
+    fn find_path_to_nearest(from: vec2, targets: List<vec2>) -> List<vec2> {
+        var best_path = List<vec2>()
+        var best_dist = -1.0
+        for target in targets {
+            var p = get_path(from, target)
+            if !p.is_empty() {
+                var total_dist = (p[0] - from).length()
+                for i in 1..p.len() {
+                    total_dist += (p[i] - p[i - 1]).length()
+                }
+                if best_dist < 0.0 || total_dist < best_dist {
+                    best_dist = total_dist
+                    best_path = p
+                }
+            }
+        }
+        return best_path
+    }
+
+    // Computes a deterministic path from `start_pos` to `end_pos` in global coordinates using active settings.
+    fn get_path(start_pos: vec2, end_pos: vec2) -> List<vec2> {
+        return get_path_with(start_pos, end_pos, method, heuristic, enable_path_smoothing)
+    }
+
+    // Computes a deterministic path specifying search method, heuristic metric, and smoothing.
+    fn get_path_with(start_pos: vec2, end_pos: vec2,
+                     path_method: PathMethod,
+                     path_heuristic: PathHeuristic,
+                     smooth: bool) -> List<vec2> {
+        var start_cell = global_to_map(start_pos)
+        var target_cell = global_to_map(end_pos)
+
+        // Adjust start if blocked
+        var start_adjusted = false
+        if !is_cell_walkable(start_cell.x, start_cell.y) {
+            if find_nearest_walkable(start_cell.x, start_cell.y)? adj_start {
+                start_cell = adj_start
+                start_adjusted = true
+            } else {
+                return List<vec2>()
+            }
+        }
+
+        // Adjust target if blocked
+        var target_adjusted = false
+        if !is_cell_walkable(target_cell.x, target_cell.y) {
+            if find_nearest_walkable(target_cell.x, target_cell.y)? adj {
+                target_cell = adj
+                target_adjusted = true
+            } else {
+                return List<vec2>()
+            }
+        }
+
+        if start_cell.x == target_cell.x && start_cell.y == target_cell.y {
+            var p = List<vec2>()
+            if target_adjusted {
+                p.push(map_to_global(target_cell))
+            } else {
+                p.push(end_pos)
+            }
+            return p
+        }
+
+        var open_set = PriorityQueue<_NavNode>((a, b) => _nav_node_less(a, b))
+        var g_score = Map<int, float>()
+        var came_from = Map<int, int>()
+        var closed = Set<int>()
+
+        var start_pk = tile_pack_coord(start_cell.x, start_cell.y)
+        var target_pk = tile_pack_coord(target_cell.x, target_cell.y)
+
+        g_score[start_pk] = 0.0
+        var h0 = 0.0
+        if path_method != PathMethod.Dijkstra {
+            h0 = heuristic_weight * calc_heuristic(start_cell.x, start_cell.y, target_cell.x, target_cell.y, path_heuristic)
+        }
+        var f0 = path_method == PathMethod.Greedy ? h0 : h0
+        open_set.push(_NavNode {
+            x = start_cell.x,
+            y = start_cell.y,
+            g = 0.0,
+            f = f0,
+            id = start_cell.y * 65536 + start_cell.x,
+        })
+
+        var found = false
+
+        while !open_set.is_empty() {
+            var current = open_set.pop()
+            var current_pk = tile_pack_coord(current.x, current.y)
+
+            if current.x == target_cell.x && current.y == target_cell.y {
+                found = true
+                break
+            }
+
+            if closed.contains(current_pk) {
+                continue
+            }
+            closed.add(current_pk)
+
+            // 4 Cardinal neighbors
+            var card_x = [0, 1, 0, -1]
+            var card_y = [-1, 0, 1, 0]
+
+            for i in 0..4 {
+                var nx = current.x + card_x[i]
+                var ny = current.y + card_y[i]
+                if !is_cell_walkable(nx, ny) {
+                    continue
+                }
+                var npk = tile_pack_coord(nx, ny)
+                if closed.contains(npk) {
+                    continue
+                }
+
+                var step_cost = default_cost * get_cell_cost(nx, ny)
+                var tentative_g = current.g + step_cost
+
+                if !g_score.has(npk) || tentative_g < g_score[npk] {
+                    came_from[npk] = current_pk
+                    g_score[npk] = tentative_g
+                    var h_val = 0.0
+                    if path_method != PathMethod.Dijkstra {
+                        h_val = heuristic_weight * calc_heuristic(nx, ny, target_cell.x, target_cell.y, path_heuristic)
+                    }
+                    var f = path_method == PathMethod.Greedy ? h_val : (tentative_g + h_val)
+                    open_set.push(_NavNode {
+                        x = nx,
+                        y = ny,
+                        g = tentative_g,
+                        f = f,
+                        id = ny * 65536 + nx,
+                    })
+                }
+            }
+
+            // 4 Diagonal neighbors (if allowed)
+            if allow_diagonal {
+                var diag_x = [1, 1, -1, -1]
+                var diag_y = [-1, 1, 1, -1]
+
+                for i in 0..4 {
+                    var nx = current.x + diag_x[i]
+                    var ny = current.y + diag_y[i]
+                    if !is_cell_walkable(nx, ny) {
+                        continue
+                    }
+                    // Corner-cutting prevention: both adjacent cardinals must be walkable
+                    if !is_cell_walkable(current.x + diag_x[i], current.y) ||
+                       !is_cell_walkable(current.x, current.y + diag_y[i]) {
+                        continue
+                    }
+
+                    var npk = tile_pack_coord(nx, ny)
+                    if closed.contains(npk) {
+                        continue
+                    }
+
+                    var step_cost = diagonal_cost * get_cell_cost(nx, ny)
+                    var tentative_g = current.g + step_cost
+
+                    if !g_score.has(npk) || tentative_g < g_score[npk] {
+                        came_from[npk] = current_pk
+                        g_score[npk] = tentative_g
+                        var h_val = 0.0
+                        if path_method != PathMethod.Dijkstra {
+                            h_val = heuristic_weight * calc_heuristic(nx, ny, target_cell.x, target_cell.y, path_heuristic)
+                        }
+                        var f = path_method == PathMethod.Greedy ? h_val : (tentative_g + h_val)
+                        open_set.push(_NavNode {
+                            x = nx,
+                            y = ny,
+                            g = tentative_g,
+                            f = f,
+                            id = ny * 65536 + nx,
+                        })
+                    }
+                }
+            }
+        }
+
+        if !found {
+            return List<vec2>()
+        }
+
+        // Reconstruct path
+        var raw_cells = List<ivec2>()
+        var curr_key = target_pk
+        while curr_key != start_pk {
+            raw_cells.push(ivec2.of(tile_unpack_x(curr_key), tile_unpack_y(curr_key)))
+            if !came_from.has(curr_key) {
+                break
+            }
+            curr_key = came_from[curr_key]
+        }
+
+        // Build waypoint path from start to end
+        var path = List<vec2>()
+        if start_adjusted {
+            path.push(map_to_global(start_cell))
+        }
+        var n = raw_cells.len()
+        for i in 0..n {
+            var c = raw_cells[n - 1 - i]
+            path.push(map_to_global(c))
+        }
+        if path.is_empty() {
+            if !target_adjusted {
+                path.push(end_pos)
+            } else {
+                path.push(map_to_global(target_cell))
+            }
+        } else if !target_adjusted {
+            // Snap exact destination endpoint only when target was originally walkable
+            path[path.len() - 1] = end_pos
+        }
+
+        if smooth {
+            if !start_adjusted {
+                var full_path = List<vec2>()
+                full_path.push(start_pos)
+                for wp in path {
+                    full_path.push(wp)
+                }
+                var smoothed = smooth_path(full_path)
+                path.clear()
+                for i in 1..smoothed.len() {
+                    path.push(smoothed[i])
+                }
+            } else {
+                path = smooth_path(path)
+            }
+        }
+
+        return path
+    }
+
+    // Computes a Dijkstra inverse distance map (flow field) from a list of target world positions.
+    fn compute_dijkstra_map(targets: List<vec2>, max_cost: float = -1.0) -> DijkstraMap {
+        var dmap = DijkstraMap()
+        dmap.region = self
+        dmap.world_targets = targets
+        if targets.is_empty() {
+            return dmap
+        }
+
+        var open_set = PriorityQueue<_NavNode>((a, b) => _nav_node_less(a, b))
+
+        for target in targets {
+            var tc = global_to_map(target)
+            if !is_cell_walkable(tc.x, tc.y) {
+                if find_nearest_walkable(tc.x, tc.y)? adj {
+                    tc = adj
+                } else {
+                    continue
+                }
+            }
+            var tpk = tile_pack_coord(tc.x, tc.y)
+            if !dmap.costs.has(tpk) {
+                dmap.costs[tpk] = 0.0
+                dmap.targets.push(tc)
+                open_set.push(_NavNode {
+                    x = tc.x,
+                    y = tc.y,
+                    g = 0.0,
+                    f = 0.0,
+                    id = tc.y * 65536 + tc.x,
+                })
+            }
+        }
+
+        if open_set.is_empty() {
+            return dmap
+        }
+
+        var max_seen_cost = 0.0
+
+        while !open_set.is_empty() {
+            var curr = open_set.pop()
+            var curr_pk = tile_pack_coord(curr.x, curr.y)
+            if curr.g > dmap.costs[curr_pk] {
+                continue
+            }
+            if curr.g > max_seen_cost {
+                max_seen_cost = curr.g
+            }
+
+            // 4 Cardinal neighbors
+            var card_x = [0, 1, 0, -1]
+            var card_y = [-1, 0, 1, 0]
+            for i in 0..4 {
+                var nx = curr.x + card_x[i]
+                var ny = curr.y + card_y[i]
+                if !is_cell_walkable(nx, ny) {
+                    continue
+                }
+                var step_cost = default_cost * get_cell_cost(nx, ny)
+                var new_cost = curr.g + step_cost
+                if max_cost >= 0.0 && new_cost > max_cost {
+                    continue
+                }
+                var npk = tile_pack_coord(nx, ny)
+                if !dmap.costs.has(npk) || new_cost < dmap.costs[npk] {
+                    dmap.costs[npk] = new_cost
+                    open_set.push(_NavNode {
+                        x = nx,
+                        y = ny,
+                        g = new_cost,
+                        f = new_cost,
+                        id = ny * 65536 + nx,
+                    })
+                }
+            }
+
+            // 4 Diagonal neighbors
+            if allow_diagonal {
+                var diag_x = [1, 1, -1, -1]
+                var diag_y = [-1, 1, 1, -1]
+                for i in 0..4 {
+                    var nx = curr.x + diag_x[i]
+                    var ny = curr.y + diag_y[i]
+                    if !is_cell_walkable(nx, ny) {
+                        continue
+                    }
+                    if !is_cell_walkable(curr.x + diag_x[i], curr.y) ||
+                       !is_cell_walkable(curr.x, curr.y + diag_y[i]) {
+                        continue
+                    }
+                    var step_cost = diagonal_cost * get_cell_cost(nx, ny)
+                    var new_cost = curr.g + step_cost
+                    if max_cost >= 0.0 && new_cost > max_cost {
+                        continue
+                    }
+                    var npk = tile_pack_coord(nx, ny)
+                    if !dmap.costs.has(npk) || new_cost < dmap.costs[npk] {
+                        dmap.costs[npk] = new_cost
+                        open_set.push(_NavNode {
+                            x = nx,
+                            y = ny,
+                            g = new_cost,
+                            f = new_cost,
+                            id = ny * 65536 + nx,
+                        })
+                    }
+                }
+            }
+        }
+
+        dmap.max_cost = max_seen_cost
+        return dmap
+    }
+
+    // Computes a Dijkstra inverse distance map (flow field) toward a single target world position.
+    fn compute_dijkstra_map_to(target: vec2, max_cost: float = -1.0) -> DijkstraMap {
+        var targets = List<vec2>()
+        targets.push(target)
+        return compute_dijkstra_map(targets, max_cost)
+    }
+}
+

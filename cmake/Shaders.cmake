@@ -45,14 +45,36 @@ function(cuervo_add_shaders target)
         set(symbol "${name}_${stage}")
         set(spv "${out_dir}/${symbol}.spv")
         set(header "${out_dir}/${symbol}.hpp")
+        # WebGPU (milestone 10.1): the same source compiled with CUERVO_WEBGPU
+        # defined (WGSL has no point size, so shaders skip gl_PointSize), its
+        # combined samplers split and renumbered, then naga writes the WGSL.
+        set(wgsl_commands)
+        set(wgsl_byproducts)
+        set(wgsl_arg)
+        if(CUERVO_WEBGPU)
+            set(wgpu_spv "${out_dir}/${symbol}.webgpu.spv")
+            set(wgsl "${out_dir}/${symbol}.wgsl")
+            set(wgsl_commands
+                COMMAND "${GLSLANG_VALIDATOR}" -V --target-env vulkan1.0 --quiet -DCUERVO_WEBGPU
+                    -o "${wgpu_spv}" "${abs}"
+                COMMAND "${CUERVO_SPIRV_OPT}" --split-combined-image-sampler -o "${wgpu_spv}" "${wgpu_spv}"
+                COMMAND "${_cuervo_shader_tool}" --webgpu-bindings "${wgpu_spv}" "${wgpu_spv}"
+                # The sources put NDC y = +1 at the top (GL convention, rhi.hpp),
+                # which is WebGPU's own: naga must not flip y as it would for
+                # Vulkan-convention SPIR-V.
+                COMMAND "${CUERVO_NAGA}" --keep-coordinate-space "${wgpu_spv}" "${wgsl}")
+            set(wgsl_byproducts "${wgpu_spv}" "${wgsl}")
+            set(wgsl_arg "${wgsl}")
+        endif()
         add_custom_command(
             OUTPUT "${header}"
-            BYPRODUCTS "${spv}"
+            BYPRODUCTS "${spv}" ${wgsl_byproducts}
             # SPIR-V 1.0 (vulkan1.0 env): valid on our Vulkan 1.3 device, and it keeps
             # glslang from emitting 1.6-only ops (e.g. discard -> demote) that
             # SPIRV-Cross can't express in GLSL 330 / ES 300.
             COMMAND "${GLSLANG_VALIDATOR}" -V --target-env vulkan1.0 --quiet -o "${spv}" "${abs}"
-            COMMAND "${_cuervo_shader_tool}" "${spv}" "${symbol}" "${header}"
+            ${wgsl_commands}
+            COMMAND "${_cuervo_shader_tool}" "${spv}" "${symbol}" "${header}" ${wgsl_arg}
             DEPENDS "${abs}" ${_cuervo_shader_tool_dep}
             COMMENT "Compiling shader ${name}.${stage}"
             VERBATIM)

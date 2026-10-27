@@ -1,0 +1,574 @@
+// Engine API: Multi-page and popup UI controls (Milestone 9.3).
+//
+// Multi-page navigation and overlays: TabBar, TabContainer, Popup, PopupMenu,
+// OptionButton, and ConfirmDialog.
+
+
+// A row of tab titles; the current one is highlighted. ui_left/right (while
+// the bar has the focus) and the pointer switch tabs. TabContainer wraps a
+// TabBar around pages.
+class TabBar extends Control {
+    // The titles.
+    @export var tabs = List<str>()
+    // The selected tab.
+    @export var current = 0
+    // Every tab is at least this wide (also makes tab positions independent
+    // of the font, e.g. for replays checked on a host without one).
+    @export var min_tab_width = 0.0
+    // `current` changed; `index` is the new tab.
+    signal tab_changed(index: int)
+
+    // Focusable unless disabled or empty.
+    fn can_focus() -> bool {
+        return !disabled && tabs.len() > 0
+    }
+    // Width of tab `i`: its title plus padding, at least `min_tab_width`.
+    fn tab_width(i: int) -> float {
+        var t = get_theme()
+        return max(UI.measure(tabs[i], t.font_size).x + t.padding.x * 2.0, min_tab_width)
+    }
+    // Left edge of tab `i` relative to the bar.
+    fn tab_x(i: int) -> float {
+        var x = 0.0
+        for k in 0..i {
+            x += tab_width(k) + 4.0
+        }
+        return x
+    }
+    // Selects tab `i` (clamped), emitting `tab_changed` when it changed.
+    fn set_current(i: int) {
+        if tabs.len() == 0 {
+            return
+        }
+        var x = clamp(i, 0, tabs.len() - 1)
+        if x != current {
+            current = x
+            emit tab_changed(x)
+        }
+    }
+    // The tab under x (a screen coordinate), or -1.
+    fn tab_at(x: float) -> int {
+        for i in 0..tabs.len() {
+            var left = position.x + tab_x(i)
+            if x >= left && x < left + tab_width(i) {
+                return i
+            }
+        }
+        return -1
+    }
+    // Left/right select the previous/next tab; false at the ends or for other directions.
+    fn nudge(dir: vec2) -> bool {
+        if dir.x == 0.0 || disabled {
+            return false
+        }
+        var to = current + (dir.x < 0.0 ? -1 : 1)
+        if to < 0 || to >= tabs.len() {
+            return false
+        }
+        set_current(to)
+        return true
+    }
+    // Selects the tab under the pointer.
+    fn pointer_down(p: vec2) {
+        var i = tab_at(p.x)
+        if i >= 0 {
+            set_current(i)
+        }
+    }
+    // Does nothing: tabs change by nudge or pointer.
+    fn activate() {}
+    // Total width of the tabs and one text line plus padding in height.
+    fn content_min_size() -> vec2 {
+        var t = get_theme()
+        var w = 0.0
+        for i in 0..tabs.len() {
+            w += tab_width(i) + 4.0
+        }
+        return vec2(w, t.font_size + t.padding.y * 2.0)
+    }
+    // Draws the tabs, marking the current one.
+    fn draw(g: Canvas) {
+        var t = get_theme()
+        var focus = has_focus()
+        for i in 0..tabs.len() {
+            var x = position.x + tab_x(i)
+            var w = tab_width(i)
+            var sel = i == current
+            g.rect(vec2(x, position.y), vec2(w, size.y), fill = sel ? t.button_focus : t.button,
+                   stroke = sel && focus ? t.accent : t.panel_border, width = t.border, radius = t.radius)
+            if sel {
+                g.rect(vec2(x + 6.0, position.y + size.y - 4.0), vec2(w - 12.0, 3.0), fill = t.accent, radius = 1.5)
+            }
+            g.text(vec2(x + w * 0.5, position.y + size.y * 0.5), tabs[i], size = t.font_size,
+                   color = sel ? t.accent : t.text_dim, align = #center, baseline = #middle)
+        }
+    }
+}
+
+// A TabBar above pages: the Control children (except its bar) are the pages,
+// and only the current one is shown. Titles come from `titles` (by index) or
+// else the page's `name`. ui_tab_prev / ui_tab_next (shoulder buttons,
+// optional actions) switch tabs while the focus is anywhere in the same UI root.
+class TabContainer extends Container {
+    // The selected page.
+    @export var current = 0
+    // Titles by page index; an empty or missing title uses the page's name.
+    @export var titles = List<str>()
+    // The bar's `min_tab_width`.
+    @export var tab_min_width = 0.0
+    // `current` changed; `index` is the new page.
+    signal tab_changed(index: int)
+
+    // The tab bar, created in ready().
+    var bar: TabBar
+
+    // Creates the TabBar and syncs the pages.
+    fn ready() {
+        bar = TabBar()
+        bar.transient = true
+        bar.name = "tab_bar"
+        add_child(bar)
+        bar.tab_changed.connect(fn(i: int) {
+            set_current(i)
+        })
+        sync_pages()
+    }
+    // The pages: laid-out Controls other than the bar. Hidden pages count.
+    fn pages() -> List<Control> {
+        var out = List<Control>()
+        for c in children {
+            if c is Control k && k != bar && !k.floating() {
+                out.push(k)
+            }
+        }
+        return out
+    }
+    // Brings the bar's titles and the pages' visibility up to date. Without a bar (the editor's preview
+    // builds a scene without running ready()) the pages still show one at a time.
+    fn sync_pages() {
+        var list = pages()
+        current = list.len() == 0 ? 0 : clamp(current, 0, list.len() - 1)
+        if bar != null {
+            var names = List<str>()
+            for i in 0..list.len() {
+                names.push(i < titles.len() && titles[i] != "" ? titles[i] : list[i].name)
+            }
+            if names != bar.tabs {
+                bar.tabs = names
+            }
+            bar.min_tab_width = tab_min_width
+            bar.current = current
+        }
+        for i in 0..list.len() {
+            list[i].visible = i == current
+        }
+    }
+    // Shows page `i` (clamped), emitting `tab_changed` when it changed.
+    fn set_current(i: int) {
+        var list = pages()
+        if list.len() == 0 {
+            return
+        }
+        var x = clamp(i, 0, list.len() - 1)
+        if x != current {
+            current = x
+            sync_pages()
+            emit tab_changed(x)
+        }
+    }
+    // Switches pages with ui_tab_prev / ui_tab_next while the focus is in the same UI root.
+    fn update(dt: float) {
+        if UI.focused != null && UI.focused.root_control() == root_control() && UI.modal_allows(self) {
+            if Input.pressed(#ui_tab_prev) {
+                set_current(current - 1)
+            }
+            if Input.pressed(#ui_tab_next) {
+                set_current(current + 1)
+            }
+        }
+    }
+    // The largest page (or bar width) wide; the bar plus the tallest page high.
+    fn content_min_size() -> vec2 {
+        var m = vec2(0.0, 0.0)
+        for k in pages() {
+            m = m.max(k.combined_min_size())
+        }
+        var b = bar == null ? vec2(0.0, 0.0) : bar.combined_min_size()
+        return vec2(max(m.x, b.x), m.y + b.y + get_theme().separation * 0.5)
+    }
+    // Places the bar on top and the current page below it.
+    fn layout_children() {
+        sync_pages()
+        var top = 0.0
+        if bar != null {
+            var b = bar.combined_min_size()
+            bar.set_rect(position, vec2(size.x, b.y))
+            top = b.y + get_theme().separation * 0.5
+        }
+        for k in pages() {
+            if k.visible {
+                k.set_rect(position + vec2(0.0, top), vec2(size.x, max(size.y - top, 0.0)))
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- popups
+
+// A panel that floats above the UI as a root of its own. Open it with
+// popup_centered() or popup_at(); close() hides it. While open and `modal`,
+// it traps the focus and input (UI.modal) and a dimmed backdrop covers the
+// rest; the previous focus comes back on close. ui_cancel closes it
+// (`cancel_closes`), and with `light_dismiss` so does a click outside (menus).
+// It may be a child of any control: its parent doesn't lay it out.
+class Popup extends Panel {
+    // Takes all input while open and dims what is behind.
+    @export var modal = true
+    // A click outside closes it.
+    @export var light_dismiss = false
+    // ui_cancel closes it.
+    @export var cancel_closes = true
+    // Open: visible. The control that takes the focus on opening (null: the first focusable).
+    var initial_focus: Control
+    // Opened / closed (by close(), ui_cancel or a click outside).
+    signal opened
+    // Emitted when it closes.
+    signal closed
+
+    var _opened = false
+    var _center = true
+    var _at = vec2(0.0, 0.0)
+    var _min_width = 0.0
+    var _prev_focus: Control
+    var _prev_modal: Node
+
+    // Always floating: its parent doesn't lay it out.
+    fn floating() -> bool {
+        return true
+    }
+    // A popup is a UI root of its own.
+    fn is_ui_root() -> bool {
+        return true
+    }
+    // Whether it is currently open.
+    fn is_open() -> bool {
+        return _opened && visible
+    }
+    // Starts hidden unless already opened.
+    fn ready() {
+        if !_opened {
+            visible = false
+        }
+    }
+    // Opens it in the middle of the screen.
+    fn popup_centered() {
+        open(true, vec2(0.0, 0.0), 0.0)
+    }
+    // Opens it with its top-left corner at `pos` (moved to stay on screen),
+    // at least `min_width` wide.
+    fn popup_at(pos: vec2, min_width = 0.0) {
+        open(false, pos, min_width)
+    }
+    // Shows it (centered or at `pos`, at least `min_width` wide), takes the modal state and moves the focus in; used by popup_centered() and popup_at().
+    fn open(centered: bool, pos: vec2, min_width: float) {
+        if is_open() {
+            return
+        }
+        _opened = true
+        visible = true
+        _center = centered
+        _at = pos
+        _min_width = min_width
+        _prev_focus = UI.focused
+        if modal {
+            _prev_modal = UI.modal
+            UI.modal = self
+        }
+        // The press that opened it must not reach it.
+        UI.consume_input()
+        var list = List<Control>()
+        collect_focusable(list)
+        if initial_focus != null && initial_focus.is_alive() && initial_focus.can_focus() {
+            UI.focused = initial_focus
+        } else if list.len() > 0 {
+            UI.focused = list[0]
+        }
+        emit opened
+    }
+    // Hides it and gives the focus back.
+    fn close() {
+        if !is_open() {
+            return
+        }
+        visible = false
+        _opened = false
+        if UI.modal == self {
+            UI.modal = _prev_modal
+        }
+        _prev_modal = null
+        if UI.focused != null && root_control() == self {
+            UI.focused = null
+        }
+        if _prev_focus != null && _prev_focus.is_alive() && _prev_focus.can_focus() && _prev_focus.is_visible_in_tree() {
+            UI.focused = _prev_focus
+        }
+        _prev_focus = null
+        emit closed
+    }
+    // Called on ui_cancel: closes it if `cancel_closes`, then emits `cancelled`.
+    fn emit_cancelled() {
+        if cancel_closes {
+            close()
+        }
+        emit cancelled
+    }
+    // Handles clicks outside it: a modal or light-dismiss popup swallows them, and light_dismiss also closes it.
+    fn on_root_input() {
+        if UI.click_pending && !contains(UI.pointer_pos) && (modal || light_dismiss) {
+            UI.click_pending = false
+            if light_dismiss {
+                close()
+            }
+        }
+    }
+    // Placed where it was opened, as small as its content allows, on screen.
+    fn layout_in(parent_pos: vec2, parent_size: vec2) {
+        var sz = combined_min_size().max(vec2(_min_width, 0.0)).min(Screen.size)
+        var pos = _center ? (Screen.size - sz) * 0.5 : _at
+        pos = pos.min(Screen.size - sz).max(vec2(0.0, 0.0))
+        set_rect(pos, sz)
+    }
+    // Queues itself for the overlay layer instead of drawing in place when open.
+    fn draw_tree(g: Canvas) {
+        if visible && _opened {
+            Scene.overlays.push(self)
+        }
+    }
+    // Draws the dimmed backdrop (when modal), the popup and its children above everything else.
+    fn draw_overlay(g: Canvas) {
+        if !visible {
+            return
+        }
+        if modal {
+            g.rect(vec2(0.0, 0.0), Screen.size, fill = Color.hex("05071080"))
+        }
+        draw(g)
+        for c in children {
+            c.draw_tree(g)
+        }
+    }
+}
+
+// A popup listing `items` as buttons; choosing one emits `item_chosen` and
+// closes it. It is what OptionButton opens, and works as a context menu.
+class PopupMenu extends Popup {
+    // The entries.
+    @export var items = List<str>()
+    // The entry that takes the focus when it opens (-1: the first).
+    @export var selected = -1
+    // At least this size for every entry button (a fixed size keeps the menu
+    // independent of the font).
+    @export var item_min_size = vec2(0.0, 0.0)
+    // `index` was chosen.
+    signal item_chosen(index: int)
+
+    var _box: VBox
+    var _buttons = List<Button>()
+
+    // Less padding than a dialog panel.
+    fn inset() -> vec4 {
+        return margins + vec4(10.0)
+    }
+
+    // Sets light dismissal and creates the box that holds the entry buttons.
+    fn ready() {
+        super.ready()
+        light_dismiss = true
+        _box = VBox()
+        _box.transient = true
+        _box.separation = 4.0
+        add_child(_box)
+    }
+    // Open as a dropdown below `pos`.
+    fn popup_menu(pos: vec2, min_width = 0.0) {
+        rebuild()
+        popup_at(pos, min_width)
+        if selected >= 0 && selected < _buttons.len() {
+            UI.focused = _buttons[selected]
+        }
+    }
+    // Brings the entry buttons up to date with `items`: adds missing ones, sets text and size, hides extras.
+    fn rebuild() {
+        while _buttons.len() < items.len() {
+            var b = Button()
+            b.transient = true
+            var idx = _buttons.len()
+            b.pressed.connect(fn() {
+                choose(idx)
+            })
+            _box.add_child(b)
+            _buttons.push(b)
+        }
+        for i in 0..items.len() {
+            _buttons[i].text = items[i]
+            _buttons[i].min_size = item_min_size
+            _buttons[i].visible = true
+        }
+        var used = items.len()
+        var total = _buttons.len()
+        for i in used..total {
+            _buttons[i].visible = false
+        }
+    }
+    // Closes the menu and emits `item_chosen`.
+    fn choose(index: int) {
+        close()
+        emit item_chosen(index)
+    }
+}
+
+// A button showing the selected entry of `items`; pressing it opens a
+// dropdown (PopupMenu) below it.
+class OptionButton extends Control {
+    // The entries.
+    @export var items = List<str>()
+    // The chosen entry, -1 for none.
+    @export var selected = 0
+    // At least this tall for every dropdown entry (0: the font's height).
+    @export var item_height = 0.0
+    // `selected` changed by the user or set_selected().
+    signal item_selected(index: int)
+
+    var _menu: PopupMenu
+
+    // Focusable unless disabled.
+    fn can_focus() -> bool {
+        return !disabled
+    }
+    // The text of the chosen entry ("" for none).
+    fn selected_text() -> str {
+        return selected >= 0 && selected < items.len() ? items[selected] : ""
+    }
+    // Selects entry `index` (clamped, -1 for none), emitting `item_selected` when it changed.
+    fn set_selected(index: int) {
+        var x = clamp(index, -1, items.len() - 1)
+        if x != selected {
+            selected = x
+            emit item_selected(x)
+        }
+    }
+    // Whether the dropdown is open.
+    fn is_open() -> bool {
+        return _menu != null && _menu.is_open()
+    }
+    // Opens the dropdown below the button with the current entries; does nothing when disabled or empty.
+    fn activate() {
+        if disabled || items.len() == 0 {
+            return
+        }
+        if _menu == null {
+            _menu = PopupMenu()
+            _menu.transient = true
+            add_child(_menu)
+            _menu.item_chosen.connect(fn(i: int) {
+                set_selected(i)
+            })
+        }
+        _menu.items = items
+        _menu.item_min_size = vec2(0.0, item_height)
+        _menu.selected = selected
+        _menu.popup_menu(vec2(position.x, position.y + size.y + 2.0), size.x)
+    }
+    // The widest entry plus padding and room for the arrow, one line tall.
+    fn content_min_size() -> vec2 {
+        var t = get_theme()
+        var w = 0.0
+        for s in items {
+            w = max(w, UI.measure(s, t.font_size).x)
+        }
+        return vec2(w, UI.measure("M", t.font_size).y) + t.padding * 2.0 + vec2(28.0, 0.0)
+    }
+    // Draws the button with the selected text and a dropdown arrow.
+    fn draw(g: Canvas) {
+        var t = get_theme()
+        var focus = has_focus() || is_open()
+        g.rect(position, size, fill = focus ? t.button_focus : t.button, stroke = focus ? t.accent : t.panel_border,
+               width = t.border, radius = t.radius)
+        var color = disabled ? t.text_disabled : (focus ? t.accent : t.text)
+        g.text(vec2(position.x + t.padding.x, position.y + size.y * 0.5), selected_text(), size = t.font_size,
+               color = color, baseline = #middle)
+        var c = vec2(position.x + size.x - t.padding.x - 4.0, position.y + size.y * 0.5)
+        g.line(c + vec2(-7.0, -3.0), c + vec2(0.0, 4.0), color = color, width = 2.5)
+        g.line(c + vec2(0.0, 4.0), c + vec2(7.0, -3.0), color = color, width = 2.5)
+    }
+}
+
+// A modal dialog with a title, a message and OK / Cancel buttons. Open it
+// with popup_centered(); `confirmed` fires for OK, `cancelled` for Cancel or
+// ui_cancel. The focus starts on Cancel (`focus_ok` puts it on OK).
+class ConfirmDialog extends Popup {
+    // Title line.
+    @export var title = "Confirm"
+    // Message text.
+    @export var message = ""
+    // Text of the OK button.
+    @export var ok_text = "OK"
+    // Text of the Cancel button.
+    @export var cancel_text = "Cancel"
+    // true: the focus starts on OK instead of Cancel.
+    @export var focus_ok = false
+    // OK was pressed.
+    signal confirmed
+
+    var _title: Label
+    var _message: Label
+    var _ok: Button
+    var _cancel: Button
+
+    // Builds the title, message and the two buttons.
+    fn ready() {
+        super.ready()
+        var box = VBox()
+        box.transient = true
+        box.separation = 16.0
+        _title = Label()
+        _title.style = #accent
+        _title.min_size = vec2(0.0, 36.0)
+        _message = Label()
+        _message.min_size = vec2(0.0, 32.0)
+        var row = HBox()
+        row.separation = 16.0
+        _ok = Button()
+        _ok.min_size = vec2(140.0, 44.0)
+        _cancel = Button()
+        _cancel.min_size = vec2(140.0, 44.0)
+        _ok.pressed.connect(fn() {
+            close()
+            emit confirmed
+        })
+        _cancel.pressed.connect(fn() {
+            emit_cancelled()
+        })
+        row.add_child(_ok)
+        row.add_child(_cancel)
+        box.add_child(_title)
+        box.add_child(_message)
+        box.add_child(row)
+        add_child(box)
+        sync_text()
+        initial_focus = focus_ok ? _ok : _cancel
+    }
+    // Copies title, message and button texts into their labels.
+    fn sync_text() {
+        _title.text = title
+        _message.text = message
+        _ok.text = ok_text
+        _cancel.text = cancel_text
+    }
+    // Refreshes the texts and initial focus, then opens it in the middle of the screen.
+    fn popup_centered() {
+        sync_text()
+        initial_focus = focus_ok ? _ok : _cancel
+        super.popup_centered()
+    }
+}

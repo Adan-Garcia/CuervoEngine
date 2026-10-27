@@ -18,10 +18,28 @@ the guide is [GUIDE.md](GUIDE.md). Names starting with `_` are private and not l
 - [scene.plm](#sceneplm): [`Node`](#node), [`NodeTransform`](#nodetransform), [`Node2D`](#node2d), [`SceneInstance`](#sceneinstance), [`CanvasLayer`](#canvaslayer), [`Scene`](#scene)
 - [nodes.plm](#nodesplm): [`ShapeKind`](#shapekind), [`Shape`](#shape), [`PathCurve`](#pathcurve), [`Path`](#path), [`Sprite`](#sprite), [`Text`](#text), [`Camera2D`](#camera2d), [`Timer`](#timer), [`LineJoin`](#linejoin), [`LineCap`](#linecap), [`Line2D`](#line2d), [`Polygon2D`](#polygon2d), [`Marker2D`](#marker2d), [`VisibleOnScreenNotifier2D`](#visibleonscreennotifier2d)
 - [animation.plm](#animationplm): [`Anim`](#anim), [`AnimInterp`](#animinterp), [`AnimLoop`](#animloop), [`AnimTrackKind`](#animtrackkind), `anim_shape`, [`AnimKey`](#animkey), [`AnimPose`](#animpose), [`AnimTrack`](#animtrack), [`Animation`](#animation), [`AnimFired`](#animfired), [`AnimPlayhead`](#animplayhead), `anim_resolve`, [`AnimBinding`](#animbinding), [`AnimBinder`](#animbinder), `anim_blend`, [`AnimationPlayer`](#animationplayer), [`Tweener`](#tweener), [`TweenStep`](#tweenstep), [`Tween`](#tween), [`AnimCondOp`](#animcondop), [`AnimCondition`](#animcondition), [`AnimStateDef`](#animstatedef), [`AnimTransition`](#animtransition), [`AnimationTree`](#animationtree)
+- [tilemap.plm](#tilemapplm): [`TileDef`](#tiledef), [`TileSet`](#tileset), [`TileCell`](#tilecell), `tile_pack_coord`, `tile_unpack_x`, `tile_unpack_y`, `autotile_mask`, [`TileMapLayer`](#tilemaplayer)
+- [lighting.plm](#lightingplm): [`PointLight2D`](#pointlight2d), [`DirectionalLight2D`](#directionallight2d), [`AmbientLight2D`](#ambientlight2d), [`OccluderShape`](#occludershape), [`LightOccluder2D`](#lightoccluder2d)
+- [navigation/nodes.plm](#navigationnodesplm): [`PathMethod`](#pathmethod), [`PathHeuristic`](#pathheuristic)
+- [navigation/region.plm](#navigationregionplm): [`NavigationRegion2D`](#navigationregion2d)
+- [navigation/dijkstra.plm](#navigationdijkstraplm): [`DijkstraMap`](#dijkstramap)
+- [navigation/agent.plm](#navigationagentplm): [`NavigationAgent2D`](#navigationagent2d)
 - [collision.plm](#collisionplm): [`Collision`](#collision), [`AreaShape`](#areashape), [`Area`](#area)
 - [particles.plm](#particlesplm): [`Pattern`](#pattern), [`Shot`](#shot), [`Module`](#module), [`Emitter`](#emitter), [`EmitPattern`](#emitpattern), [`Emitter2D`](#emitter2d)
-- [ui.plm](#uiplm): [`Theme`](#theme), [`Control`](#control), [`Container`](#container), [`BoxContainer`](#boxcontainer), [`VBox`](#vbox), [`HBox`](#hbox), [`Margin`](#margin), [`Panel`](#panel), [`Center`](#center), [`Label`](#label), [`Button`](#button), [`Toggle`](#toggle), [`Slider`](#slider), [`GridContainer`](#gridcontainer), [`FlowContainer`](#flowcontainer), [`SplitContainer`](#splitcontainer), [`AspectRatioContainer`](#aspectratiocontainer), [`ScrollContainer`](#scrollcontainer), [`Image`](#image), [`TextureRect`](#texturerect), [`ProgressBar`](#progressbar), [`LineEdit`](#lineedit), [`TabBar`](#tabbar), [`TabContainer`](#tabcontainer), [`Popup`](#popup), [`PopupMenu`](#popupmenu), [`OptionButton`](#optionbutton), [`ConfirmDialog`](#confirmdialog), [`UIExtra`](#uiextra), [`UI`](#ui)
+- [ui/theme.plm](#uithemeplm): [`Theme`](#theme)
+- [ui/control.plm](#uicontrolplm): [`Control`](#control)
+- [ui/containers.plm](#uicontainersplm): [`Container`](#container), [`BoxContainer`](#boxcontainer), [`VBox`](#vbox), [`HBox`](#hbox), [`Margin`](#margin), [`Panel`](#panel), [`Center`](#center), [`GridContainer`](#gridcontainer), [`FlowContainer`](#flowcontainer), [`SplitContainer`](#splitcontainer), [`AspectRatioContainer`](#aspectratiocontainer), [`ScrollContainer`](#scrollcontainer)
+- [ui/widgets.plm](#uiwidgetsplm): [`Label`](#label), [`Button`](#button), [`Toggle`](#toggle), [`Slider`](#slider), [`Image`](#image), [`TextureRect`](#texturerect), [`ProgressBar`](#progressbar), [`LineEdit`](#lineedit)
+- [ui/popups.plm](#uipopupsplm): [`TabBar`](#tabbar), [`TabContainer`](#tabcontainer), [`Popup`](#popup), [`PopupMenu`](#popupmenu), [`OptionButton`](#optionbutton), [`ConfirmDialog`](#confirmdialog)
+- [ui/ui.plm](#uiuiplm): [`UIExtra`](#uiextra), [`UI`](#ui)
 - [audio.plm](#audioplm): [`Audio`](#audio), [`AudioPlayer`](#audioplayer)
+- [physics/shapes.plm](#physicsshapesplm): [`Shape2D`](#shape2d), [`CircleShape2D`](#circleshape2d), [`RectangleShape2D`](#rectangleshape2d), [`CapsuleShape2D`](#capsuleshape2d), [`SegmentShape2D`](#segmentshape2d), [`ConvexPolygonShape2D`](#convexpolygonshape2d), [`ConcavePolygonShape2D`](#concavepolygonshape2d), [`SeparationRayShape2D`](#separationrayshape2d), [`CollisionShape2D`](#collisionshape2d)
+- [physics/collision_polygon.plm](#physicscollision_polygonplm): [`CollisionPolygon2D`](#collisionpolygon2d)
+- [physics/bodies.plm](#physicsbodiesplm): [`PhysicsBody2D`](#physicsbody2d), [`StaticBody2D`](#staticbody2d), [`AnimatableBody2D`](#animatablebody2d), [`RigidBody2D`](#rigidbody2d), [`KinematicCollision2D`](#kinematiccollision2d), [`CharacterBody2D`](#characterbody2d)
+- [physics/area_raycast.plm](#physicsarea_raycastplm): [`Area2D`](#area2d), [`RayCast2D`](#raycast2d)
+- [physics/joints.plm](#physicsjointsplm): [`Joint2D`](#joint2d), [`PinJoint2D`](#pinjoint2d), [`RevoluteJoint2D`](#revolutejoint2d), [`DistanceJoint2D`](#distancejoint2d), [`DampedSpringJoint2D`](#dampedspringjoint2d), [`PrismaticJoint2D`](#prismaticjoint2d), [`SliderJoint2D`](#sliderjoint2d), [`GrooveJoint2D`](#groovejoint2d), [`WeldJoint2D`](#weldjoint2d), [`WheelJoint2D`](#wheeljoint2d), [`MotorJoint2D`](#motorjoint2d), [`MoverJoint2D`](#moverjoint2d), [`PogoJoint2D`](#pogojoint2d), [`FilterJoint2D`](#filterjoint2d)
+- [physics/queries.plm](#physicsqueriesplm): [`ShapeCast2D`](#shapecast2d), [`RayCastResult2D`](#raycastresult2d), [`ShapeCastResult2D`](#shapecastresult2d), [`Physics2D`](#physics2d)
+- [physics/tilemap_collision.plm](#physicstilemap_collisionplm): [`TileMapCollision2D`](#tilemapcollision2d)
 
 ## math.plm
 
@@ -1139,6 +1157,59 @@ Without `fill` or `stroke` a shape is filled white.
 
   Everything drawn after this covers everything drawn before it (shapes
   and text alike). Scene.draw_frame starts one per CanvasLayer.
+
+- `fn point_light(pos: vec2, radius: float, color: Color = Color {}, energy = 1.0, falloff = 1.0, rotation = 0.0, spot_angle = 6.2831855, spot_feather = 0.2617994, source_radius = 4.0, shadows = true, shadow_softness = 16.0, shadow_color: Color = Color { r = 0.0, g = 0.0, b = 0.0, a = 0.65 }, mask = 1, subtract = false, height = 48.0)`
+
+  2D lighting (DESIGN.md 4.17, milestone 9.7). The light nodes of
+  lighting.plm call these while the tree draws; the lights and occluders
+  queued then shade everything drawn before apply_lights(), which
+  Scene.draw_frame calls after the world (CanvasLayers stay unlit).
+  Render only: lighting never touches the simulation.
+
+  A light at `pos` reaching `radius` pixels. `spot_angle` < 2*pi (radians)
+  makes it a cone pointing along `rotation`, its edge softened over
+  `spot_feather`. Occluders cast shadows when `shadows` is on:
+  `shadow_softness` is the size of the glowing source (0 = hard shadows;
+  they are sharp at their occluder and that wide at the light);
+  `shadow_color` tints them. Only occluders sharing a bit of `mask` block
+  it. `subtract` darkens instead of lighting. `height` is how far above
+  the plane the light hangs: occluder faces are normal mapped against it.
+
+- `fn directional_light(rotation: float, color: Color = Color {}, energy = 1.0, max_distance = 600.0, shadows = true, shadow_softness = 16.0, shadow_color: Color = Color { r = 0.0, g = 0.0, b = 0.0, a = 0.65 }, mask = 1)`
+
+  Parallel light (sun, moon) shining along `rotation` over the whole view;
+  shadows reach `max_distance` pixels back toward it.
+
+- `fn ambient_light(color: Color = Color { r = 0.05, g = 0.06, b = 0.12, a = 1.0 }, darkness = 0.8, glow = 0.35)`
+
+  Darkens the world by `darkness` (0..1) tinted `color`, except where
+  lights reach; `glow` adds the lights' color on top.
+
+- `fn occluder_circle(center: vec2, radius: float, mask = 1, bevel = 8.0)`
+
+  A disc that blocks lights sharing a bit of `mask`. Occluders are
+  normal mapped: their face bends outward over the last `bevel` pixels
+  from the edge (0 = flat), so edges turned to a light catch it and edges
+  turned away fall dark; only other occluders shadow a face.
+
+- `fn occluder_rect(center: vec2, size: vec2, rotation = 0.0, corner_radius = 0.0, mask = 1, bevel = 8.0)`
+
+  A `size` rectangle centered on `center`, turned by `rotation`.
+
+- `fn occluder_capsule(center: vec2, half_length: float, radius: float, rotation = 0.0, mask = 1, bevel = 8.0)`
+
+  A capsule like capsule().
+
+- `fn occluder_polygon(points: List<vec2>, closed = true, thickness = 2.0, pos = vec2(0.0, 0.0), rotation = 0.0, scale = vec2(1.0, 1.0), mask = 1, bevel = 8.0)`
+
+  The edges through `points` (placed like polygon()), each a wall
+  `thickness` wide; `closed` joins the last point to the first.
+
+- `fn apply_lights()`
+
+  Shades everything drawn so far with the queued lights (in the current
+  view), then forgets them. Without an ambient light, lights add to the
+  scene; with one, the scene darkens except where they reach.
 
 ## scene.plm
 
@@ -3475,6 +3546,923 @@ character should key the same fields.
 
   Engine-internal: evaluates once per tick before the children's update().
 
+## tilemap.plm
+
+Engine API: Tilemaps (DESIGN.md 4.17, Milestone 9.5).
+
+TileMapLayer: a 2D uniform grid of tiles backed by a TileSet, with cell
+editing, coordinate conversions, autotiling, and scene file serialization.
+
+Source: `cuervo/script/prelude/tilemap.plm`
+
+### Constants and functions
+
+- `fn tile_pack_coord(x: int, y: int) -> int`
+
+  Packs a 2D integer cell coordinate into a 32-bit key for fast Map lookup.
+
+- `fn tile_unpack_x(p: int) -> int`
+
+  Unpacks grid X coordinate from a packed key.
+
+- `fn tile_unpack_y(p: int) -> int`
+
+  Unpacks grid Y coordinate from a packed key.
+
+- `fn autotile_mask(north: bool, east: bool, south: bool, west: bool, north_east = false, south_east = false, south_west = false, north_west = false) -> int`
+
+  Constructs an autotile bitmask from neighbor booleans.
+
+### TileDef
+
+```pluma
+struct TileDef
+```
+
+A single tile definition within a TileSet.
+
+**Fields**
+
+- `var id = 0`
+
+  Unique identifier of this tile in the tileset.
+
+- `var asset = ""`
+
+  Vector asset path ("" = draws colored shape or empty).
+
+- `var color = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }`
+
+  Fill color for rectangle shape or tint color for vector asset.
+
+- `var walkable = true`
+
+  Whether navigation regions treat this tile as traversable.
+
+- `var nav_cost = 1.0`
+
+  Traversal cost multiplier for pathfinding (1.0 = standard cost).
+
+- `var terrain = -1`
+
+  Terrain identifier (-1 = no terrain). Tiles with matching terrain connect during autotiling.
+
+- `var peering_bits = 0`
+
+  Bitmask of matching neighbor peering bits for autotiling:
+  Bit 0 (1): North, Bit 1 (2): East, Bit 2 (4): South, Bit 3 (8): West
+  Bit 4 (16): NorthEast, Bit 5 (32): SouthEast, Bit 6 (64): SouthWest, Bit 7 (128): NorthWest
+
+### TileSet
+
+```pluma
+struct TileSet
+```
+
+A collection of tile definitions and grid properties.
+
+**Fields**
+
+- `var tile_size = vec2(32.0, 32.0)`
+
+  Pixel size of each tile (width, height).
+
+- `var tiles = List<TileDef>()`
+
+  List of tile definitions in this set.
+
+**Methods**
+
+- `fn find_tile(id: int) -> TileDef?`
+
+  Finds a tile by ID, or null if not found.
+
+- `fn find_autotile(terrain: int, mask: int) -> TileDef?`
+
+  Finds an autotile matching terrain and neighbor peering bits.
+
+### TileCell
+
+```pluma
+struct TileCell
+```
+
+A placed tile cell in a TileMapLayer.
+
+**Fields**
+
+- `var x = 0`
+
+  Cell grid X coordinate.
+
+- `var y = 0`
+
+  Cell grid Y coordinate.
+
+- `var tile_id = 0`
+
+  Tile ID from the layer's TileSet.
+
+- `var terrain = -1`
+
+  Terrain group (-1 = none).
+
+### TileMapLayer
+
+```pluma
+class TileMapLayer extends Node2D
+```
+
+A 2D uniform grid layer of tiles (milestone 9.5, DESIGN.md 4.17).
+
+**Fields**
+
+- `@export var tile_size = vec2(32.0, 32.0)`
+
+  Pixel dimensions of each cell on this layer.
+
+- `@export var tileset = TileSet {}`
+
+  The tileset defining tile properties.
+
+- `@export var cells = List<TileCell>()`
+
+  Placed cells saved in the scene file.
+
+- `@export var enabled = true`
+
+  Whether this layer is enabled for rendering and updates.
+
+- `@export var light_occluders = false`
+
+  Solid tiles (TileDef.walkable false) block 2D lights (milestone 9.8),
+  merged into as few rectangles as possible (solid_rects()).
+
+- `@export var occluder_mask = 1`
+
+  Blocks lights whose `light_mask` shares a bit with this.
+
+- `@export var occluder_bevel = 8.0`
+
+  Normal mapping of the solid tiles' faces (LightOccluder2D.bevel).
+
+**Methods**
+
+- `fn cell_size() -> vec2`
+
+  The size of one cell in pixels: `tile_size`, else the tileset's, else 32.
+
+- `fn set_cell(x: int, y: int, tile_id: int, terrain = -1)`
+
+  Sets or replaces a cell at grid coordinate (x, y). If `tile_id < 0`, erases the cell.
+
+- `fn get_cell(x: int, y: int) -> int`
+
+  Returns the tile ID at grid coordinate (x, y), or -1 if empty.
+
+- `fn get_cell_terrain(x: int, y: int) -> int`
+
+  Returns the terrain ID at grid coordinate (x, y), or -1 if empty.
+
+- `fn has_cell(x: int, y: int) -> bool`
+
+  Returns true if a placed cell exists at (x, y).
+
+- `fn erase_cell(x: int, y: int)`
+
+  Removes the cell at (x, y).
+
+- `fn clear()`
+
+  Clears all placed cells on this layer.
+
+- `fn is_solid(x: int, y: int) -> bool`
+
+  Whether the tile at (x, y) is solid: placed and not walkable.
+
+- `fn solid_rects() -> List<Rect2>`
+
+  The solid tiles as rectangles in cell coordinates: runs along each row,
+  joined with the identical runs of the rows below. Lights
+  (`light_occluders`) and TileMapCollision2D use them, so a wall of many
+  tiles is one occluder and one collision box. Scanned in row order, so
+  the list is the same in every run.
+
+- `fn cell_count() -> int`
+
+  Returns the count of placed cells.
+
+- `fn get_used_cells() -> List<ivec2>`
+
+  Returns a list of all placed cell grid coordinates.
+
+- `fn get_used_rect() -> Rect2`
+
+  Returns the bounding rectangle in cell coordinates enclosing all placed cells.
+
+- `fn map_to_local(coord: ivec2) -> vec2`
+
+  Converts a cell grid coordinate into local pixel position (center of tile).
+
+- `fn local_to_map(pos: vec2) -> ivec2`
+
+  Converts local pixel position into a cell grid coordinate.
+
+- `fn map_to_global(coord: ivec2) -> vec2`
+
+  Converts a cell grid coordinate into global world coordinates.
+
+- `fn global_to_map(pos: vec2) -> ivec2`
+
+  Converts global world coordinates into a cell grid coordinate.
+
+- `fn calculate_autotile_mask(x: int, y: int, terrain: int) -> int`
+
+  Calculates the autotile neighbor bitmask for cell (x, y) matching `terrain`.
+
+- `fn update_autotile(x: int, y: int)`
+
+  Updates the autotiled tile ID at (x, y) based on current neighbor connections.
+
+- `fn set_cell_autotile(x: int, y: int, terrain: int)`
+
+  Places a terrain tile at (x, y) and updates autotiling for the cell and its 8 neighbors.
+  If `terrain < 0`, erases the cell at (x, y) and updates its 8 neighbors.
+
+- `fn draw(g: Canvas)`
+
+  Draws all visible tiles on this layer.
+
+## lighting.plm
+
+Engine API: 2D lighting (DESIGN.md 4.17, milestone 9.7).
+
+Lights and occluders are nodes that queue into the frame's lighting while
+the tree draws (Canvas.point_light and friends); Scene.draw_frame applies
+them after the world, so CanvasLayers (HUDs, menus) stay unlit. Shadows are
+raymarched through the occluders' signed distance fields on the GPU, the
+same on Vulkan and GL. Lighting is render only: it never changes the
+simulation, a state hash or a replay.
+
+Without an AmbientLight2D, lights add their color to the scene. With one,
+the scene darkens by its `darkness` except where lights reach.
+
+Source: `cuervo/script/prelude/lighting.plm`
+
+### PointLight2D
+
+```pluma
+class PointLight2D extends Node2D
+```
+
+A light at the node's position reaching `radius` pixels (times its global
+scale). With `spot_angle` below a full turn it is a cone pointing along the
+node's rotation (+x at rotation 0).
+
+**Fields**
+
+- `@export var enabled = true`
+
+  false switches the light off.
+
+- `@export var color = Color { r = 1.0, g = 0.95, b = 0.8, a = 1.0 }`
+
+  The light's color; its alpha scales the light.
+
+- `@export var energy = 1.0`
+
+  Brightness multiplier.
+
+- `@export var radius = 200.0`
+
+  How far the light reaches, in pixels.
+
+- `@export var falloff = 1.0`
+
+  How fast it fades toward `radius` (0 = the gentlest curve).
+
+- `@export var spot_angle = 6.2831855`
+
+  The cone's full angle in radians (6.2831855 = all around).
+
+- `@export var spot_feather = 0.2617994`
+
+  How much of the cone's edge fades out, in radians.
+
+- `@export var source_radius = 4.0`
+
+  The size of the light's source; shadows start this far from it.
+
+- `@export var shadow_enabled = true`
+
+  Occluders cast shadows from this light.
+
+- `@export var shadow_softness = 16.0`
+
+  The size of the glowing source in pixels: shadows are sharp where they
+  touch their occluder and this wide at the light (0 = hard shadows).
+
+- `@export var shadow_color = Color { r = 0.0, g = 0.0, b = 0.0, a = 0.65 }`
+
+  The color shadows are tinted, its alpha their strength.
+
+- `@export var light_mask = 1`
+
+  Only occluders whose `occluder_mask` shares a bit with this cast shadows.
+
+- `@export var subtract = false`
+
+  Darkens instead of lighting (a "negative" light).
+
+- `@export var height = 48.0`
+
+  How far above the plane the light hangs, in pixels: occluder faces are
+  normal mapped, and a low light rakes across their bevels.
+
+**Methods**
+
+- `fn draw(g: Canvas)`
+
+  Draws the node (render only).
+
+### DirectionalLight2D
+
+```pluma
+class DirectionalLight2D extends Node2D
+```
+
+Parallel light over the whole view (sun, moon), shining along the node's
+rotation (+x at rotation 0, so PI/2 shines down).
+
+**Fields**
+
+- `@export var enabled = true`
+
+  false switches the light off.
+
+- `@export var color = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }`
+
+  The light's color; its alpha scales the light.
+
+- `@export var energy = 0.6`
+
+  Brightness multiplier.
+
+- `@export var max_distance = 600.0`
+
+  How far back toward the light shadows are traced, in pixels.
+
+- `@export var shadow_enabled = true`
+
+  Occluders cast shadows from this light.
+
+- `@export var shadow_softness = 16.0`
+
+  How much shadows widen with distance (0 = hard shadows).
+
+- `@export var shadow_color = Color { r = 0.0, g = 0.0, b = 0.0, a = 0.65 }`
+
+  The color shadows are tinted, its alpha their strength.
+
+- `@export var light_mask = 1`
+
+  Only occluders whose `occluder_mask` shares a bit with this cast shadows.
+
+**Methods**
+
+- `fn draw(g: Canvas)`
+
+  Draws the node (render only).
+
+### AmbientLight2D
+
+```pluma
+class AmbientLight2D extends Node2D
+```
+
+Darkens the whole world (night, caves) except where lights reach. One per
+scene; the last one drawn wins.
+
+**Fields**
+
+- `@export var enabled = true`
+
+  false leaves the scene at full brightness.
+
+- `@export var color = Color { r = 0.05, g = 0.06, b = 0.12, a = 1.0 }`
+
+  The tint of the darkness.
+
+- `@export var darkness = 0.8`
+
+  0 = no darkening, 1 = black where no light reaches.
+
+- `@export var glow = 0.35`
+
+  How much of the lights' color is added on top of what they reveal.
+
+**Methods**
+
+- `fn draw(g: Canvas)`
+
+  Draws the node (render only).
+
+### OccluderShape
+
+```pluma
+enum OccluderShape
+```
+
+What a `LightOccluder2D` blocks light with.
+
+**Variants**
+
+- `Circle`
+
+  a disc of `radius`
+
+- `Rect`
+
+  a `size` rectangle with `corner_radius` corners
+
+- `Capsule`
+
+  a segment `size.x` long with round caps of `radius`
+
+- `Polygon`
+
+  walls `thickness` wide along `points`
+
+### LightOccluder2D
+
+```pluma
+class LightOccluder2D extends Node2D
+```
+
+Blocks light: lights whose `light_mask` shares a bit with `occluder_mask`
+cast shadows behind it. The shape is centered on the node, turned and sized
+by its global transform. The occluder's own area stays lit (like a wall's
+face), so put one under the visuals it should shadow from.
+
+**Fields**
+
+- `@export var enabled = true`
+
+  false stops it blocking light.
+
+- `@export var shape = OccluderShape.Rect`
+
+  Which shape blocks the light.
+
+- `@export var radius = 16.0`
+
+  Circle and Capsule: the radius in pixels.
+
+- `@export var size = vec2(32.0, 32.0)`
+
+  Rect: width and height; Capsule: the segment's length is `size.x`.
+
+- `@export var corner_radius = 0.0`
+
+  Rect: the corner radius (0 = square corners).
+
+- `@export var points = List<vec2>()`
+
+  Polygon: the corners, as offsets from the node.
+
+- `@export var closed = true`
+
+  Polygon: joins the last point to the first.
+
+- `@export var thickness = 2.0`
+
+  Polygon: the walls' thickness in pixels.
+
+- `@export var occluder_mask = 1`
+
+  Blocks lights whose `light_mask` shares a bit with this.
+
+- `@export var bevel = 8.0`
+
+  Normal mapping: the face bends outward over this many pixels from the
+  edge, so edges turned to a light catch it (0 = a flat face).
+
+**Methods**
+
+- `fn draw(g: Canvas)`
+
+  Draws the node (render only).
+
+## navigation/nodes.plm
+
+Engine API: 2D grid pathfinding and navigation (DESIGN.md 4.17, Milestone 9.5).
+
+NavigationRegion2D defines traversable terrain bounds, step costs, obstacle
+baking from TileMapLayer, and deterministic A* / Dijkstra / Greedy pathfinding.
+DijkstraMap provides flow field gradient queries and mass crowd steering.
+NavigationAgent2D steers nodes along waypoints or flow fields with arrival signals.
+
+Source: `cuervo/script/prelude/navigation/nodes.plm`
+
+### PathMethod
+
+```pluma
+enum PathMethod
+```
+
+The pathfinding search algorithm.
+
+**Variants**
+
+- `AStar`
+
+  Standard A* search combining path cost and distance heuristic.
+
+- `Dijkstra`
+
+  Dijkstra uniform-cost search without heuristic.
+
+- `Greedy`
+
+  Greedy best-first search guided purely by heuristic.
+
+### PathHeuristic
+
+```pluma
+enum PathHeuristic
+```
+
+Distance metric for pathfinding heuristics.
+
+**Variants**
+
+- `Octile`
+
+  8-way diagonal distance taking diagonal cost into account.
+
+- `Euclidean`
+
+  Straight-line geometric Euclidean distance.
+
+- `Manhattan`
+
+  4-way taxicab grid distance.
+
+- `Chebyshev`
+
+  8-way Chebyshev distance (maximum of horizontal and vertical deltas).
+
+## navigation/region.plm
+
+Source: `cuervo/script/prelude/navigation/region.plm`
+
+### NavigationRegion2D
+
+```pluma
+class NavigationRegion2D extends Node2D
+```
+
+A 2D navigation region defining traversable space and pathfinding (milestone 9.5).
+
+**Fields**
+
+- `@export var cell_size = vec2(32.0, 32.0)`
+
+  Navigation grid cell size in pixels.
+
+- `@export var bounds_min = ivec2 { x = -64, y = -64 }`
+
+  Minimum cell bounds for pathfinding search.
+
+- `@export var bounds_max = ivec2 { x = 64, y = 64 }`
+
+  Maximum cell bounds for pathfinding search.
+
+- `@export var allow_diagonal = true`
+
+  Whether 8-way diagonal movement is allowed.
+
+- `@export var diagonal_cost = 1.41421356`
+
+  Traversal cost for diagonal steps (standard: ~1.41421356).
+
+- `@export var default_cost = 1.0`
+
+  Default cardinal step cost.
+
+- `@export var method = PathMethod.AStar`
+
+  Active pathfinding method (AStar, Dijkstra, or Greedy).
+
+- `@export var heuristic = PathHeuristic.Octile`
+
+  Active heuristic metric for A* and Greedy search.
+
+- `@export var heuristic_weight = 1.0`
+
+  Weight multiplier for the heuristic (1.0 = standard, > 1.0 = weighted A*).
+
+- `@export var enable_path_smoothing = false`
+
+  Whether generated paths are automatically smoothed via line-of-sight pruning.
+
+**Methods**
+
+- `fn set_cell_walkable(x: int, y: int, walkable: bool)`
+
+  Marks a cell as walkable or obstacle.
+
+- `fn is_cell_walkable(x: int, y: int) -> bool`
+
+  Checks whether a grid cell is traversable.
+
+- `fn set_cell_cost(x: int, y: int, cost: float)`
+
+  Sets a custom traversal cost for a cell (clamped to > 0).
+
+- `fn get_cell_cost(x: int, y: int) -> float`
+
+  Returns the traversal cost for a cell.
+
+- `fn bake_from_tilemap(layer: TileMapLayer)`
+
+  Bakes walkable and non-walkable cells from a TileMapLayer.
+
+- `fn clear_obstacles()`
+
+  Clears all marked obstacle cells, restoring full grid traversability.
+
+- `fn clear_costs()`
+
+  Clears all custom cell costs, restoring default movement costs.
+
+- `fn set_cost_rect(min_coord: ivec2, max_coord: ivec2, cost: float)`
+
+  Sets custom movement cost for all cells in a grid coordinate rectangle.
+
+- `fn set_walkable_rect(min_coord: ivec2, max_coord: ivec2, walkable: bool)`
+
+  Sets walkability for all cells in a grid coordinate rectangle.
+
+- `fn inflate_obstacles(radius: int)`
+
+  Expands all obstacle cells outward by `radius` cells to provide agent clearance.
+
+- `fn map_to_local(coord: ivec2) -> vec2`
+
+  Converts a grid cell coordinate to local pixel center.
+
+- `fn local_to_map(pos: vec2) -> ivec2`
+
+  Converts local pixel position to a grid cell coordinate.
+
+- `fn map_to_global(coord: ivec2) -> vec2`
+
+  Converts a grid cell coordinate to global world coordinates.
+
+- `fn global_to_map(pos: vec2) -> ivec2`
+
+  Converts global world coordinates to a grid cell coordinate.
+
+- `fn calc_heuristic(ax: int, ay: int, bx: int, by: int, h: PathHeuristic) -> float`
+
+  Computes heuristic distance between two cells according to the specified metric.
+
+- `fn find_nearest_walkable(tx: int, ty: int, radius = 5) -> ivec2?`
+
+  Finds the closest walkable neighbor to (tx, ty) within a search radius, preferring minimal Euclidean distance.
+
+- `fn is_straight_walkable(from: vec2, to: vec2) -> bool`
+
+  Checks if a continuous straight line segment between two world positions is free of obstacles (supercover DDA).
+
+- `fn smooth_path(path: List<vec2>) -> List<vec2>`
+
+  Smooths a path by removing redundant waypoints with clear line of sight.
+
+- `fn simplify_path(path: List<vec2>) -> List<vec2>`
+
+  Simplifies a waypoint path by pruning redundant collinear waypoints.
+
+- `fn get_reachable_cells(origin: vec2, max_cost: float) -> List<ivec2>`
+
+  Computes all grid cells reachable from `origin` within `max_cost`.
+
+- `fn find_path_to_nearest(from: vec2, targets: List<vec2>) -> List<vec2>`
+
+  Computes the shortest path to the closest reachable destination among candidates.
+
+- `fn get_path(start_pos: vec2, end_pos: vec2) -> List<vec2>`
+
+  Computes a deterministic path from `start_pos` to `end_pos` in global coordinates using active settings.
+
+- `fn get_path_with(start_pos: vec2, end_pos: vec2, path_method: PathMethod, path_heuristic: PathHeuristic, smooth: bool) -> List<vec2>`
+
+  Computes a deterministic path specifying search method, heuristic metric, and smoothing.
+
+- `fn compute_dijkstra_map(targets: List<vec2>, max_cost: float = -1.0) -> DijkstraMap`
+
+  Computes a Dijkstra inverse distance map (flow field) from a list of target world positions.
+
+- `fn compute_dijkstra_map_to(target: vec2, max_cost: float = -1.0) -> DijkstraMap`
+
+  Computes a Dijkstra inverse distance map (flow field) toward a single target world position.
+
+## navigation/dijkstra.plm
+
+Source: `cuervo/script/prelude/navigation/dijkstra.plm`
+
+### DijkstraMap
+
+```pluma
+class DijkstraMap
+```
+
+A precomputed flow field and distance heat map from one or more targets across a NavigationRegion2D.
+Enables instantaneous path extraction and mass flocking/crowd navigation with zero search overhead.
+
+**Fields**
+
+- `var region: NavigationRegion2D = null`
+
+  Reference to the originating NavigationRegion2D.
+
+- `var costs = Map<int, float>()`
+
+  Map of packed cell coordinates to their traversal cost/distance to the nearest goal.
+
+- `var targets = List<ivec2>()`
+
+  Target grid coordinates used as the 0-cost origins of the flood.
+
+- `var world_targets = List<vec2>()`
+
+  World target positions used when computing this map.
+
+- `var max_cost = 0.0`
+
+  Maximum traversal cost encountered in the reachable region.
+
+**Methods**
+
+- `fn count() -> int`
+
+  Returns the number of reachable cells stored in the map.
+
+- `fn is_empty() -> bool`
+
+  Returns true if no cells were reached or the map is empty.
+
+- `fn get_targets() -> List<ivec2>`
+
+  Returns the list of target grid coordinates.
+
+- `fn get_world_targets() -> List<vec2>`
+
+  Returns the list of world target positions.
+
+- `fn get_max_cost() -> float`
+
+  Returns the maximum cost among all reached cells.
+
+- `fn has_cell(cell: ivec2) -> bool`
+
+  Returns true if the grid cell coordinate was reached by the Dijkstra flood.
+
+- `fn has_position(pos: vec2) -> bool`
+
+  Returns true if the global world position maps to a reached cell.
+
+- `fn get_cell_cost(cell: ivec2) -> float`
+
+  Returns the distance/cost to the nearest goal for grid cell `cell`, or -1.0 if unreachable.
+
+- `fn get_cost_at(pos: vec2) -> float`
+
+  Returns the distance/cost to the nearest goal for global position `pos`, or -1.0 if unreachable.
+
+- `fn get_cell_direction(cell: ivec2) -> vec2`
+
+  Returns the normalized downhill direction vector for grid cell `cell`.
+
+- `fn get_direction_at(pos: vec2) -> vec2`
+
+  Returns the normalized downhill direction vector for global position `pos`.
+
+- `fn get_cell_flee_direction(cell: ivec2) -> vec2`
+
+  Returns the normalized uphill fleeing direction vector for grid cell `cell`.
+
+- `fn get_flee_direction_at(pos: vec2) -> vec2`
+
+  Returns the normalized uphill fleeing direction vector for global position `pos`.
+
+- `fn get_path_from(start_pos: vec2, max_steps = 256, smooth = false) -> List<vec2>`
+
+  Extracts an instantaneous waypoint path from `start_pos` to the nearest goal using flow gradient.
+
+## navigation/agent.plm
+
+Source: `cuervo/script/prelude/navigation/agent.plm`
+
+### NavigationAgent2D
+
+```pluma
+class NavigationAgent2D extends Node2D
+```
+
+An agent node that navigates toward a target position across a NavigationRegion2D.
+
+**Signals**
+
+- `signal target_reached`
+
+  Signal emitted when the agent reaches its final target.
+
+- `signal navigation_finished`
+
+  Signal emitted when the entire waypoint path is completed.
+
+- `signal waypoint_reached(index: int)`
+
+  Signal emitted when a waypoint index is reached.
+
+**Fields**
+
+- `@export var target_position = vec2(0.0, 0.0)`
+
+  Destination position in global coordinates.
+
+- `@export var path_desired_distance = 8.0`
+
+  Distance to current waypoint required to advance to the next.
+
+- `@export var target_desired_distance = 8.0`
+
+  Distance to final destination required to consider navigation finished.
+
+- `@export var max_speed = 100.0`
+
+  Maximum movement speed in units per second.
+
+- `@export var region_path = ""`
+
+  Node name/path to the target NavigationRegion2D ("" = searches tree automatically).
+
+- `@export var path_method = PathMethod.AStar`
+
+  Pathfinding search method used by this agent.
+
+- `@export var path_heuristic = PathHeuristic.Octile`
+
+  Pathfinding heuristic metric used by this agent.
+
+- `@export var enable_path_smoothing = false`
+
+  Whether this agent requests smoothed waypoint paths.
+
+**Methods**
+
+- `fn set_target_position(pos: vec2)`
+
+  Sets a new target destination and computes the path.
+
+- `fn update(dt: float)`
+
+  Advances waypoint progression and checks arrival.
+
+- `fn get_next_path_position() -> vec2`
+
+  Returns the next global position the agent should steer toward.
+
+- `fn is_target_reached() -> bool`
+
+  Returns true when the agent is within `target_desired_distance` of `target_position`.
+
+- `fn is_navigation_finished() -> bool`
+
+  Returns true when the waypoint path is exhausted or target is reached.
+
+- `fn distance_to_target() -> float`
+
+  Returns distance in pixels from the agent's current position to `target_position`.
+
+- `fn get_current_navigation_path() -> List<vec2>`
+
+  Returns the full list of active path waypoints.
+
+- `fn get_dijkstra_direction(dmap: DijkstraMap) -> vec2`
+
+  Returns the downhill direction vector for this agent from a precomputed DijkstraMap.
+
+- `fn get_dijkstra_flee_direction(dmap: DijkstraMap) -> vec2`
+
+  Returns the uphill fleeing direction vector for this agent from a precomputed DijkstraMap.
+
+- `fn set_path_from_dijkstra_map(dmap: DijkstraMap, max_steps = 256, smooth = false)`
+
+  Sets the agent's waypoint path directly from a precomputed DijkstraMap without running search.
+
 ## collision.plm
 
 Engine API, part 3a: the collision world (DESIGN.md 4.7), backed by
@@ -4022,37 +5010,14 @@ only a marker.
 
   Draws the node (render only).
 
-## ui.plm
+## ui/theme.plm
 
-Engine API, part 5: game UI (DESIGN.md 4.10). Retained UI nodes in the
-scene tree, drawn with the Canvas (SDF rounded rects + MSDF text).
+Engine API: UI themes and styling (DESIGN.md 4.10).
 
-Layout. A Control's rect (`position` = top-left, `size`) is computed every
-tick before the UI updates: a Control whose parent isn't a Control is a UI
-root and is placed in the screen rect; every other Control is placed by
-its parent. Outside containers a control uses anchors + offsets
-(Godot-style): its edges sit at `parent.position + parent.size * anchor` +
-`offset`, and it never gets smaller than its combined minimum size (its
-content's, e.g. a label's text, and `min_size`). When a dimension's two
-anchors coincide the control grows around that anchor (0 = right/down,
-0.5 = both ways, 1 = left/up); otherwise it grows right/down.
-Containers (VBox, HBox, Margin, Panel, Center) ignore their children's
-anchors and place them. All of it is plain float math in fixed tree order,
-so layout is deterministic (DESIGN.md 4.1).
+Colors, font sizes and spacing of the UI widgets. Assign one to a
+control's `theme` (or change UI.theme) to restyle a tree.
 
-Focus. One control has the focus (`UI.focused`). The actions ui_up,
-ui_down, ui_left, ui_right (with key repeat), ui_accept and ui_cancel
-move it geometrically between the focusable controls of the UI root that
-holds it (wrapping around at the ends), activate it, or emit the root's
-`cancelled` signal. The pointer (`Input.pointer()`, ui_click) focuses what
-it moves over and activates what it clicks; sliders follow drags. Each
-input is consumed by the first root that uses it in a tick. Projects bind
-the ui_* actions in project.toml.
-
-Themes are minimal: colors, font sizes, padding (Theme). A control uses
-the nearest `theme` up its parents, else UI.theme.
-
-Source: `cuervo/script/prelude/ui.plm`
+Source: `cuervo/script/prelude/ui/theme.plm`
 
 ### Theme
 
@@ -4141,6 +5106,14 @@ control's `theme` (or change UI.theme) to restyle a tree.
 - `var border = 2.0`
 
   Border width in pixels of panels and widgets.
+
+## ui/control.plm
+
+Engine API: Base Control node (DESIGN.md 4.10).
+
+Retained UI nodes in the scene tree, laid-out rects, focus, and input handling.
+
+Source: `cuervo/script/prelude/ui/control.plm`
 
 ### Control
 
@@ -4368,6 +5341,15 @@ top of this file).
 
   UI roots lay out their tree and handle input before it updates.
 
+## ui/containers.plm
+
+Engine API: UI layout containers (DESIGN.md 4.10, Milestone 9.3).
+
+Container nodes: Container, BoxContainer, VBox, HBox, Margin, Panel, Center,
+GridContainer, FlowContainer, SplitContainer, AspectRatioContainer, ScrollContainer.
+
+Source: `cuervo/script/prelude/ui/containers.plm`
+
 ### Container
 
 ```pluma
@@ -4499,217 +5481,6 @@ Children at their minimum size, centered.
 - `fn layout_children()`
 
   Centers each child at its minimum size.
-
-### Label
-
-```pluma
-class Label extends Control
-```
-
-A line of text. `style` picks the size and color from the theme.
-
-**Fields**
-
-- `@export var text = ""`
-
-  The text shown.
-
-- `@export var style = #normal`
-
-  \#normal, #title, #small, #dim, #accent, #danger, #gold
-
-- `@export var font_size = 0.0`
-
-  > 0 overrides the style's size
-
-- `@export var align = #left`
-
-  \#left, #center, #right
-
-**Methods**
-
-- `fn text_size() -> float`
-
-  The font size: `font_size` if set, else the style's size from the theme.
-
-- `fn text_color() -> Color`
-
-  The text color for `style`, from the theme.
-
-- `fn content_min_size() -> vec2`
-
-  The size of the measured text.
-
-- `fn draw(g: Canvas)`
-
-  Draws the text, aligned within the rect.
-
-### Button
-
-```pluma
-class Button extends Control
-```
-
-A push button: ui_accept or a click while focused emits `pressed`.
-
-**Signals**
-
-- `signal pressed`
-
-  Activated: ui_accept while focused, or a click.
-
-**Fields**
-
-- `@export var text = ""`
-
-  The caption.
-
-- `var flash = 0`
-
-  ticks of "pressed" highlight
-
-**Methods**
-
-- `fn can_focus() -> bool`
-
-  Buttons take the focus unless disabled.
-
-- `fn activate()`
-
-  Emits `pressed` (nothing while disabled).
-
-- `fn update(dt: float)`
-
-  Counts down the brief pressed look after an activation.
-
-- `fn content_min_size() -> vec2`
-
-  The caption's size plus the theme padding.
-
-- `fn draw(g: Canvas)`
-
-  Draws the button fill by state, its border and the caption.
-
-### Toggle
-
-```pluma
-class Toggle extends Control
-```
-
-An on/off switch with a label; ui_accept or a click flips it.
-
-**Signals**
-
-- `signal toggled(value: bool)`
-
-  `on` changed; `value` is the new state.
-
-**Fields**
-
-- `@export var text = ""`
-
-  The caption beside the check box.
-
-- `@export var on = false`
-
-  True when checked.
-
-**Methods**
-
-- `fn can_focus() -> bool`
-
-  Toggles take the focus unless disabled.
-
-- `fn activate()`
-
-  Flips `on` and emits `toggled`.
-
-- `fn content_min_size() -> vec2`
-
-  The caption's size plus the box and theme padding.
-
-- `fn draw(g: Canvas)`
-
-  Draws the toggle fill by state, the check box and the caption.
-
-### Slider
-
-```pluma
-class Slider extends Control
-```
-
-A value in [min_value, max_value] snapped to `increment`; ui_left/ui_right
-change it while focused, the pointer drags it.
-
-**Signals**
-
-- `signal changed(value: float)`
-
-  `value` changed (keys or dragging).
-
-**Fields**
-
-- `@export var text = ""`
-
-  The caption left of the track; empty for a bare track.
-
-- `@export var value = 0.5`
-
-  The current value, between `min_value` and `max_value`.
-
-- `@export var min_value = 0.0`
-
-  The lowest value.
-
-- `@export var max_value = 1.0`
-
-  The highest value.
-
-- `@export var increment = 0.1`
-
-  0: continuous
-
-**Methods**
-
-- `fn can_focus() -> bool`
-
-  Sliders take the focus unless disabled.
-
-- `fn set_value(v: float)`
-
-  Sets `value` clamped and snapped, emitting `changed` if it moved.
-
-- `fn ratio() -> float`
-
-  `value` as a fraction of the range, 0..1.
-
-- `fn nudge(dir: vec2) -> bool`
-
-  ui_left and ui_right step the value by `increment`; true if it was used.
-
-- `fn track_x() -> float`
-
-  The left end of the track in screen pixels.
-
-- `fn track_width() -> float`
-
-  The track's length in pixels.
-
-- `fn pointer_down(p: vec2)`
-
-  A click sets the value from the pointer position.
-
-- `fn pointer_drag(p: vec2)`
-
-  Dragging sets the value from the pointer position.
-
-- `fn content_min_size() -> vec2`
-
-  The caption's size plus the track's minimum length.
-
-- `fn draw(g: Canvas)`
-
-  Draws the fill by state, the caption, the track and the value.
 
 ### GridContainer
 
@@ -5082,6 +5853,226 @@ the view is clipped and can't be clicked.
 
   Draws the scroll bars that are needed.
 
+## ui/widgets.plm
+
+Engine API: Basic UI widgets (DESIGN.md 4.10, Milestone 9.3).
+
+Interactive controls: Label, Button, Toggle, Slider, Image, TextureRect,
+ProgressBar, and LineEdit.
+
+Source: `cuervo/script/prelude/ui/widgets.plm`
+
+### Label
+
+```pluma
+class Label extends Control
+```
+
+A line of text. `style` picks the size and color from the theme.
+
+**Fields**
+
+- `@export var text = ""`
+
+  The text shown.
+
+- `@export var style = #normal`
+
+  \#normal, #title, #small, #dim, #accent, #danger, #gold
+
+- `@export var font_size = 0.0`
+
+  > 0 overrides the style's size
+
+- `@export var align = #left`
+
+  \#left, #center, #right
+
+**Methods**
+
+- `fn text_size() -> float`
+
+  The font size: `font_size` if set, else the style's size from the theme.
+
+- `fn text_color() -> Color`
+
+  The text color for `style`, from the theme.
+
+- `fn content_min_size() -> vec2`
+
+  The size of the measured text.
+
+- `fn draw(g: Canvas)`
+
+  Draws the text, aligned within the rect.
+
+### Button
+
+```pluma
+class Button extends Control
+```
+
+A push button: ui_accept or a click while focused emits `pressed`.
+
+**Signals**
+
+- `signal pressed`
+
+  Activated: ui_accept while focused, or a click.
+
+**Fields**
+
+- `@export var text = ""`
+
+  The caption.
+
+- `var flash = 0`
+
+  ticks of "pressed" highlight
+
+**Methods**
+
+- `fn can_focus() -> bool`
+
+  Buttons take the focus unless disabled.
+
+- `fn activate()`
+
+  Emits `pressed` (nothing while disabled).
+
+- `fn update(dt: float)`
+
+  Counts down the brief pressed look after an activation.
+
+- `fn content_min_size() -> vec2`
+
+  The caption's size plus the theme padding.
+
+- `fn draw(g: Canvas)`
+
+  Draws the button fill by state, its border and the caption.
+
+### Toggle
+
+```pluma
+class Toggle extends Control
+```
+
+An on/off switch with a label; ui_accept or a click flips it.
+
+**Signals**
+
+- `signal toggled(value: bool)`
+
+  `on` changed; `value` is the new state.
+
+**Fields**
+
+- `@export var text = ""`
+
+  The caption beside the check box.
+
+- `@export var on = false`
+
+  True when checked.
+
+**Methods**
+
+- `fn can_focus() -> bool`
+
+  Toggles take the focus unless disabled.
+
+- `fn activate()`
+
+  Flips `on` and emits `toggled`.
+
+- `fn content_min_size() -> vec2`
+
+  The caption's size plus the box and theme padding.
+
+- `fn draw(g: Canvas)`
+
+  Draws the toggle fill by state, the check box and the caption.
+
+### Slider
+
+```pluma
+class Slider extends Control
+```
+
+A value in [min_value, max_value] snapped to `increment`; ui_left/ui_right
+change it while focused, the pointer drags it.
+
+**Signals**
+
+- `signal changed(value: float)`
+
+  `value` changed (keys or dragging).
+
+**Fields**
+
+- `@export var text = ""`
+
+  The caption left of the track; empty for a bare track.
+
+- `@export var value = 0.5`
+
+  The current value, between `min_value` and `max_value`.
+
+- `@export var min_value = 0.0`
+
+  The lowest value.
+
+- `@export var max_value = 1.0`
+
+  The highest value.
+
+- `@export var increment = 0.1`
+
+  0: continuous
+
+**Methods**
+
+- `fn can_focus() -> bool`
+
+  Sliders take the focus unless disabled.
+
+- `fn set_value(v: float)`
+
+  Sets `value` clamped and snapped, emitting `changed` if it moved.
+
+- `fn ratio() -> float`
+
+  `value` as a fraction of the range, 0..1.
+
+- `fn nudge(dir: vec2) -> bool`
+
+  ui_left and ui_right step the value by `increment`; true if it was used.
+
+- `fn track_x() -> float`
+
+  The left end of the track in screen pixels.
+
+- `fn track_width() -> float`
+
+  The track's length in pixels.
+
+- `fn pointer_down(p: vec2)`
+
+  A click sets the value from the pointer position.
+
+- `fn pointer_drag(p: vec2)`
+
+  Dragging sets the value from the pointer position.
+
+- `fn content_min_size() -> vec2`
+
+  The caption's size plus the track's minimum length.
+
+- `fn draw(g: Canvas)`
+
+  Draws the fill by state, the caption, the track and the value.
+
 ### Image
 
 ```pluma
@@ -5089,7 +6080,7 @@ class Image extends Control
 ```
 
 A vector image (SVG or .evec, like Sprite's `asset`) in a layout rect.
-Raster images come with the asset pipeline of milestone 11.2.
+Raster images come with the asset pipeline of milestone 11.2a.
 
 **Fields**
 
@@ -5327,6 +6318,15 @@ on the tick of a ui_* press cancels that press.
 - `fn draw(g: Canvas)`
 
   Draws the field, the text or placeholder scrolled to keep the caret visible, and a blinking caret while editing.
+
+## ui/popups.plm
+
+Engine API: Multi-page and popup UI controls (Milestone 9.3).
+
+Multi-page navigation and overlays: TabBar, TabContainer, Popup, PopupMenu,
+OptionButton, and ConfirmDialog.
+
+Source: `cuervo/script/prelude/ui/popups.plm`
 
 ### TabBar
 
@@ -5726,6 +6726,15 @@ ui_cancel. The focus starts on Cancel (`focus_ok` puts it on OK).
 
   Refreshes the texts and initial focus, then opens it in the middle of the screen.
 
+## ui/ui.plm
+
+Engine API: UI system manager and event dispatcher (DESIGN.md 4.10).
+
+Global UI event dispatch, keyboard/gamepad focus navigation, click/drag routing,
+tooltips, and rendering.
+
+Source: `cuervo/script/prelude/ui/ui.plm`
+
 ### UIExtra
 
 ```pluma
@@ -6048,3 +7057,1534 @@ playing (`voice` is the last voice it started, -1 when stopped).
 - `fn draw(g: Canvas)`
 
   Draws the node (render only).
+
+## physics/shapes.plm
+
+Engine API, part 3b: 2D Physics backed by Box2D v3 (DESIGN.md 4.17, milestone 9.6).
+Compiled in with CUERVO_FEATURE_PHYSICS. Provides scene-tree bodies, shape resources,
+collision queries, kinematic slide mechanics, sensors, and joints.
+
+Source: `cuervo/script/prelude/physics/shapes.plm`
+
+### Shape2D
+
+```pluma
+class Shape2D
+```
+
+Base class for 2D collision shape resources.
+
+### CircleShape2D
+
+```pluma
+class CircleShape2D extends Shape2D
+```
+
+A 2D circle collision shape defined by its radius.
+
+**Fields**
+
+- `@export var radius = 16.0`
+
+  Radius of the circle in virtual pixels.
+
+### RectangleShape2D
+
+```pluma
+class RectangleShape2D extends Shape2D
+```
+
+A 2D rectangular collision shape defined by its width and height.
+
+**Fields**
+
+- `@export var size = vec2(32.0, 32.0)`
+
+  Width (x) and height (y) of the rectangle in virtual pixels.
+
+### CapsuleShape2D
+
+```pluma
+class CapsuleShape2D extends Shape2D
+```
+
+A 2D capsule collision shape defined by a radius and total height.
+
+**Fields**
+
+- `@export var radius = 10.0`
+
+  Radius of the capsule end caps.
+
+- `@export var height = 30.0`
+
+  Total height of the capsule from top to bottom.
+
+### SegmentShape2D
+
+```pluma
+class SegmentShape2D extends Shape2D
+```
+
+A 2D line segment collision shape between two endpoints.
+
+**Fields**
+
+- `@export var a = vec2(-16.0, 0.0)`
+
+  First endpoint of the line segment relative to the node.
+
+- `@export var b = vec2(16.0, 0.0)`
+
+  Second endpoint of the line segment relative to the node.
+
+### ConvexPolygonShape2D
+
+```pluma
+class ConvexPolygonShape2D extends Shape2D
+```
+
+A 2D convex polygon collision shape defined by its vertices.
+
+**Fields**
+
+- `@export var points = List<vec2>()`
+
+  List of vertices defining the convex polygon.
+
+### ConcavePolygonShape2D
+
+```pluma
+class ConcavePolygonShape2D extends Shape2D
+```
+
+A 2D concave polyline or chain collision shape defined by a sequence of points.
+
+**Fields**
+
+- `@export var points = List<vec2>()`
+
+  Sequence of points forming the chain.
+
+- `@export var is_loop = false`
+
+  When true, the first and last points are connected into a closed loop.
+
+### SeparationRayShape2D
+
+```pluma
+class SeparationRayShape2D extends Shape2D
+```
+
+A 2D collision shape consisting of a ray that separates colliding bodies.
+
+**Fields**
+
+- `@export var length = 20.0`
+
+  Length of the separation ray in virtual pixels.
+
+- `@export var slide_on_slope = false`
+
+  When true, slides along slopes rather than stopping.
+
+### CollisionShape2D
+
+```pluma
+class CollisionShape2D extends Node2D
+```
+
+A scene node that assigns a 2D collision shape to a parent PhysicsBody2D or Area2D.
+
+**Fields**
+
+- `var shape: Shape2D? = null`
+
+  The shape resource defining the collision geometry (not exported as class references cannot be serialized).
+
+- `@export var shape_type = 1`
+
+  Shape type fallback when not using a Shape2D resource (1: Box, 2: Circle, 3: Capsule, 4: Segment).
+
+- `@export var size = vec2(32.0, 32.0)`
+
+  Box dimensions (width, height) in pixels.
+
+- `@export var radius = 16.0`
+
+  Circle or capsule radius in pixels.
+
+- `@export var height = 30.0`
+
+  Capsule total height in pixels.
+
+- `@export var a = vec2(-16.0, 0.0)`
+
+  Segment endpoint A relative to node.
+
+- `@export var b = vec2(16.0, 0.0)`
+
+  Segment endpoint B relative to node.
+
+- `@export var disabled = false`
+
+  When true, the shape does not collide or detect overlaps.
+
+- `@export var debug_color = Color { r = 0.2, g = 0.6, b = 1.0, a = 0.4 }`
+
+  Debug draw outline/fill color.
+
+- `@export var debug_draw = false`
+
+  When true, forces debug drawing regardless of global debug flag.
+
+- `var shape_handle = 0`
+
+  Native handle in the physics world.
+
+- `var body_owner: Node2D? = null`
+
+  Parent body or area owner.
+
+**Methods**
+
+- `fn enter_tree()`
+
+  Engine-internal tree entry hook registering collision geometry with parent body.
+
+- `fn ready()`
+
+  Registers the shape with the parent physics body upon entering the tree.
+
+- `fn exit()`
+
+  Unregisters the shape from the physics world when removed.
+
+- `fn register_shape()`
+
+  Searches up the hierarchy for an owning body or area and creates the native shape.
+
+- `fn create_shape_for(b_handle: int, is_sensor: bool)`
+
+  Internal helper creating native Box2D shape definition.
+
+- `fn unregister_shape()`
+
+  Destroys the native shape handle.
+
+- `fn draw(g: Canvas)`
+
+  Draws the collision shape preview in editor or when debug shapes are toggled.
+
+## physics/collision_polygon.plm
+
+Source: `cuervo/script/prelude/physics/collision_polygon.plm`
+
+### CollisionPolygon2D
+
+```pluma
+class CollisionPolygon2D extends Node2D
+```
+
+A scene node that assigns a 2D polygon or chain collision shape to a parent PhysicsBody2D or Area2D.
+
+**Fields**
+
+- `@export var polygon = List<vec2>()`
+
+  Array of vertex points defining the collision polygon.
+
+- `@export var build_mode = 0`
+
+  Build mode for the polygon (0: Solids / Convex Polygon, 1: Segments / Chain).
+
+- `@export var disabled = false`
+
+  When true, the collision polygon is disabled.
+
+- `@export var debug_color = Color { r = 0.2, g = 0.6, b = 1.0, a = 0.4 }`
+
+  Debug draw outline/fill color.
+
+- `@export var debug_draw = false`
+
+  When true, forces debug drawing regardless of global debug flag.
+
+- `var shape_handle = 0`
+
+  Native handle in the physics world.
+
+- `var body_owner: Node2D? = null`
+
+  Parent body or area owner.
+
+**Methods**
+
+- `fn enter_tree()`
+
+  Engine-internal tree entry hook registering collision geometry with parent body.
+
+- `fn ready()`
+
+  Registers the polygon shape with the parent physics body upon entering the tree.
+
+- `fn exit()`
+
+  Unregisters the polygon shape from the physics world when removed.
+
+- `fn register_shape()`
+
+  Searches up the hierarchy for an owning body or area and creates the native shape.
+
+- `fn create_shape_for(b_handle: int, is_sensor: bool)`
+
+  Internal helper creating native Box2D shape definition.
+
+- `fn unregister_shape()`
+
+  Destroys the native shape handle.
+
+- `fn draw(g: Canvas)`
+
+  Draws the collision polygon preview in editor or when debug shapes are toggled.
+
+## physics/bodies.plm
+
+Source: `cuervo/script/prelude/physics/bodies.plm`
+
+### PhysicsBody2D
+
+```pluma
+class PhysicsBody2D extends Node2D
+```
+
+Base class for 2D physics bodies (StaticBody2D, RigidBody2D, CharacterBody2D).
+
+**Fields**
+
+- `@export var collision_layer = 1`
+
+  The physics layers this body is on (bitmask).
+
+- `@export var collision_mask = 1`
+
+  The physics layers this body scans for collisions (bitmask).
+
+- `var body_handle = 0`
+
+  Native body handle.
+
+**Methods**
+
+- `fn ensure_body()`
+
+  Ensures the native physics body is created.
+
+- `fn enter_tree()`
+
+  Engine-internal tree entry hook ensuring native body exists before child shapes register.
+
+- `fn ready()`
+
+  Creates the native physics body upon entering the tree.
+
+- `fn exit()`
+
+  Cleans up the native body when leaving the tree.
+
+- `fn create_native_body(kind: int)`
+
+  Creates the underlying Box2D body with specified type kind (0: Static, 1: Kinematic, 2: Dynamic).
+
+- `fn destroy_native_body()`
+
+  Destroys the native body handle.
+
+### StaticBody2D
+
+```pluma
+class StaticBody2D extends PhysicsBody2D
+```
+
+A static 2D physics body that does not move under simulation forces (floors, walls, obstacles).
+
+**Fields**
+
+- `@export var constant_linear_velocity = vec2(0.0, 0.0)`
+
+  Constant linear velocity for conveyor belts and moving surfaces.
+
+**Methods**
+
+- `fn ready()`
+
+  Creates static body.
+
+### AnimatableBody2D
+
+```pluma
+class AnimatableBody2D extends PhysicsBody2D
+```
+
+A 2D physics body that is simulated kinematically, ideal for moving platforms and doors.
+
+**Fields**
+
+- `@export var sync_to_physics = true`
+
+  When true, body movement synchronizes to physics simulation ticks.
+
+**Methods**
+
+- `fn ready()`
+
+  Creates animatable kinematic body.
+
+### RigidBody2D
+
+```pluma
+class RigidBody2D extends PhysicsBody2D
+```
+
+A dynamic 2D rigid body fully simulated by Box2D physics.
+
+**Fields**
+
+- `@export var mass = 1.0`
+
+  Body mass in kilograms.
+
+- `@export var gravity_scale = 1.0`
+
+  Multiplier for gravity applied to this body.
+
+- `@export var linear_velocity = vec2(0.0, 0.0)`
+
+  Current linear velocity vector in pixels per second.
+
+- `@export var angular_velocity = 0.0`
+
+  Current angular velocity in radians per second.
+
+- `@export var linear_damp = 0.0`
+
+  Linear damping reducing movement speed over time.
+
+- `@export var angular_damp = 0.0`
+
+  Angular damping reducing rotational speed over time.
+
+- `@export var lock_rotation = false`
+
+  When true, the body cannot rotate.
+
+- `@export var continuous_cd = false`
+
+  When true, continuous collision detection (CCD) is enabled for fast-moving bodies.
+
+- `@export var can_sleep = true`
+
+  When true, the body can enter sleep state to save CPU simulation time.
+
+**Methods**
+
+- `fn update_tree(dt: float)`
+
+  Engine-internal per-tick update hook that syncs script-modified velocity or flags.
+
+- `fn ready()`
+
+  Creates dynamic body and applies initial properties.
+
+- `fn apply_force(force: vec2)`
+
+  Applies a continuous force vector to the center of mass.
+
+- `fn apply_impulse(impulse: vec2)`
+
+  Applies an instantaneous linear impulse vector to the center of mass.
+
+- `fn apply_force_at_point(force: vec2, point: vec2)`
+
+  Applies a continuous force vector at a specified world offset.
+
+- `fn apply_impulse_at_point(impulse: vec2, point: vec2)`
+
+  Applies an instantaneous linear impulse vector at a specified world offset.
+
+- `fn set_bullet(bullet: bool)`
+
+  Sets whether continuous collision detection (bullet mode) is enabled.
+
+- `fn is_bullet() -> bool`
+
+  Returns true if continuous collision detection (bullet mode) is enabled.
+
+- `fn set_can_sleep(cs: bool)`
+
+  Sets whether this body can enter sleep mode.
+
+- `fn is_can_sleep() -> bool`
+
+  Returns true if this body can enter sleep mode.
+
+- `fn set_awake(awake: bool)`
+
+  Wakes up or puts the body to sleep.
+
+- `fn is_awake() -> bool`
+
+  Returns true if the body is currently awake.
+
+- `fn apply_torque(torque: float)`
+
+  Applies a rotational torque.
+
+- `fn apply_angular_impulse(impulse: float)`
+
+  Applies an instantaneous angular impulse.
+
+- `fn set_linear_velocity(v: vec2)`
+
+  Sets linear velocity directly.
+
+- `fn get_linear_velocity() -> vec2`
+
+  Gets linear velocity from simulation.
+
+- `fn set_angular_velocity(w: float)`
+
+  Sets angular velocity directly.
+
+- `fn get_angular_velocity() -> float`
+
+  Gets angular velocity from simulation.
+
+### KinematicCollision2D
+
+```pluma
+class KinematicCollision2D
+```
+
+Holds data about a collision occurring during a kinematic move.
+
+**Fields**
+
+- `var position = vec2(0.0, 0.0)`
+
+  The point of collision in world coordinates.
+
+- `var normal = vec2(0.0, 0.0)`
+
+  The surface normal at the point of collision.
+
+- `var travel = vec2(0.0, 0.0)`
+
+  The travel motion prior to collision.
+
+- `var remainder = vec2(0.0, 0.0)`
+
+  The remaining motion deflected along the surface.
+
+- `var collider: Node2D? = null`
+
+  The colliding body node.
+
+### CharacterBody2D
+
+```pluma
+class CharacterBody2D extends PhysicsBody2D
+```
+
+A 2D kinematic body specialized for player and character movement with move_and_slide().
+
+**Fields**
+
+- `@export var velocity = vec2(0.0, 0.0)`
+
+  Current linear velocity vector in pixels per second.
+
+- `@export var up_direction = vec2(0.0, -1.0)`
+
+  Direction vector pointing up (defaults to (0, -1) for standard 2D view).
+
+- `@export var floor_max_angle = 0.785398`
+
+  Maximum angle in radians for a surface to be considered a walkable floor.
+
+- `@export var max_slides = 4`
+
+  Maximum number of collision iterations per move_and_slide call.
+
+- `var on_floor = false`
+
+  True if the character stood on a floor surface during the last move_and_slide.
+
+- `var on_wall = false`
+
+  True if the character touched a wall during the last move_and_slide.
+
+- `var on_ceiling = false`
+
+  True if the character bumped a ceiling during the last move_and_slide.
+
+- `var floor_normal = vec2(0.0, 0.0)`
+
+  Surface normal vector of the floor contact.
+
+- `var wall_normal = vec2(0.0, 0.0)`
+
+  Surface normal vector of the wall contact.
+
+- `var slide_collisions = List<KinematicCollision2D>()`
+
+  List of collisions recorded during the last move_and_slide call.
+
+- `@export var floor_velocity = vec2(0.0, 0.0)`
+
+  Linear velocity vector of the floor collider beneath the character's feet.
+
+**Methods**
+
+- `fn ready()`
+
+  Creates kinematic character body.
+
+- `fn is_on_floor() -> bool`
+
+  Returns true if the character is touching a floor surface.
+
+- `fn is_on_wall() -> bool`
+
+  Returns true if the character is touching a wall surface.
+
+- `fn is_on_ceiling() -> bool`
+
+  Returns true if the character is touching a ceiling surface.
+
+- `fn get_floor_normal() -> vec2`
+
+  Returns the normal of the floor contact.
+
+- `fn get_wall_normal() -> vec2`
+
+  Returns the normal of the wall contact.
+
+- `fn get_platform_velocity() -> vec2`
+
+  Returns the linear velocity vector of the floor collider beneath the character's feet.
+
+- `fn get_slide_collision_count() -> int`
+
+  Returns the number of slide collisions that occurred this frame.
+
+- `fn get_slide_collision(i: int) -> KinematicCollision2D`
+
+  Returns the slide collision at index `i`.
+
+- `fn move_and_slide() -> bool`
+
+  Moves the character according to `velocity * dt`, sliding along walls/slopes and pushing dynamic bodies.
+
+## physics/area_raycast.plm
+
+Source: `cuervo/script/prelude/physics/area_raycast.plm`
+
+### Area2D
+
+```pluma
+class Area2D extends Node2D
+```
+
+A 2D area detector that monitors overlapping physics bodies and areas.
+
+**Signals**
+
+- `signal body_entered(body: Node2D)`
+
+  Emitted when a physics body enters this area.
+
+- `signal body_exited(body: Node2D)`
+
+  Emitted when a physics body exits this area.
+
+- `signal area_entered(area: Area2D)`
+
+  Emitted when another area enters this area.
+
+- `signal area_exited(area: Area2D)`
+
+  Emitted when another area exits this area.
+
+**Fields**
+
+- `@export var collision_layer = 1`
+
+  The physics layers this area occupies.
+
+- `@export var collision_mask = 1`
+
+  The physics layers this area detects.
+
+- `@export var monitoring = true`
+
+  When true, the area monitors overlaps and emits signals.
+
+- `var body_handle = 0`
+
+  Native body handle.
+
+- `var overlapping_bodies = List<Node2D>()`
+
+  Currently overlapping bodies.
+
+- `var overlapping_areas = List<Area2D>()`
+
+  Currently overlapping areas.
+
+**Methods**
+
+- `fn ensure_body()`
+
+  Ensures the native sensor body is created.
+
+- `fn enter_tree()`
+
+  Engine-internal tree entry hook ensuring native sensor body exists before child shapes register.
+
+- `fn ready()`
+
+  Creates native sensor body.
+
+- `fn exit()`
+
+  Cleans up native sensor body.
+
+- `fn get_overlapping_bodies() -> List<Node2D>`
+
+  Returns a list of all currently overlapping physics bodies.
+
+- `fn get_overlapping_areas() -> List<Area2D>`
+
+  Returns a list of all currently overlapping Area2Ds.
+
+- `fn overlaps_body(body: Node2D) -> bool`
+
+  Returns true if this area currently overlaps `body`.
+
+- `fn overlaps_area(area: Area2D) -> bool`
+
+  Returns true if this area currently overlaps `area`.
+
+### RayCast2D
+
+```pluma
+class RayCast2D extends Node2D
+```
+
+A 2D raycast node that casts a ray along target_position to detect colliders.
+
+**Fields**
+
+- `@export var target_position = vec2(0.0, 50.0)`
+
+  The destination endpoint vector of the raycast relative to this node.
+
+- `@export var collision_mask = 1`
+
+  The physics layers this ray scans for.
+
+- `@export var enabled = true`
+
+  When true, the ray updates automatically each tick.
+
+- `@export var exclude_parent = true`
+
+  When true, the ray ignores its parent physics body.
+
+- `@export var debug_draw = false`
+
+  When true, forces debug drawing regardless of global debug flag.
+
+- `var colliding = false`
+
+  True if the ray is currently colliding with a shape.
+
+- `var collider: Node2D? = null`
+
+  The hit collider node if any.
+
+- `var collision_point = vec2(0.0, 0.0)`
+
+  The world point of contact.
+
+- `var collision_normal = vec2(0.0, 0.0)`
+
+  The surface normal at the hit point.
+
+**Methods**
+
+- `fn update_tree(dt: float)`
+
+  Engine-internal per-tick update hook that runs raycast before script update().
+
+- `fn update(dt: float)`
+
+  Updates ray query each tick while enabled.
+
+- `fn is_colliding() -> bool`
+
+  Returns true if a collision is detected.
+
+- `fn get_collider() -> Node2D?`
+
+  Returns the collider node that was hit, or null.
+
+- `fn get_collision_point() -> vec2`
+
+  Returns the world point of the ray collision.
+
+- `fn get_collision_normal() -> vec2`
+
+  Returns the world normal of the ray collision.
+
+- `fn force_raycast_update()`
+
+  Immediately executes the raycast against the current physics world.
+
+- `fn draw(g: Canvas)`
+
+  Draws the raycast line and collision hit point in editor or when debug shapes are toggled.
+
+## physics/joints.plm
+
+Source: `cuervo/script/prelude/physics/joints.plm`
+
+### Joint2D
+
+```pluma
+class Joint2D extends Node2D
+```
+
+Base class for all 2D physics joints constraining two bodies.
+
+**Fields**
+
+- `@export var node_a = ""`
+
+  Name or relative path of the first connected body.
+
+- `@export var node_b = ""`
+
+  Name or relative path of the second connected body.
+
+- `@export var collide_connected = false`
+
+  When true, the two connected bodies can collide with each other.
+
+- `@export var debug_draw = false`
+
+  When true, forces debug drawing regardless of global debug flag.
+
+- `var joint_handle = 0`
+
+  Native joint handle.
+
+**Methods**
+
+- `fn resolve_body(path: str) -> PhysicsBody2D?`
+
+  Resolves a node path or node name to an existing PhysicsBody2D in the scene hierarchy.
+
+- `fn ensure_joint()`
+
+  Ensures the native joint is created if both connected bodies exist.
+
+- `fn ready()`
+
+  Connects bodies and creates native joint upon entering the tree.
+
+- `fn exit()`
+
+  Cleans up native joint when leaving the scene tree.
+
+- `fn set_motor_speed(speed: float)`
+
+  Sets the target motor speed in radians/sec (or px/sec for prismatic) if supported by the joint.
+
+- `fn set_motor_enabled(enabled: bool)`
+
+  Enables or disables the joint motor.
+
+- `fn get_reaction_force() -> vec2`
+
+  Returns the constraint reaction force exerted by this joint in Newtons.
+
+- `fn get_reaction_torque() -> float`
+
+  Returns the constraint reaction torque exerted by this joint in Newton-meters.
+
+- `fn draw(g: Canvas)`
+
+  Draws joint preview in editor or when debug shapes are toggled.
+
+### PinJoint2D
+
+```pluma
+class PinJoint2D extends Joint2D
+```
+
+A revolute pin joint constraining two physics bodies at an anchor point.
+
+**Fields**
+
+- `@export var softness = 0.0`
+
+  Softness (compliance) factor of the joint spring (0 = rigid).
+
+- `@export var angular_limit_enabled = false`
+
+  When true, rotational limits are enforced between lower and upper angles.
+
+- `@export var angular_limit_lower = 0.0`
+
+  Lower rotational limit in radians.
+
+- `@export var angular_limit_upper = 0.0`
+
+  Upper rotational limit in radians.
+
+- `@export var motor_enabled = false`
+
+  When true, the joint motor is active.
+
+- `@export var motor_speed = 0.0`
+
+  Target rotational speed of the motor in radians per second.
+
+- `@export var motor_max_torque = 1000.0`
+
+  Maximum motor torque in Newton-meters.
+
+**Methods**
+
+- `fn set_motor_speed(s: float)`
+
+  Sets the pin joint target motor speed in radians per second.
+
+- `fn set_motor_enabled(e: bool)`
+
+  Enables or disables the pin joint motor.
+
+### RevoluteJoint2D
+
+```pluma
+class RevoluteJoint2D extends PinJoint2D
+```
+
+Alias for PinJoint2D representing a 2D revolute joint.
+
+### DistanceJoint2D
+
+```pluma
+class DistanceJoint2D extends Joint2D
+```
+
+A distance joint maintaining a fixed or spring distance between two physics bodies.
+
+**Fields**
+
+- `@export var length = 0.0`
+
+  Target distance between anchor points (0 = auto-calculate from initial positions).
+
+- `@export var min_length = 0.0`
+
+  Minimum distance constraint.
+
+- `@export var max_length = 0.0`
+
+  Maximum distance constraint.
+
+- `@export var stiffness = 20.0`
+
+  Spring stiffness in Hertz.
+
+- `@export var damping = 0.7`
+
+  Spring damping ratio.
+
+**Methods**
+
+- `fn draw(g: Canvas)`
+
+  Draws distance constraint line between connected bodies.
+
+### DampedSpringJoint2D
+
+```pluma
+class DampedSpringJoint2D extends DistanceJoint2D
+```
+
+A damped spring joint connecting two bodies with distance spring dynamics.
+
+**Fields**
+
+- `@export var rest_length = 0.0`
+
+  Rest length of the spring in virtual pixels.
+
+### PrismaticJoint2D
+
+```pluma
+class PrismaticJoint2D extends Joint2D
+```
+
+A prismatic slider joint constraining movement along a linear axis between two bodies.
+
+**Fields**
+
+- `@export var axis = vec2(1.0, 0.0)`
+
+  Slide axis direction vector.
+
+- `@export var enable_spring = false`
+
+  When true, a linear spring along the slide axis is enabled.
+
+- `@export var spring_stiffness = 10.0`
+
+  Spring stiffness in Hertz.
+
+- `@export var spring_damping = 0.7`
+
+  Spring damping ratio.
+
+- `@export var target_translation = 0.0`
+
+  Target translation along the slide axis in pixels.
+
+- `@export var limit_enabled = false`
+
+  When true, translation limits are enforced along the slide axis.
+
+- `@export var lower_limit = 0.0`
+
+  Lower translation limit in pixels.
+
+- `@export var upper_limit = 0.0`
+
+  Upper translation limit in pixels.
+
+- `@export var motor_enabled = false`
+
+  When true, the linear motor is active.
+
+- `@export var motor_speed = 0.0`
+
+  Target speed of the linear motor in pixels per second.
+
+- `@export var motor_max_force = 1000.0`
+
+  Maximum motor force in Newtons.
+
+**Methods**
+
+- `fn set_motor_speed(s: float)`
+
+  Sets the linear motor speed in pixels per second.
+
+- `fn set_motor_enabled(e: bool)`
+
+  Enables or disables the linear motor.
+
+- `fn draw(g: Canvas)`
+
+  Draws slide axis and limits.
+
+### SliderJoint2D
+
+```pluma
+class SliderJoint2D extends PrismaticJoint2D
+```
+
+Alias for PrismaticJoint2D representing a 2D slider joint.
+
+### GrooveJoint2D
+
+```pluma
+class GrooveJoint2D extends Joint2D
+```
+
+A groove joint constraining a body to slide along a groove path.
+
+**Fields**
+
+- `@export var length = 50.0`
+
+  Length of the groove constraint in virtual pixels.
+
+- `@export var initial_offset = 0.0`
+
+  Initial offset along the groove in virtual pixels.
+
+**Methods**
+
+- `fn draw(g: Canvas)`
+
+  Draws groove line constraint.
+
+### WeldJoint2D
+
+```pluma
+class WeldJoint2D extends Joint2D
+```
+
+A weld joint that rigidly connects two physics bodies at an anchor point.
+
+**Fields**
+
+- `@export var linear_hertz = 0.0`
+
+  Linear stiffness in Hertz (0 = rigid).
+
+- `@export var angular_hertz = 0.0`
+
+  Angular stiffness in Hertz (0 = rigid).
+
+- `@export var linear_damping = 1.0`
+
+  Linear damping ratio.
+
+- `@export var angular_damping = 1.0`
+
+  Angular damping ratio.
+
+### WheelJoint2D
+
+```pluma
+class WheelJoint2D extends Joint2D
+```
+
+A wheel joint providing suspension spring along an axis and rotational drive for vehicle wheels.
+
+**Fields**
+
+- `@export var axis = vec2(0.0, 1.0)`
+
+  Suspension slide axis direction vector.
+
+- `@export var enable_spring = true`
+
+  When true, suspension spring is active.
+
+- `@export var suspension_stiffness = 5.0`
+
+  Suspension spring stiffness in Hertz.
+
+- `@export var suspension_damping = 0.7`
+
+  Suspension damping ratio.
+
+- `@export var enable_limit = false`
+
+  When true, suspension translation limits are enforced.
+
+- `@export var lower_translation = -20.0`
+
+  Lower suspension travel limit in pixels.
+
+- `@export var upper_translation = 20.0`
+
+  Upper suspension travel limit in pixels.
+
+- `@export var motor_enabled = false`
+
+  When true, the rotational wheel motor is active.
+
+- `@export var motor_speed = 0.0`
+
+  Target rotational speed of the wheel in radians per second.
+
+- `@export var motor_max_torque = 1000.0`
+
+  Maximum wheel motor torque in Newton-meters.
+
+**Methods**
+
+- `fn set_motor_speed(s: float)`
+
+  Sets the wheel motor speed in radians per second.
+
+- `fn set_motor_enabled(e: bool)`
+
+  Enables or disables the wheel motor.
+
+- `fn draw(g: Canvas)`
+
+  Draws wheel suspension axis and travel limits.
+
+### MotorJoint2D
+
+```pluma
+class MotorJoint2D extends Joint2D
+```
+
+A motor joint controlling the relative position, angle, and friction between two bodies.
+
+**Fields**
+
+- `@export var linear_offset = vec2(0.0, 0.0)`
+
+  Target linear offset vector between the bodies.
+
+- `@export var angular_offset = 0.0`
+
+  Target relative angle in radians between the bodies.
+
+- `@export var max_force = 1000.0`
+
+  Maximum corrective force in Newtons.
+
+- `@export var max_torque = 1000.0`
+
+  Maximum corrective torque in Newton-meters.
+
+- `@export var linear_hertz = 2.0`
+
+  Linear spring stiffness in Hertz for position control.
+
+- `@export var linear_damping = 0.7`
+
+  Linear spring damping ratio.
+
+- `@export var max_spring_force = 1000.0`
+
+  Maximum spring force in Newtons.
+
+- `@export var angular_hertz = 2.0`
+
+  Angular spring stiffness in Hertz for orientation control.
+
+- `@export var angular_damping = 0.7`
+
+  Angular spring damping ratio.
+
+- `@export var max_spring_torque = 1000.0`
+
+  Maximum spring torque in Newton-meters.
+
+**Methods**
+
+- `fn set_motor_speed(s: float)`
+
+  Sets the target angular motor speed in radians per second.
+
+### MoverJoint2D
+
+```pluma
+class MoverJoint2D extends Joint2D
+```
+
+A mover joint driving dynamic character motion through velocity commands.
+
+**Fields**
+
+- `@export var linear_velocity = vec2(0.0, 0.0)`
+
+  Desired linear velocity vector.
+
+- `@export var max_force = vec2(1000.0, 1000.0)`
+
+  Maximum drive force vector along x and y axes.
+
+### PogoJoint2D
+
+```pluma
+class PogoJoint2D extends Joint2D
+```
+
+A pogo stick spring joint constraining two bodies along a contact normal.
+
+**Fields**
+
+- `@export var normal = vec2(0.0, -1.0)`
+
+  Normal direction vector of the pogo constraint.
+
+- `@export var stiffness = 10.0`
+
+  Spring stiffness in Hertz.
+
+- `@export var damping = 0.7`
+
+  Spring damping ratio.
+
+- `@export var rest_length = 30.0`
+
+  Rest length of the pogo spring in virtual pixels.
+
+- `@export var max_tension = 50000.0`
+
+  Maximum tension force.
+
+- `@export var max_compression = 50000.0`
+
+  Maximum compression force.
+
+### FilterJoint2D
+
+```pluma
+class FilterJoint2D extends Joint2D
+```
+
+A filter joint disabling collision detection between two specific bodies.
+
+## physics/queries.plm
+
+Source: `cuervo/script/prelude/physics/queries.plm`
+
+### ShapeCast2D
+
+```pluma
+class ShapeCast2D extends Node2D
+```
+
+A 2D shape cast node that sweeps a shape along target_position to detect colliders.
+
+**Fields**
+
+- `var shape: Shape2D? = null`
+
+  The shape resource to cast.
+
+- `@export var shape_type = 1`
+
+  Fallback shape type when shape resource is null (1: Box, 2: Circle, 3: Capsule, 4: Segment).
+
+- `@export var size = vec2(32.0, 32.0)`
+
+  Box dimensions (width, height) in pixels.
+
+- `@export var radius = 16.0`
+
+  Circle or capsule radius in pixels.
+
+- `@export var target_position = vec2(0.0, 50.0)`
+
+  Destination endpoint vector of the shape sweep relative to this node.
+
+- `@export var collision_mask = 1`
+
+  Physics layers this sweep scans for.
+
+- `@export var enabled = true`
+
+  When true, updates automatically each tick.
+
+- `@export var exclude_parent = true`
+
+  When true, ignores the parent physics body.
+
+- `@export var debug_draw = false`
+
+  When true, forces debug drawing regardless of global debug flag.
+
+- `var colliding = false`
+
+  True if the shape cast detected a collision.
+
+- `var collider: Node2D? = null`
+
+  The hit collider node if any.
+
+- `var collision_point = vec2(0.0, 0.0)`
+
+  World point of contact.
+
+- `var collision_normal = vec2(0.0, 0.0)`
+
+  Surface normal at contact point.
+
+- `var fraction = 0.0`
+
+  Fraction of sweep motion where collision occurred.
+
+**Methods**
+
+- `fn update_tree(dt: float)`
+
+  Engine-internal per-tick update hook that runs shape cast before script update().
+
+- `fn update(dt: float)`
+
+  Updates shape cast query each tick while enabled.
+
+- `fn is_colliding() -> bool`
+
+  Returns true if a collision is detected.
+
+- `fn get_collider() -> Node2D?`
+
+  Returns the collider node that was hit, or null.
+
+- `fn get_collision_point() -> vec2`
+
+  Returns the world point of the collision.
+
+- `fn get_collision_normal() -> vec2`
+
+  Returns the surface normal of the collision.
+
+- `fn force_shapecast_update()`
+
+  Immediately executes the shape cast query against the physics world.
+
+- `fn draw(g: Canvas)`
+
+  Draws the shape cast sweep and collision hit point in editor or when debug shapes are toggled.
+
+### RayCastResult2D
+
+```pluma
+class RayCastResult2D
+```
+
+Result structure returned by direct raycast queries through Physics2D.raycast().
+
+**Fields**
+
+- `var hit = false`
+
+  True if a collision was found.
+
+- `var point = vec2(0.0, 0.0)`
+
+  World point of collision.
+
+- `var normal = vec2(0.0, 0.0)`
+
+  Surface normal of collision.
+
+- `var fraction = 0.0`
+
+  Fraction of the total ray length where the collision occurred.
+
+- `var collider: Node2D? = null`
+
+  The hit collider node if any.
+
+### ShapeCastResult2D
+
+```pluma
+class ShapeCastResult2D
+```
+
+Result structure returned by direct shape cast queries through Physics2D.shapecast().
+
+**Fields**
+
+- `var hit = false`
+
+  True if a collision was found.
+
+- `var point = vec2(0.0, 0.0)`
+
+  World point of collision.
+
+- `var normal = vec2(0.0, 0.0)`
+
+  Surface normal of collision.
+
+- `var fraction = 0.0`
+
+  Fraction of the total sweep length where the collision occurred.
+
+- `var collider: Node2D? = null`
+
+  The hit collider node if any.
+
+### Physics2D
+
+```pluma
+class Physics2D
+```
+
+Static query and configuration interface for the 2D physics world.
+
+**Methods**
+
+- `static fn raycast(from: vec2, to: vec2, mask: int = 1) -> RayCastResult2D`
+
+  Casts a ray from `from` to `to`, testing against shapes on `mask` layers.
+
+- `static fn shapecast(from: vec2, to: vec2, mask: int = 1, shape: Shape2D? = null) -> ShapeCastResult2D`
+
+  Casts a shape from `from` to `to`, testing against colliders on `mask` layers.
+
+- `static fn intersect_point(point: vec2, mask: int = 1) -> Node2D?`
+
+  Queries whether a point intersects with any collider on `mask` layers, returning the collider node.
+
+- `static fn explode(center: vec2, radius: float = 100.0, falloff: float = 50.0, impulse: float = 100.0, mask: int = 1)`
+
+  Applies a radial explosion in the physics world with explosive impulse and falloff.
+
+- `static fn get_gravity() -> vec2`
+
+  Gets the global 2D physics gravity vector.
+
+- `static fn set_gravity(g: vec2)`
+
+  Sets the global 2D physics gravity vector.
+
+- `static fn toggle_debug() -> bool`
+
+  Toggles runtime debug shape rendering on or off, returning the new state.
+
+- `static fn set_debug(enabled: bool)`
+
+  Sets runtime debug shape rendering explicitly.
+
+- `static fn is_debug() -> bool`
+
+  Returns whether runtime debug shape rendering is enabled.
+
+## physics/tilemap_collision.plm
+
+Physics for tilemaps (DESIGN.md 4.17, milestone 9.8).
+
+Source: `cuervo/script/prelude/physics/tilemap_collision.plm`
+
+### TileMapCollision2D
+
+```pluma
+class TileMapCollision2D extends Node2D
+```
+
+Gives its parent TileMapLayer's solid tiles (TileDef.walkable false)
+collision: when it enters the tree it builds one StaticBody2D with a box
+CollisionShape2D per rectangle of TileMapLayer.solid_rects(), so a wall of
+many tiles is one box. The bodies are transient children (scene files keep
+only this node) built in row order, the same in every run. Cells changed
+later need rebuild(). Meant for unrotated, unscaled layers.
+
+**Fields**
+
+- `@export var collision_layer = 1`
+
+  The physics layers the tile bodies are on (bitmask).
+
+- `@export var collision_mask = 1`
+
+  The physics layers the tile bodies scan (bitmask).
+
+**Methods**
+
+- `fn ready()`
+
+  Builds the tile bodies (call super.ready() when overriding).
+
+- `fn rebuild()`
+
+  Replaces the tile bodies with ones for the layer's current cells.

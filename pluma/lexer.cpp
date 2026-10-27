@@ -11,7 +11,7 @@ namespace {
 constexpr std::string_view keywords[] = {
     "alloc",  "as",     "await",  "break",   "class",   "const",  "continue", "defer",
     "else",   "emit",   "enum",   "extends", "false",   "final",  "fn",       "for",
-    "foreach", "free",  "get",    "if",      "in",      "is",     "loop",     "manual",
+    "foreach", "free",  "get",    "if",      "import",  "in",      "is",     "loop",     "manual",
     "match",  "new",    "null",   "pub",     "return",  "self",   "set",      "signal",
     "start",  "static", "step",   "struct",  "super",   "trait",  "true",     "unsafe",
     "var",    "weak",   "while",  "yield",

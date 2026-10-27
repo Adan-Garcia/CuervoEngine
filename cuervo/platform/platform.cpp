@@ -61,12 +61,7 @@ std::filesystem::path path_from_utf8(std::string_view text) {
 
 std::filesystem::path executable_dir() {
     const char* base = SDL_GetBasePath(); // owned by SDL (SDL3)
-    if (base == nullptr) return {};
-    auto p = path_from_utf8(base);
-    while (p.has_relative_path() && p.filename().empty()) {
-        p = p.parent_path();
-    }
-    return p;
+    return base != nullptr ? path_from_utf8(base) : std::filesystem::path();
 }
 
 std::filesystem::path find_asset(std::string_view subpath, std::string_view fallback) {
@@ -77,38 +72,29 @@ std::filesystem::path find_asset(std::string_view subpath, std::string_view fall
         auto p = path_from_utf8(*dir) / path_from_utf8(subpath);
         if (fs::exists(p, ec)) return p;
     }
-    // 2. Compiled fallback if it exists (e.g. running from repo during development)
+    // 2. Relative to executable: <exe_dir>/assets/<subpath>
+    const auto exe = executable_dir();
+    if (!exe.empty()) {
+        auto p1 = exe / "assets" / path_from_utf8(subpath);
+        if (fs::exists(p1, ec)) return p1;
+
+        // 3. Relative to parent: <exe_dir>/../assets/<subpath> (standard when binaries are in bin/)
+        auto p2 = exe.parent_path() / "assets" / path_from_utf8(subpath);
+        if (fs::exists(p2, ec)) return p2;
+
+        // 4. Standard install prefix: <exe_dir>/../share/cuervo/assets/<subpath>
+        auto p3 = exe.parent_path() / "share" / "cuervo" / "assets" / path_from_utf8(subpath);
+        if (fs::exists(p3, ec)) return p3;
+    }
+    // 5. Compiled fallback (running from the build tree); last so a stale build path never shadows an
+    // installed layout.
     if (!fallback.empty()) {
         auto p = path_from_utf8(fallback);
         if (fs::exists(p, ec)) return p;
     }
-    // 3. Search upwards from the executable directory: <dir>/assets/<subpath>
-    const auto exe = executable_dir();
-    if (!exe.empty()) {
-        for (fs::path cur = exe; !cur.empty(); ) {
-            auto p = cur / "assets" / path_from_utf8(subpath);
-            if (fs::exists(p, ec)) return p;
-            auto parent = cur.parent_path();
-            if (parent == cur) break;
-            cur = std::move(parent);
-        }
-
-        // Standard install prefix: <exe_dir>/../share/cuervo/assets/<subpath>
-        auto p_share = exe.parent_path() / "share" / "cuervo" / "assets" / path_from_utf8(subpath);
-        if (fs::exists(p_share, ec)) return p_share;
-    }
-    // 4. Search upwards from current working directory: <dir>/assets/<subpath>
-    for (fs::path cur = fs::current_path(ec); !ec && !cur.empty(); ) {
-        auto p = cur / "assets" / path_from_utf8(subpath);
-        if (fs::exists(p, ec)) return p;
-        auto parent = cur.parent_path();
-        if (parent == cur) break;
-        cur = std::move(parent);
-    }
-
-    if (!fallback.empty()) return path_from_utf8(fallback);
-    if (!exe.empty()) return exe.parent_path() / "assets" / path_from_utf8(subpath);
-    return path_from_utf8(subpath);
+    return fallback.empty()
+               ? (exe.empty() ? path_from_utf8(subpath) : exe.parent_path() / "assets" / path_from_utf8(subpath))
+               : path_from_utf8(fallback);
 }
 
 std::filesystem::path user_data_dir(std::string_view game) {

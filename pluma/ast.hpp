@@ -54,9 +54,11 @@ struct ErrorType : TypeExpr {
     static constexpr TypeKind node_kind = TypeKind::Error;
 };
 
-// `int`, `List<T>`, `Map<str, int>`
+// `int`, `List<T>`, `Map<str, int>`, `tween.Tween` (a package's type through
+// an import, LANGUAGE.md 9.26)
 struct NamedType : TypeExpr {
     static constexpr TypeKind node_kind = TypeKind::Named;
+    Ident qualifier; // the import alias, empty for an unqualified name
     Ident name;
     List<TypeExpr*> args;
 };
@@ -621,16 +623,35 @@ struct SignalDecl : Decl {
     List<Param> params;
 };
 
+// ---------------------------------------------------------------- imports
+
+// `import tween`, `import tween as tw`, `import tween.{Tween, ease as e}`
+// (LANGUAGE.md 9.26). An import's names are visible in its own file only.
+struct ImportItem {
+    Ident name;
+    Ident alias; // empty: the item's own name
+};
+
+struct ImportDecl {
+    Span span;
+    Ident package;
+    Ident alias;     // `as` name for the package, empty for none
+    bool has_items = false;
+    List<ImportItem> items;
+};
+
 // ---------------------------------------------------------------- roots
 
 struct Module {
     List<Decl*> decls;
+    List<ImportDecl*> imports; // in source order
 };
 
 // Script mode (REPL): declarations and statements mixed at top level.
 // Declarations appear as DeclStmt.
 struct Script {
     List<Stmt*> stmts;
+    List<ImportDecl*> imports;
 };
 
 // Precedence levels, high number = binds tighter. Mirrors LANGUAGE.md 4.1

@@ -1,0 +1,247 @@
+// An agent node that navigates toward a target position across a NavigationRegion2D.
+class NavigationAgent2D extends Node2D {
+    // Destination position in global coordinates.
+    @export var target_position = vec2(0.0, 0.0)
+    // Distance to current waypoint required to advance to the next.
+    @export var path_desired_distance = 8.0
+    // Distance to final destination required to consider navigation finished.
+    @export var target_desired_distance = 8.0
+    // Maximum movement speed in units per second.
+    @export var max_speed = 100.0
+    // Node name/path to the target NavigationRegion2D ("" = searches tree automatically).
+    @export var region_path = ""
+    // Pathfinding search method used by this agent.
+    @export var path_method = PathMethod.AStar
+    // Pathfinding heuristic metric used by this agent.
+    @export var path_heuristic = PathHeuristic.Octile
+    // Whether this agent requests smoothed waypoint paths.
+    @export var enable_path_smoothing = false
+
+    // Signal emitted when the agent reaches its final target.
+    signal target_reached
+    // Signal emitted when the entire waypoint path is completed.
+    signal navigation_finished
+    // Signal emitted when a waypoint index is reached.
+    signal waypoint_reached(index: int)
+
+    // Current list of waypoint positions in global coordinates.
+    var _path = List<vec2>()
+    // Current index in `_path`.
+    var _waypoint_idx = 0
+    // Whether navigation is completed.
+    var _nav_finished = true
+    // Whether target has been reached.
+    var _target_reached = false
+
+    // Resolves a relative or absolute node path ("../Foo", "Foo/Bar", or a node name).
+    fn _resolve_node(np: str) -> Node? {
+        if np == "" || np == "." {
+            return self
+        }
+        var curr: Node = self
+        if np.starts_with("/") {
+            while curr.parent != null {
+                curr = curr.parent
+            }
+        }
+        var parts = np.split("/")
+        for part in parts {
+            if part == "" || part == "." {
+                continue
+            }
+            if part == ".." {
+                if curr.parent != null {
+                    curr = curr.parent
+                } else {
+                    return null
+                }
+            } else {
+                var found: Node = null
+                for c in curr.children {
+                    if c.name == part {
+                        found = c
+                        break
+                    }
+                }
+                if found == null {
+                    found = curr.find(part)
+                }
+                if found == null {
+                    return null
+                }
+                curr = found
+            }
+        }
+        return curr
+    }
+
+    // Resolves the active NavigationRegion2D.
+    fn _resolve_region() -> NavigationRegion2D? {
+        // 1. Explicit path
+        if region_path.len() > 0 {
+            if _resolve_node(region_path) is NavigationRegion2D r {
+                return r
+            }
+        }
+        // 2. Siblings in parent
+        if parent is Node par {
+            for child in par.children {
+                if child is NavigationRegion2D reg {
+                    return reg
+                }
+            }
+            // 3. Parent's siblings (e.g. Character and NavRegion both children of Level)
+            if par.parent is Node grand {
+                for child in grand.children {
+                    if child is NavigationRegion2D reg {
+                        return reg
+                    }
+                }
+            }
+        }
+        // 4. Whole scene tree search
+        var root: Node = self
+        while root.parent != null {
+            root = root.parent
+        }
+        return _search_region_in_tree(root)
+    }
+
+    fn _search_region_in_tree(n: Node) -> NavigationRegion2D? {
+        if n is NavigationRegion2D r {
+            return r
+        }
+        for c in n.children {
+            if _search_region_in_tree(c)? found {
+                return found
+            }
+        }
+        return null
+    }
+
+    // Sets a new target destination and computes the path.
+    fn set_target_position(pos: vec2) {
+        target_position = pos
+        _nav_finished = false
+        _target_reached = false
+        if _resolve_region()? reg {
+            _path = reg.get_path_with(global_position(), pos, path_method, path_heuristic, enable_path_smoothing)
+            _waypoint_idx = 0
+            if _path.is_empty() {
+                target_position = global_position()
+                _nav_finished = true
+                return
+            }
+            target_position = _path[_path.len() - 1]
+            if _path.len() > 1 && (global_position() - _path[0]).length() <= path_desired_distance {
+                _waypoint_idx = 1
+            }
+        } else {
+            _path.clear()
+            _path.push(pos)
+            _waypoint_idx = 0
+        }
+    }
+
+    // Advances waypoint progression and checks arrival.
+    fn update(dt: float) {
+        if _nav_finished || _path.is_empty() {
+            return
+        }
+        var cur_pos = global_position()
+        while _waypoint_idx < _path.len() {
+            var wp = _path[_waypoint_idx]
+            var desired_dist = (_waypoint_idx + 1 < _path.len()) ? path_desired_distance : target_desired_distance
+            if (cur_pos - wp).length() <= desired_dist {
+                emit waypoint_reached(_waypoint_idx)
+                _waypoint_idx += 1
+            } else {
+                break
+            }
+        }
+
+        if _waypoint_idx >= _path.len() {
+            _nav_finished = true
+            emit navigation_finished
+            if (cur_pos - target_position).length() <= target_desired_distance {
+                _target_reached = true
+                emit target_reached
+            }
+        }
+    }
+
+    // Returns the next global position the agent should steer toward.
+    fn get_next_path_position() -> vec2 {
+        if _path.is_empty() || _nav_finished {
+            return target_position
+        }
+        var cur_pos = global_position()
+        while _waypoint_idx < _path.len() {
+            var wp = _path[_waypoint_idx]
+            var dist = (cur_pos - wp).length()
+            var desired_dist = (_waypoint_idx + 1 < _path.len()) ? path_desired_distance : target_desired_distance
+            if dist <= desired_dist {
+                emit waypoint_reached(_waypoint_idx)
+                _waypoint_idx += 1
+            } else {
+                break
+            }
+        }
+
+        if _waypoint_idx >= _path.len() {
+            _nav_finished = true
+            emit navigation_finished
+            if (cur_pos - target_position).length() <= target_desired_distance {
+                _target_reached = true
+                emit target_reached
+            }
+            return target_position
+        }
+
+        return _path[_waypoint_idx]
+    }
+
+    // Returns true when the agent is within `target_desired_distance` of `target_position`.
+    fn is_target_reached() -> bool {
+        return _target_reached || (global_position() - target_position).length() <= target_desired_distance
+    }
+
+    // Returns true when the waypoint path is exhausted or target is reached.
+    fn is_navigation_finished() -> bool {
+        return _nav_finished
+    }
+
+    // Returns distance in pixels from the agent's current position to `target_position`.
+    fn distance_to_target() -> float {
+        return (global_position() - target_position).length()
+    }
+
+    // Returns the full list of active path waypoints.
+    fn get_current_navigation_path() -> List<vec2> {
+        return _path
+    }
+
+    // Returns the downhill direction vector for this agent from a precomputed DijkstraMap.
+    fn get_dijkstra_direction(dmap: DijkstraMap) -> vec2 {
+        return dmap.get_direction_at(global_position())
+    }
+
+    // Returns the uphill fleeing direction vector for this agent from a precomputed DijkstraMap.
+    fn get_dijkstra_flee_direction(dmap: DijkstraMap) -> vec2 {
+        return dmap.get_flee_direction_at(global_position())
+    }
+
+    // Sets the agent's waypoint path directly from a precomputed DijkstraMap without running search.
+    fn set_path_from_dijkstra_map(dmap: DijkstraMap, max_steps = 256, smooth = false) {
+        _path = dmap.get_path_from(global_position(), max_steps, smooth)
+        _waypoint_idx = 0
+        _nav_finished = _path.is_empty()
+        _target_reached = false
+        if _path.len() > 0 {
+            target_position = _path[_path.len() - 1]
+        }
+        if _path.len() > 1 && (global_position() - _path[0]).length() <= path_desired_distance {
+            _waypoint_idx = 1
+        }
+    }
+}

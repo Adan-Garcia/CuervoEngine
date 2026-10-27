@@ -1,0 +1,49 @@
+// Physics for tilemaps (DESIGN.md 4.17, milestone 9.8).
+
+// Gives its parent TileMapLayer's solid tiles (TileDef.walkable false)
+// collision: when it enters the tree it builds one StaticBody2D with a box
+// CollisionShape2D per rectangle of TileMapLayer.solid_rects(), so a wall of
+// many tiles is one box. The bodies are transient children (scene files keep
+// only this node) built in row order, the same in every run. Cells changed
+// later need rebuild(). Meant for unrotated, unscaled layers.
+class TileMapCollision2D extends Node2D {
+    // The physics layers the tile bodies are on (bitmask).
+    @export var collision_layer = 1
+    // The physics layers the tile bodies scan (bitmask).
+    @export var collision_mask = 1
+
+    // Builds the tile bodies (call super.ready() when overriding).
+    fn ready() {
+        rebuild()
+    }
+
+    // Replaces the tile bodies with ones for the layer's current cells.
+    fn rebuild() {
+        var i = children.len() - 1
+        while i >= 0 {
+            var c = children[i]
+            if c.transient && c is StaticBody2D {
+                c.queue_free()
+            }
+            i -= 1
+        }
+        if parent is TileMapLayer tm {
+            var sz = tm.cell_size()
+            for r in tm.solid_rects() {
+                var world = tm.to_global((r.pos + r.size * 0.5) * sz)
+                var body = StaticBody2D()
+                body.name = "Tiles"
+                body.transient = true
+                body.collision_layer = collision_layer
+                body.collision_mask = collision_mask
+                body.position = Scene.transform_hierarchy() ? to_local(world) : world
+                var shape = CollisionShape2D()
+                shape.name = "Shape"
+                shape.shape_type = 1
+                shape.size = r.size * sz
+                body.add_child(shape)
+                add_child(body)
+            }
+        }
+    }
+}

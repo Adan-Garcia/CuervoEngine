@@ -45,7 +45,7 @@ TEST_CASE("strings") {
     REQUIRE(tokens.size() == 3);
     CHECK(tokens[0].kind == K::String);
     CHECK(tokens[0].text == R"("Score: {score}")");
-    CHECK(tokens[1].text == R"("a\"b")");
+    CHECK(tokens[1].text == "\"a\\\"b\""); // not a raw string: MSVC misparses R"(...\"...)" inside a macro argument
 
     CHECK(kinds("\"open") == std::vector{K::Error, K::Eof});
 }

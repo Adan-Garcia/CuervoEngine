@@ -1,0 +1,836 @@
+// Engine API: UI layout containers (DESIGN.md 4.10, Milestone 9.3).
+//
+// Container nodes: Container, BoxContainer, VBox, HBox, Margin, Panel, Center,
+// GridContainer, FlowContainer, SplitContainer, AspectRatioContainer, ScrollContainer.
+
+// A control that arranges its children; the base of VBox, HBox, Margin, Panel and Center.
+class Container extends Control {}
+
+// Stacks visible children (VBox: top to bottom, HBox: left to right) at
+// their minimum size along the stack, filling the other direction. Space
+// left over goes to `expand` children, else `align` places the stack.
+class BoxContainer extends Container {
+    @export var separation = -1.0 // < 0: the theme's
+    @export var align = #begin    // #begin, #center, #end
+    // True stacks top to bottom; HBox overrides it to stack left to right.
+    fn vertical() -> bool {
+        return true
+    }
+    // The space between children: `separation`, or the theme's when it is negative.
+    fn gap() -> float {
+        return separation >= 0.0 ? separation : get_theme().separation
+    }
+    // The stack's minimum size: children along the stack plus gaps, the widest across.
+    fn content_min_size() -> vec2 {
+        var along = 0.0
+        var across = 0.0
+        var n = 0
+        for c in children {
+            if c is Control k && k.in_layout() {
+                var m = k.combined_min_size()
+                along += vertical() ? m.y : m.x
+                across = max(across, vertical() ? m.x : m.y)
+                n += 1
+            }
+        }
+        if n > 1 {
+            along += gap() * ((n - 1) as float)
+        }
+        return vertical() ? vec2(across, along) : vec2(along, across)
+    }
+    // Stacks the visible children, shares leftover space among `expand` children and applies `align`.
+    fn layout_children() {
+        var need = content_min_size()
+        var extra = max(vertical() ? size.y - need.y : size.x - need.x, 0.0)
+        var expanders = 0
+        for c in children {
+            if c is Control k && k.in_layout() && k.expand {
+                expanders += 1
+            }
+        }
+        var cursor = 0.0
+        if expanders == 0 {
+            if align == #center {
+                cursor = extra * 0.5
+            } else if align == #end {
+                cursor = extra
+            }
+        }
+        var first = true
+        for c in children {
+            if c is Control k && k.in_layout() {
+                if !first {
+                    cursor += gap()
+                }
+                first = false
+                var m = k.combined_min_size()
+                var len = vertical() ? m.y : m.x
+                if k.expand {
+                    len += extra / (expanders as float)
+                }
+                if vertical() {
+                    k.set_rect(position + vec2(0.0, cursor), vec2(size.x, len))
+                } else {
+                    k.set_rect(position + vec2(cursor, 0.0), vec2(len, size.y))
+                }
+                cursor += len
+            }
+        }
+    }
+}
+
+// A BoxContainer that stacks children top to bottom.
+class VBox extends BoxContainer {}
+
+// A BoxContainer that stacks children left to right.
+class HBox extends BoxContainer {
+    // False: HBox stacks left to right.
+    fn vertical() -> bool {
+        return false
+    }
+}
+
+// Children fill the rect minus `margins` (left, top, right, bottom).
+class Margin extends Container {
+    // Left, top, right and bottom, in pixels.
+    @export var margins = vec4(0.0, 0.0, 0.0, 0.0)
+    // The empty border around the children (`margins`).
+    fn inset() -> vec4 {
+        return margins
+    }
+    // The children's minimum size plus the inset.
+    fn content_min_size() -> vec2 {
+        var m = vec2(0.0, 0.0)
+        for c in children {
+            if c is Control k && k.in_layout() {
+                m = m.max(k.combined_min_size())
+            }
+        }
+        var i = inset()
+        return m + vec2(i.x + i.z, i.y + i.w)
+    }
+    // Gives the children the rect minus the inset.
+    fn layout_children() {
+        var i = inset()
+        for c in children {
+            if c is Control k && !k.floating() {
+                k.set_rect(position + vec2(i.x, i.y), (size - vec2(i.x + i.z, i.y + i.w)).max(vec2(0.0, 0.0)))
+            }
+        }
+    }
+}
+
+// A Margin with a themed background; adds the theme's panel padding.
+class Panel extends Margin {
+    // The empty border around the children (the theme's panel padding).
+    fn inset() -> vec4 {
+        return margins + vec4(get_theme().panel_padding)
+    }
+    // Draws the panel's rounded background and border.
+    fn draw(g: Canvas) {
+        var t = get_theme()
+        g.rect(position, size, fill = t.panel, stroke = t.panel_border, width = t.border, radius = t.radius * 1.5)
+    }
+}
+
+// Children at their minimum size, centered.
+class Center extends Container {
+    // The largest child's minimum size.
+    fn content_min_size() -> vec2 {
+        var m = vec2(0.0, 0.0)
+        for c in children {
+            if c is Control k && k.in_layout() {
+                m = m.max(k.combined_min_size())
+            }
+        }
+        return m
+    }
+    // Centers each child at its minimum size.
+    fn layout_children() {
+        for c in children {
+            if c is Control k && !k.floating() {
+                var m = k.combined_min_size()
+                k.set_rect(position + (size - m) * 0.5, m)
+            }
+        }
+    }
+}
+
+
+// Children in a grid of `columns` columns, filled row by row. A column is as
+// wide as its widest cell and a row as tall as its tallest; children fill
+// their cell. Space left over goes equally to the columns (rows) that hold an
+// `expand` child.
+class GridContainer extends Container {
+    // Cells per row.
+    @export var columns = 2
+    // Gap between columns / rows; < 0: the theme's separation.
+    @export var h_separation = -1.0
+    // Gap between rows (see h_separation).
+    @export var v_separation = -1.0
+
+    // The column gap in effect: h_separation, or the theme's separation if negative.
+    fn hgap() -> float {
+        return h_separation >= 0.0 ? h_separation : get_theme().separation
+    }
+    // The row gap in effect: v_separation, or the theme's separation if negative.
+    fn vgap() -> float {
+        return v_separation >= 0.0 ? v_separation : get_theme().separation
+    }
+    // The laid-out children, in order.
+    fn cells() -> List<Control> {
+        var out = List<Control>()
+        for c in children {
+            if c is Control k && k.in_layout() {
+                out.push(k)
+            }
+        }
+        return out
+    }
+    // Minimum column widths and row heights, and which of them grow.
+    fn measure_grid(widths: List<float>, heights: List<float>, grow_x: List<bool>, grow_y: List<bool>) {
+        var cols = max(columns, 1)
+        var list = cells()
+        var rows = (list.len() + cols - 1) / cols
+        for i in 0..cols {
+            widths.push(0.0)
+            grow_x.push(false)
+        }
+        for i in 0..rows {
+            heights.push(0.0)
+            grow_y.push(false)
+        }
+        for i in 0..list.len() {
+            var m = list[i].combined_min_size()
+            var cx = i % cols
+            var ry = i / cols
+            widths[cx] = max(widths[cx], m.x)
+            heights[ry] = max(heights[ry], m.y)
+            if list[i].expand {
+                grow_x[cx] = true
+                grow_y[ry] = true
+            }
+        }
+    }
+    // Sum of the column widths and row heights plus the gaps.
+    fn content_min_size() -> vec2 {
+        var w = List<float>()
+        var h = List<float>()
+        var gx = List<bool>()
+        var gy = List<bool>()
+        measure_grid(w, h, gx, gy)
+        var total = vec2(0.0, 0.0)
+        for x in w {
+            total.x += x
+        }
+        for y in h {
+            total.y += y
+        }
+        if w.len() > 1 {
+            total.x += hgap() * ((w.len() - 1) as float)
+        }
+        if h.len() > 1 {
+            total.y += vgap() * ((h.len() - 1) as float)
+        }
+        return total
+    }
+    // Sizes the columns and rows (growing those holding an `expand` child) and places each child in its cell.
+    fn layout_children() {
+        var w = List<float>()
+        var h = List<float>()
+        var gx = List<bool>()
+        var gy = List<bool>()
+        measure_grid(w, h, gx, gy)
+        var need = content_min_size()
+        var extra = (size - need).max(vec2(0.0, 0.0))
+        var nx = 0
+        for g in gx {
+            if g {
+                nx += 1
+            }
+        }
+        var ny = 0
+        for g in gy {
+            if g {
+                ny += 1
+            }
+        }
+        for i in 0..w.len() {
+            if gx[i] {
+                w[i] += extra.x / (nx as float)
+            }
+        }
+        for i in 0..h.len() {
+            if gy[i] {
+                h[i] += extra.y / (ny as float)
+            }
+        }
+        var cols = max(columns, 1)
+        var list = cells()
+        var xs = List<float>()
+        var cursor = 0.0
+        for i in 0..w.len() {
+            xs.push(cursor)
+            cursor += w[i] + hgap()
+        }
+        var ys = List<float>()
+        cursor = 0.0
+        for i in 0..h.len() {
+            ys.push(cursor)
+            cursor += h[i] + vgap()
+        }
+        for i in 0..list.len() {
+            var cx = i % cols
+            var ry = i / cols
+            list[i].set_rect(position + vec2(xs[cx], ys[ry]), vec2(w[cx], h[ry]))
+        }
+    }
+}
+
+// Children placed left to right in rows that wrap when the next child would
+// pass the right edge (`vertical`: top to bottom in columns that wrap at the
+// bottom). Children keep their minimum size. Its minimum size follows the
+// size it was last given (a wrapped height needs the width), so a flow inside
+// a box settles one tick after its width changes.
+class FlowContainer extends Container {
+    // true: columns that fill downwards instead of rows.
+    @export var vertical = false
+    // Gaps along the flow and between lines; < 0: the theme's separation.
+    @export var h_separation = -1.0
+    // Gap between lines (see h_separation).
+    @export var v_separation = -1.0
+
+    // The gap along the flow in effect: h_separation, or the theme's separation if negative.
+    fn hgap() -> float {
+        return h_separation >= 0.0 ? h_separation : get_theme().separation
+    }
+    // The gap between lines in effect: v_separation, or the theme's separation if negative.
+    fn vgap() -> float {
+        return v_separation >= 0.0 ? v_separation : get_theme().separation
+    }
+    // Lays the children out within `limit` along the flow; places them when
+    // `place`. Returns the used size.
+    fn flow(limit: float, place: bool) -> vec2 {
+        var along_gap = vertical ? vgap() : hgap()
+        var line_gap = vertical ? hgap() : vgap()
+        var a = 0.0     // cursor along the flow
+        var line = 0.0  // start of the current line, across the flow
+        var line_len = 0.0
+        var used_along = 0.0
+        var first = true
+        for c in children {
+            if c is Control k && k.in_layout() {
+                var m = k.combined_min_size()
+                var len = vertical ? m.y : m.x
+                var thick = vertical ? m.x : m.y
+                if !first && a + len > limit {
+                    line += line_len + line_gap
+                    a = 0.0
+                    line_len = 0.0
+                    first = true
+                }
+                if place {
+                    k.set_rect(position + (vertical ? vec2(line, a) : vec2(a, line)), m)
+                }
+                a += len + along_gap
+                used_along = max(used_along, a - along_gap)
+                line_len = max(line_len, thick)
+                first = false
+            }
+        }
+        var across = line + line_len
+        return vertical ? vec2(across, used_along) : vec2(used_along, across)
+    }
+    // The widest child's size; when it has a size, the extent along the flow is wrapped to it and the other axis grows to fit the lines.
+    fn content_min_size() -> vec2 {
+        var widest = vec2(0.0, 0.0)
+        for c in children {
+            if c is Control k && k.in_layout() {
+                widest = widest.max(k.combined_min_size())
+            }
+        }
+        var limit = vertical ? size.y : size.x
+        if limit <= 0.0 {
+            return widest
+        }
+        var used = flow(limit, false)
+        return vertical ? vec2(used.x, widest.y) : vec2(widest.x, used.y)
+    }
+    // Places the children in wrapping lines within the container's size along the flow.
+    fn layout_children() {
+        flow(vertical ? size.y : size.x, true)
+    }
+}
+
+// Two children side by side (`vertical`: one above the other) with a bar
+// between them. The bar is focusable: ui_left/right (ui_up/down when
+// vertical) move it, and the pointer drags it. Each child keeps at least its
+// minimum size.
+class SplitContainer extends Container {
+    // true: the first child on top, the bar horizontal.
+    @export var vertical = false
+    // The first child's share of the space left after the bar, 0..1.
+    @export var split = 0.5
+    // The bar's thickness in pixels.
+    @export var bar_size = 12.0
+    // Pixels a ui_* press moves the bar.
+    @export var handle_step = 24.0
+    // `split` changed (keys or dragging).
+    signal split_changed(value: float)
+
+    // Focusable unless disabled, so the bar can be moved with the keys.
+    fn can_focus() -> bool {
+        return !disabled
+    }
+    // The first two laid-out children.
+    fn pair() -> List<Control> {
+        var out = List<Control>()
+        for c in children {
+            if c is Control k && k.in_layout() && out.len() < 2 {
+                out.push(k)
+            }
+        }
+        return out
+    }
+    // The component of `v` along the split direction (y when vertical, else x).
+    fn along(v: vec2) -> float {
+        return vertical ? v.y : v.x
+    }
+    // Space for the children along the split direction.
+    fn available() -> float {
+        return max(along(size) - bar_size, 1.0)
+    }
+    // The first child's length, within the children's minimum sizes.
+    fn first_length() -> float {
+        var p = pair()
+        if p.len() < 2 {
+            return available()
+        }
+        var lo = along(p[0].combined_min_size())
+        var hi = available() - along(p[1].combined_min_size())
+        return clamp(available() * split, lo, max(hi, lo))
+    }
+    // Sets `split` (clamped to 0..1), emitting `split_changed` when it changed.
+    fn set_split(v: float) {
+        var x = clamp(v, 0.0, 1.0)
+        if x != split {
+            split = x
+            emit split_changed(x)
+        }
+    }
+    // Top-left corner of the bar.
+    fn bar_rect_pos() -> vec2 {
+        var f = first_length()
+        return vertical ? position + vec2(0.0, f) : position + vec2(f, 0.0)
+    }
+    // Size of the bar.
+    fn bar_rect_size() -> vec2 {
+        return vertical ? vec2(size.x, bar_size) : vec2(bar_size, size.y)
+    }
+    // Center of the bar.
+    fn center() -> vec2 {
+        return bar_rect_pos() + bar_rect_size() * 0.5
+    }
+    // The control to focus at `p`: the bar itself, or a focusable control inside the children.
+    fn focusable_at(p: vec2) -> Control {
+        var found: Control
+        if !visible {
+            return found
+        }
+        var bp = bar_rect_pos()
+        var bs = bar_rect_size()
+        if !disabled && p.x >= bp.x && p.y >= bp.y && p.x < bp.x + bs.x && p.y < bp.y + bs.y {
+            found = self
+        }
+        for c in children {
+            if c is Control k && !k.floating() {
+                var f = k.focusable_at(p)
+                if f != null {
+                    found = f
+                }
+            }
+        }
+        return found
+    }
+    // Moves the bar by `handle_step` pixels per press along its direction; false if the direction doesn't apply.
+    fn nudge(dir: vec2) -> bool {
+        var d = vertical ? dir.y : dir.x
+        if d == 0.0 || disabled {
+            return false
+        }
+        set_split(split + d * handle_step / available())
+        return true
+    }
+    // Starts dragging: moves the bar under the pointer.
+    fn pointer_down(p: vec2) {
+        pointer_drag(p)
+    }
+    // Moves the bar to follow the pointer.
+    fn pointer_drag(p: vec2) {
+        if !disabled {
+            var origin = vertical ? position.y : position.x
+            set_split((along(p) - origin - bar_size * 0.5) / available())
+        }
+    }
+    // The bar plus the first two children's minimum sizes along the split, and the larger across.
+    fn content_min_size() -> vec2 {
+        var p = pair()
+        var a = bar_size
+        var across = 0.0
+        for k in p {
+            var m = k.combined_min_size()
+            a += along(m)
+            across = max(across, vertical ? m.x : m.y)
+        }
+        return vertical ? vec2(across, a) : vec2(a, across)
+    }
+    // Gives the first child the space before the bar and the second the rest; a lone child fills the container.
+    fn layout_children() {
+        var p = pair()
+        if p.len() == 0 {
+            return
+        }
+        var f = first_length()
+        if p.len() == 1 {
+            p[0].set_rect(position, size)
+            return
+        }
+        if vertical {
+            p[0].set_rect(position, vec2(size.x, f))
+            p[1].set_rect(position + vec2(0.0, f + bar_size), vec2(size.x, max(size.y - f - bar_size, 0.0)))
+        } else {
+            p[0].set_rect(position, vec2(f, size.y))
+            p[1].set_rect(position + vec2(f + bar_size, 0.0), vec2(max(size.x - f - bar_size, 0.0), size.y))
+        }
+    }
+    // Draws the bar with a grip line, highlighted while focused.
+    fn draw(g: Canvas) {
+        var t = get_theme()
+        var focus = has_focus()
+        var bp = bar_rect_pos()
+        var bs = bar_rect_size()
+        g.rect(bp, bs, fill = focus ? t.button_focus : t.button, stroke = focus ? t.accent : t.panel_border,
+               width = t.border, radius = t.radius * 0.5)
+        var c = bp + bs * 0.5
+        var grip = vertical ? vec2(22.0, 0.0) : vec2(0.0, 22.0)
+        g.line(c - grip, c + grip, color = focus ? t.accent : t.text_dim, width = 3.0)
+    }
+}
+
+// Fits its children into the largest rectangle of width : height = `ratio`
+// that fits (#fit) or the smallest that covers the whole container (#cover,
+// clipped), placed by `align` (0 = left/top, 1 = right/bottom).
+class AspectRatioContainer extends Container {
+    // Width divided by height.
+    @export var ratio = 1.0
+    // #fit or #cover.
+    @export var stretch = #fit
+    // Where the child sits in the spare space: (0, 0) top-left, (1, 1) bottom-right.
+    @export var align = vec2(0.5, 0.5)
+
+    // Only #cover clips, since the child then overflows the container.
+    fn clips_children() -> bool {
+        return stretch == #cover
+    }
+    // The largest minimum size among the children.
+    fn content_min_size() -> vec2 {
+        var m = vec2(0.0, 0.0)
+        for c in children {
+            if c is Control k && k.in_layout() {
+                m = m.max(k.combined_min_size())
+            }
+        }
+        return m
+    }
+    // The child rectangle's size for the current container size.
+    fn child_size() -> vec2 {
+        var r = max(ratio, 0.0001)
+        var wide = size.x / max(size.y, 0.0001) > r
+        if (stretch == #cover) == wide {
+            return vec2(size.x, size.x / r)
+        }
+        return vec2(size.y * r, size.y)
+    }
+    // Gives every child the ratio-fitted rectangle, placed by `align`.
+    fn layout_children() {
+        var cs = child_size()
+        var at = position + (size - cs) * align
+        for c in children {
+            if c is Control k && k.in_layout() {
+                k.set_rect(at, cs)
+            }
+        }
+    }
+    // Draws the children; with #cover they are clipped to the container.
+    fn draw_tree(g: Canvas) {
+        if !visible {
+            return
+        }
+        if stretch == #cover {
+            draw(g)
+            UI.push_clip(g, position, size)
+            for c in children {
+                c.draw_tree(g)
+            }
+            UI.pop_clip(g)
+        } else {
+            super.draw_tree(g)
+        }
+    }
+}
+
+// One child inside a view onto it: the child gets its minimum size or the
+// view's, whichever is larger, and the content scrolls by the wheel and
+// `ui_scroll_up/down` actions (over the container, or when the focus is
+// inside it), by dragging the bar or empty content, and by keyboard/gamepad
+// focus moves (the focused control is scrolled into view). Content outside
+// the view is clipped and can't be clicked.
+class ScrollContainer extends Container {
+    // Which directions scroll. A direction that doesn't scroll gives the
+    // content the view's size there (and the container its minimum size).
+    @export var vertical = true
+    // Scroll horizontally too (see vertical).
+    @export var horizontal = false
+    // Pixels per wheel notch / first scroll press (held presses go slower).
+    @export var wheel_step = 56.0
+    // Scroll the focused control into view when focus moves into the content.
+    @export var follow_focus = true
+    // Draw the scroll bars (10 px wide, over the right/bottom edge).
+    @export var show_bars = true
+    // The content's offset: how far it is scrolled, 0 .. max_scroll().
+    @export var scroll = vec2(0.0, 0.0)
+    // `scroll` changed.
+    signal scrolled(offset: vec2)
+
+    var _content = vec2(0.0, 0.0)  // laid-out content size
+    var _view = vec2(0.0, 0.0)     // viewport size (minus bars)
+    var _seen_focus: Control
+    var _drag = 0                  // 0 none, 1 bar, 2 content
+    var _drag_from = vec2(0.0, 0.0)
+    var _drag_scroll = vec2(0.0, 0.0)
+    var _bar_vertical = true
+
+    // Always clips: the content outside the view is hidden.
+    fn clips_children() -> bool {
+        return true
+    }
+    // Width of a scroll bar in pixels.
+    fn bar_width() -> float {
+        return 10.0
+    }
+    // Pixels one scroll press moves; the wheel step.
+    fn scroll_step() -> float {
+        return wheel_step
+    }
+    // The content child: the first laid-out Control.
+    fn content() -> Control {
+        for c in children {
+            if c is Control k && k.in_layout() {
+                return k
+            }
+        }
+        return null
+    }
+    // The content's minimum size across any direction that doesn't scroll, and nothing along the scrolling ones.
+    fn content_min_size() -> vec2 {
+        var c = content()
+        if c == null {
+            return vec2(0.0, 0.0)
+        }
+        var m = c.combined_min_size()
+        return vec2(horizontal ? 0.0 : m.x, vertical ? 0.0 : m.y)
+    }
+    // The farthest `scroll` can go.
+    fn max_scroll() -> vec2 {
+        return (_content - _view).max(vec2(0.0, 0.0))
+    }
+    // True if vertical scrolling is on and the content is taller than the view.
+    fn needs_vertical_bar() -> bool {
+        return vertical && max_scroll().y > 0.0
+    }
+    // True if horizontal scrolling is on and the content is wider than the view.
+    fn needs_horizontal_bar() -> bool {
+        return horizontal && max_scroll().x > 0.0
+    }
+    // Sets `scroll` (clamped), emitting `scrolled` when it moved.
+    fn set_scroll(v: vec2) {
+        var s = v.min(max_scroll()).max(vec2(0.0, 0.0))
+        if !vertical {
+            s.y = 0.0
+        }
+        if !horizontal {
+            s.x = 0.0
+        }
+        if s != scroll {
+            scroll = s
+            emit scrolled(s)
+        }
+    }
+    // Scrolls by `amount` pixels; true if the offset changed.
+    fn scroll_by(amount: vec2) -> bool {
+        var before = scroll
+        set_scroll(scroll + amount)
+        return scroll != before
+    }
+    // The control to scroll for a wheel at `p` in direction `dir` (-1 up, 1 down): an inner scroller first, else self if it can move that way; null if none.
+    fn find_scroll(p: vec2, dir: float) -> Control {
+        if !visible || !contains(p) {
+            return null
+        }
+        var inner = super.find_scroll(p, dir)
+        if inner != null {
+            return inner
+        }
+        if dir < 0.0 && scroll.y <= 0.0 {
+            return null
+        }
+        if dir > 0.0 && scroll.y >= max_scroll().y {
+            return null
+        }
+        return self
+    }
+    // The control to scroll for `dir` when the pointer position doesn't matter (focus scrolling): an inner scroller first, else self if it can move that way.
+    fn find_any_scroll(dir: float) -> Control {
+        if !visible {
+            return null
+        }
+        var inner = super.find_any_scroll(dir)
+        if inner != null {
+            return inner
+        }
+        if (dir < 0.0 && scroll.y > 0.0) || (dir > 0.0 && scroll.y < max_scroll().y) {
+            return self
+        }
+        return null
+    }
+    // Scrolls so the rectangle (relative to the content's top-left) is inside the view.
+    fn reveal(rel_pos: vec2, rel_size: vec2) {
+        var s = scroll
+        if rel_pos.y < s.y {
+            s.y = rel_pos.y
+        } else if rel_pos.y + rel_size.y > s.y + _view.y {
+            s.y = rel_pos.y + rel_size.y - _view.y
+        }
+        if rel_pos.x < s.x {
+            s.x = rel_pos.x
+        } else if rel_pos.x + rel_size.x > s.x + _view.x {
+            s.x = rel_pos.x + rel_size.x - _view.x
+        }
+        set_scroll(s)
+    }
+    // Sizes the content (bars take space only when it overflows), scrolls a newly focused control into view, and places it offset by `scroll`.
+    fn layout_children() {
+        var c = content()
+        if c == null {
+            return
+        }
+        var need = c.combined_min_size()
+        // Bars take their width only when the content overflows.
+        var view = size
+        var bw = bar_width()
+        var tall = vertical && need.y > view.y
+        if tall {
+            view.x -= bw
+        }
+        if horizontal && need.x > view.x {
+            view.y -= bw
+            if !tall && vertical && need.y > view.y {
+                view.x -= bw
+            }
+        }
+        var cs = vec2(horizontal ? max(need.x, view.x) : view.x, vertical ? max(need.y, view.y) : view.y)
+        _view = view.max(vec2(0.0, 0.0))
+        _content = cs
+        // The content still sits where the last layout put it: a newly
+        // focused control's offset in it is what to scroll into view.
+        if follow_focus && UI.focused != null && UI.focused != _seen_focus && c.is_ancestor_of(UI.focused) {
+            var f = UI.focused
+            reveal(f.position - c.position, f.size)
+        }
+        _seen_focus = UI.focused
+        set_scroll(scroll)
+        c.set_rect(position - scroll, cs)
+    }
+    // Starts a drag: on a scroll bar it jumps the thumb to the pointer, elsewhere it drags the content.
+    fn pointer_down(p: vec2) {
+        _drag_from = p
+        _drag_scroll = scroll
+        _drag = 2
+        var bw = bar_width()
+        if needs_vertical_bar() && p.x >= position.x + size.x - bw {
+            _drag = 1
+            _bar_vertical = true
+        } else if needs_horizontal_bar() && p.y >= position.y + size.y - bw {
+            _drag = 1
+            _bar_vertical = false
+        }
+        if _drag == 1 {
+            // Jump the thumb's center to the click, then follow the drag.
+            var ms = max_scroll()
+            if _bar_vertical {
+                var track = max(_view.y - thumb_length(true), 1.0)
+                set_scroll(vec2(scroll.x, (p.y - position.y - thumb_length(true) * 0.5) / track * ms.y))
+            } else {
+                var track = max(_view.x - thumb_length(false), 1.0)
+                set_scroll(vec2((p.x - position.x - thumb_length(false) * 0.5) / track * ms.x, scroll.y))
+            }
+            _drag_from = p
+            _drag_scroll = scroll
+        }
+    }
+    // Continues the drag started in pointer_down(): moves the thumb or the content.
+    fn pointer_drag(p: vec2) {
+        if _drag == 2 {
+            set_scroll(_drag_scroll - (p - _drag_from))
+        } else if _drag == 1 {
+            var ms = max_scroll()
+            if _bar_vertical {
+                var track = max(_view.y - thumb_length(true), 1.0)
+                set_scroll(vec2(scroll.x, _drag_scroll.y + (p.y - _drag_from.y) / track * ms.y))
+            } else {
+                var track = max(_view.x - thumb_length(false), 1.0)
+                set_scroll(vec2(_drag_scroll.x + (p.x - _drag_from.x) / track * ms.x, scroll.y))
+            }
+        }
+    }
+    // Length of the scroll bar thumb for the vertical (`vert`) or horizontal bar, proportional to the view and at least 28 px.
+    fn thumb_length(vert: bool) -> float {
+        var view = vert ? _view.y : _view.x
+        var total = vert ? _content.y : _content.x
+        return clamp(view * view / max(total, 1.0), 28.0, max(view, 28.0))
+    }
+    // Draws the container, then the children clipped to the view, then the scroll bars.
+    fn draw_tree(g: Canvas) {
+        if !visible {
+            return
+        }
+        draw(g)
+        UI.push_clip(g, position, size)
+        for c in children {
+            c.draw_tree(g)
+        }
+        UI.pop_clip(g)
+        if show_bars {
+            draw_bars(g)
+        }
+    }
+    // Draws the scroll bars that are needed.
+    fn draw_bars(g: Canvas) {
+        var t = get_theme()
+        var ms = max_scroll()
+        var bw = bar_width()
+        if needs_vertical_bar() {
+            var len = thumb_length(true)
+            var y = position.y + (_view.y - len) * (scroll.y / ms.y)
+            g.rect(vec2(position.x + size.x - bw, position.y), vec2(bw, _view.y), fill = t.panel, radius = bw * 0.5)
+            g.rect(vec2(position.x + size.x - bw + 1.0, y), vec2(bw - 2.0, len), fill = t.text_dim, radius = bw * 0.5)
+        }
+        if needs_horizontal_bar() {
+            var len = thumb_length(false)
+            var x = position.x + (_view.x - len) * (scroll.x / ms.x)
+            g.rect(vec2(position.x, position.y + size.y - bw), vec2(_view.x, bw), fill = t.panel, radius = bw * 0.5)
+            g.rect(vec2(x, position.y + size.y - bw + 1.0), vec2(len, bw - 2.0), fill = t.text_dim, radius = bw * 0.5)
+        }
+    }
+}
+

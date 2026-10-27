@@ -373,6 +373,10 @@ private:
             case TypeKind::Error: out_ += "<error>"; break;
             case TypeKind::Named: {
                 auto n = as<NamedType>(t);
+                if (!n->qualifier.empty()) {
+                    out_ += n->qualifier.name;
+                    out_ += '.';
+                }
                 out_ += n->name.name;
                 if (!n->args.empty()) {
                     out_ += '<';

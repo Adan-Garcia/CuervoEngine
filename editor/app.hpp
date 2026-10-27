@@ -10,6 +10,7 @@
 #include "cuervo/input/devices.hpp"
 #include "cuervo/platform/window.hpp"
 #include "cuervo/render/font.hpp"
+#include "cuervo/render/light_batcher.hpp"
 #include "cuervo/render/mesh_batcher.hpp"
 #include "cuervo/render/sdf_batcher.hpp"
 #include "cuervo/render/text_renderer.hpp"
@@ -29,6 +30,7 @@
 #include "editor/play_controller.hpp"
 #include "editor/project_env.hpp"
 #include "editor/projects.hpp"
+#include "editor/settings.hpp"
 #include "editor/splash.hpp"
 #include "editor/view_camera.hpp"
 
@@ -42,8 +44,8 @@ namespace cuervo::editor {
 
 enum class SplashMode { Auto, On, Off };
 
-// The scene view's transform tool (DESIGN.md 4.16 "Clarified (Milestone 8.3)"): Q, W, E, R.
-enum class Tool { Select, Move, Rotate, Scale };
+// The scene view's transform tool (DESIGN.md 4.16 "Clarified (Milestone 8.3)"): Q, W, E, R, B.
+enum class Tool { Select, Move, Rotate, Scale, Paint };
 const char* tool_name(Tool tool);
 
 struct EditorOptions {
@@ -85,6 +87,8 @@ struct EditorOptions {
     std::optional<std::string> palette;
     // --layout <name>: start in that saved layout.
     std::string layout;
+    std::optional<float> ui_scale;    // --ui-scale <float>: UI spacing/size scale factor
+    std::optional<float> font_scale;  // --font-scale <float>: Font size scale factor
 };
 
 int run_editor(const EditorOptions& options);
@@ -100,6 +104,17 @@ public:
     int run();
 
     EditorDocument& doc() { return doc_; }
+    // The animation timeline's scrub (milestone 9.8): while `on`, the scene
+    // view shows `player`'s clip `clip` at `tick` (ProjectEnv::preview_animation).
+    struct AnimPreview {
+        bool on = false;
+        NodeId player = 0;
+        std::string clip;
+        int tick = 0;
+    };
+    AnimPreview& anim_preview() { return anim_preview_; }
+    // Rebuilds the scene view from the document next frame (drops a pose).
+    void refresh_preview() { preview_revision_ = ~std::uint64_t{0}; }
     ProjectEnv& env() { return env_; }
     ConsoleLog& console() { return console_; }
     ViewCamera& camera() { return camera_; }
@@ -115,9 +130,14 @@ public:
     // ---- 8.3: tools, palette, messages, layouts, projects
     Tool tool() const { return tool_; }
     void set_tool(Tool tool) { tool_ = tool; }
+    int paint_tile_id() const { return paint_tile_id_; }
+    void set_paint_tile_id(int id) { paint_tile_id_ = id; }
     // Snap to the grid / 15 degrees / 0.1 (Ctrl while dragging inverts it).
     bool snap() const { return snap_; }
     void set_snap(bool snap) { snap_ = snap; }
+    bool collision_shapes() const { return collision_shapes_; }
+    void set_collision_shapes(bool enabled) { collision_shapes_ = enabled; }
+    bool preview_lighting() const { return preview_lighting_; }
     // Ctrl+Shift+P; `query` pre-fills the search.
     void open_palette(std::string query = {});
     // A banner or toast in the kit's formula (messages.hpp); the console keeps the raw log line.
@@ -166,6 +186,32 @@ public:
     // Recompiles the project's scripts (class registry and preview) after
     // they change on disk while not playing.
     void reload_project_scripts();
+
+    // Dynamic UI & Font scaling
+    void zoom_in();
+    void zoom_out();
+    void reset_zoom();
+    void set_ui_scale(float scale);
+    void set_font_scale(float scale);
+    float ui_scale() const;
+    float font_scale() const;
+    EditorSettings& settings() { return settings_; }
+    const EditorSettings& settings() const { return settings_; }
+
+    // Opens a script, document, or directory in the default code editor of the device.
+    bool open_in_external_editor(const std::filesystem::path& path, int line = 0);
+    // Searches project scripts for `class <class_name>`. Returns { relative_file_path, line_number }.
+    std::pair<std::string, int> find_class_script(const std::string& class_name) const;
+    bool is_script_class(const std::string& class_name) const;
+    bool has_script_bound(NodeId id) const;
+    std::pair<std::string, int> node_script(NodeId id) const;
+    std::vector<std::pair<std::string, std::string>> project_script_classes() const;
+    std::vector<std::string> find_script_classes_in_file(const std::filesystem::path& file) const;
+    bool attach_script_file(NodeId id, const std::filesystem::path& file, std::string& error);
+    bool create_and_attach_script(NodeId id, const std::string& class_name, const std::filesystem::path& rel_path,
+                                  std::string& error);
+    bool detach_script(NodeId id);
+    void request_attach_script(NodeId id);
 
     // Logs a rejected edit (EditorDocument::error) to the console.
     void report(bool ok);
@@ -219,6 +265,7 @@ private:
     Window window_;
     std::unique_ptr<rhi::Device> device_;
     render::SdfBatcher shapes_;
+    render::LightBatcher lights_;
     render::TextRenderer text_;
     // Sprites (Canvas.vector) in the scene view and the game view.
     render::MeshBatcher meshes_;
@@ -230,6 +277,7 @@ private:
     ViewCamera camera_;
     bool frame_request_ = true;
     std::uint64_t preview_revision_ = ~std::uint64_t{0};
+    AnimPreview anim_preview_;
     bool running_ = true;
     std::uint64_t frames_ = 0;
     std::string title_;
@@ -256,13 +304,18 @@ private:
 
     // 8.3 state.
     Tool tool_ = Tool::Move;
+    int paint_tile_id_ = 0;
     bool snap_ = false;
+    bool collision_shapes_ = true;
+    // The scene view shows the scene's 2D lights (milestone 9.8); off draws it unlit.
+    bool preview_lighting_ = true;
     ActionRegistry actions_;
     std::size_t actions_classes_ = 0; // the class count the "Add Node" actions were built for
     MessageCenter messages_;
     LayoutStore layouts_;
     Layout layout_;                   // the window's docks and panels right now
     RecentProjects recents_;
+    EditorSettings settings_;
     bool palette_open_ = false;
     bool palette_request_ = false;
     std::string palette_query_;
@@ -279,13 +332,20 @@ private:
     bool dock_built_ = false;
 
     // Dialog state.
-    enum class Dialog { None, NewScene, Open, SaveAs, AddChild, DiscardChanges, License, SaveLayout };
+    enum class Dialog { None, NewScene, Open, SaveAs, AddChild, DiscardChanges, License, SaveLayout, AttachScript };
     Dialog dialog_ = Dialog::None;
     bool dialog_opened_ = false;
     std::string path_input_;
     std::string class_filter_;
     std::string new_root_class_ = "Node2D";
     NodeId add_parent_ = 0;
+    NodeId attach_node_ = 0;
+    int attach_tab_ = 0; // 0 = Existing, 1 = New
+    std::string attach_filter_;
+    std::string new_script_class_;
+    std::string new_script_path_;
+    std::string attach_error_;
+    mutable std::map<std::string, std::pair<std::string, int>> class_scripts_cache_;
 };
 
 } // namespace cuervo::editor

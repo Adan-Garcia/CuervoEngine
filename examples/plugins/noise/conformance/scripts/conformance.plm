@@ -1,0 +1,35 @@
+// Exercises every noise native in the simulation. The results are globals:
+// the state hash covers a game's numeric and vector globals.
+
+import noise
+
+var field = 0.0
+var hashes = 0
+var drift = vec2(0.0, 0.0)
+
+class Conformance extends Node {
+    var wisps = List<noise.Wisp>()
+
+    fn ready() {
+        for i in 0..6 {
+            var w = noise.Wisp()
+            w.base = vec2(60.0 + 100.0 * (i as float), 180.0)
+            w.seed = 3 + i
+            w.rate = 0.5 + 0.2 * (i as float)
+            add_child(w)
+            wisps.push(w)
+        }
+    }
+
+    fn update(dt: float) {
+        field = 0.0
+        for i in 0..8 {
+            field += noise.value((i as float) * 0.37, field, i)
+        }
+        hashes = (hashes + noise.hash(hashes, 17, 5)) % 1000003
+        drift = vec2(0.0, 0.0)
+        for w in wisps {
+            drift += w.position - w.base
+        }
+    }
+}

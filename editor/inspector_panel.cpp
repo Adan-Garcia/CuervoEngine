@@ -243,6 +243,51 @@ public:
             ImGui::SameLine();
             ImGui::TextDisabled("extends %s", cls->base.c_str());
         }
+
+        const auto [script_path, script_line] = app.find_class_script(n->type);
+        const bool has_script = !script_path.empty();
+        if (has_script) {
+            ImGui::TextDisabled("Script:");
+            ImGui::SameLine();
+            ImGui::TextColored(theme::im(theme::colors().accent), "%s", script_path.c_str());
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetItemTooltip("%s (class %s, line %d)", script_path.c_str(), n->type.c_str(), script_line);
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Open")) {
+                app.open_in_external_editor(app.env().resolve(script_path), script_line);
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Change")) {
+                app.request_attach_script(id);
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Detach")) {
+                app.detach_script(id);
+            }
+        } else {
+            ImGui::TextDisabled("Script: <none>");
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Attach Script...")) {
+                app.request_attach_script(id);
+            }
+        }
+
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("CUERVO_ASSET")) {
+                const char* asset_path = static_cast<const char*>(p->Data);
+                if (std::string_view(asset_path).ends_with(".plm")) {
+                    std::string error;
+                    if (app.attach_script_file(id, app.env().resolve(asset_path), error)) {
+                        app.notify_ok(std::format("Bound '{}' to '{}'.", asset_path, n->name));
+                    } else {
+                        app.report_failure(error);
+                    }
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+
         ImGui::TextDisabled("%s", doc.model().path_of(id).c_str());
         if (id != name_node_ || !ImGui::IsAnyItemActive()) {
             name_node_ = id;
@@ -252,6 +297,27 @@ public:
         ImGui::InputText("name", &name_text_);
         if (ImGui::IsItemDeactivatedAfterEdit()) app.report(doc.rename(id, name_text_));
         ImGui::Separator();
+
+        if (n->type == "TileMapLayer") {
+            ImGui::TextUnformatted("Tile Palette:");
+            ImGui::SameLine();
+            const int current_tid = app.paint_tile_id();
+            for (int tid = 0; tid < 6; ++tid) {
+                ImGui::PushID(tid);
+                const std::string btn_label = std::format("Tile {}", tid);
+                const bool selected = current_tid == tid && app.tool() == Tool::Paint;
+                if (selected) ImGui::PushStyleColor(ImGuiCol_Button, theme::im(theme::colors().accent));
+                if (ImGui::Button(btn_label.c_str())) {
+                    app.set_paint_tile_id(tid);
+                    app.set_tool(Tool::Paint);
+                }
+                if (selected) ImGui::PopStyleColor();
+                ImGui::SameLine();
+                ImGui::PopID();
+            }
+            ImGui::NewLine();
+            ImGui::Separator();
+        }
 
         if (cls == nullptr) {
             ImGui::TextColored(theme::im(theme::colors().warning), "'%s' is not a node class of this project;", n->type.c_str());

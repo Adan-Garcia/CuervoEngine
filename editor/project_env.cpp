@@ -4,8 +4,10 @@
 #include <format>
 #include <functional>
 
+#include "cuervo/assets/vfs.hpp"
 #include "cuervo/core/log.hpp"
 #include "cuervo/platform/platform.hpp"
+#include "cuervo/script/plugin_host.hpp"
 #include "cuervo/script/scene_bridge.hpp"
 #include "pluma/value.hpp"
 #include "pluma/vm.hpp"
@@ -116,6 +118,10 @@ bool ProjectEnv::open(const fs::path& dir, const render::FontAtlas* font, std::s
     options.virtual_size = {static_cast<float>(project_.virtual_size.x()), static_cast<float>(project_.virtual_size.y())};
     options.project_dir = project_.dir;
     options.font = font;
+    // The project's native plugins (milestone 10.5c): their natives are part
+    // of the scripts' API.
+    options.plugins = script::load_project_plugins(*assets::Vfs::dev(project_.dir), error);
+    if (!options.plugins) return false;
     release_preview();
     host_ = std::make_unique<script::ScriptHost>(options, input_map_);
     has_project_ = true;
@@ -244,6 +250,33 @@ void ProjectEnv::rebuild_preview(const scene::SceneDoc& doc) {
             LOG_WARN("{}", report);
         }
     }
+}
+
+bool ProjectEnv::preview_animation(std::size_t player, const std::string& name, float tick, std::string& error) {
+    if (!preview_ok_ || player >= preview_nodes_.size()) {
+        error = "no preview";
+        return false;
+    }
+    pluma::VM& vm = host_->session()->vm();
+    const pluma::Value& node = preview_nodes_[player];
+    const pluma::RecordRT* player_rt = vm.find_class("AnimationPlayer");
+    if (player_rt == nullptr || !is_instance_of(node, player_rt)) {
+        error = "not an AnimationPlayer";
+        return false;
+    }
+    pluma::Value anim = pluma::str_value(name);
+    pluma::retain(anim);
+    pluma::RunResult r = vm.call_method(node, "play", std::span<const pluma::Value>(&anim, 1));
+    pluma::release(anim);
+    if (r.ok) {
+        const pluma::Value t = pluma::Value::f32(tick);
+        r = vm.call_method(node, "seek", std::span<const pluma::Value>(&t, 1));
+    }
+    if (!r.ok) {
+        error = r.panic ? r.panic->render() : std::string("failed");
+        return false;
+    }
+    return true;
 }
 
 } // namespace cuervo::editor

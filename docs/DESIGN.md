@@ -28,18 +28,17 @@ Design pillars, in priority order:
 4. **Pleasant scripting.** Static types with inference, coroutines, good errors,
    hot reload.
 
-Non-goals for now: 3D, networking, engine-level modding, macOS, a built-in test framework
-for users.
+Non-goals for now: engine-level modding, live in-game code execution in release builds.
 
 ## 2. Decision summary
 
 | Area | Decision |
 |---|---|
 | Engine language | C++20, CMake |
-| Platforms | Linux and Web (WASM) are verified; Windows is being validated (7.4; the Clang debug build passes all tests and matches the Linux hashes, docs/WINDOWS.md) |
-| Dimensionality | 2D. Generic `Vec<T,N>` (vec1…vecN) for extra axes, not 3D transforms |
+| Platforms | Linux and Web (WASM) are verified; Windows is being validated (7.4; the Clang debug build passes all tests and matches the Linux hashes, docs/WINDOWS.md). macOS, mobile and drop-in console SDKs in Phase 13 |
+| Dimensionality | 2D primary. Generic `Vec<T,N>` (vec1…vecN) for extra axes; zero-bloat 3D in Phase 14 |
 | Simulation | Deterministic, fixed timestep, seeded RNG, strict float rules |
-| Scene model | Node tree (script objects) for authoring and gameplay; hot systems (particles, collision) keep their own SoA arrays; a general ECS is not exposed (decision in 12.4) |
+| Scene model | Node tree (script objects) for authoring/UI; hot systems keep contiguous SoA pools; Hybrid model (queries exposed to scripts) in 12.4 |
 | Graphics backends | Vulkan (desktop), OpenGL 3.3 / GLES 3.0 / WebGL2 (web + legacy), behind an RHI; both implement every feature |
 | Render tiers | `compatible` (exports to all backends) or `full` (Vulkan-only features) |
 | Vector rendering | SDF primitives + tessellated SVG + MSDF text + raster fallback |
@@ -48,12 +47,12 @@ for users.
 | Runtime drawing | Canvas-style script API |
 | Resolution | Virtual coordinate space + scale mode; vectors render at native resolution |
 | Particles | General particle system: gameplay (CPU, deterministic, collidable) and visual (GPU) modes, native modules + script `foreach`. No dedicated bullet system: bullets are built on particles |
-| Collision | Circles + capsules in a spatial hash (AABB/OBB planned); general physics is separate and optional (planned, 9.6) |
+| Collision | Circles + capsules in a spatial hash (AABB/OBB planned); general physics is separate and optional (implemented, 9.6) |
 | Input | Named actions/axes, rebindable, recorded per tick |
-| Audio | miniaudio + mixer buses + voice limiting |
+| Audio | miniaudio + mixer buses + voice limiting (default); optional FMOD/Wwise via C ABI |
 | Game UI | Retained UI nodes in the scene tree |
 | Assets | Import pipeline (atlases, hot reload) + packed archive for release |
-| Scene files | Binary, versioned with migrations, `scene dump` text view for git |
+| Scene files | Human-readable text in project (Git 3-way mergeable, 11.2c) + packed binary archive for release |
 | Editor | Standalone Dear ImGui application |
 | Threading | Scripts single-threaded; engine uses a job system (1 thread on web) |
 | Netcode | None yet; stay rollback-ready |
@@ -88,14 +87,14 @@ cuervo/
   scene/      binary scene files and migrations (the node tree itself is Pluma, in script/prelude/)
   particles/  emitters, SoA pools, native modules (visual mode runs on the CPU; GPU compute planned)
   collision/  shapes (circle, capsule), spatial hash, queries
-  physics/    optional general physics (planned, 9.6; not in the tree yet)
+  physics/    optional general physics (implemented, 9.6)
   audio/      miniaudio decoding + the engine's own mixer, buses, voice limiting
   input/      action maps, input frames, recording/playback, replay files
   assets/     virtual file system, pack format, manifest
   brand/      generated brand tokens and the embedded app icon
   jobs/       job system
   script/     engine bindings, project loading, game session, and the engine prelude
-              (`prelude/*.plm`: nodes, UI controls, collision, particles, audio)
+              (`prelude/*.plm`: nodes, UI controls, collision, particles, audio, physics)
 pluma/        standalone: lexer, parser, type checker, bytecode compiler, VM, AOT-to-C, formatter,
               LSP, DAP debugger, profiler, REPL (`plm`), and the math library (`std/math.plm`)
 editor/       Dear ImGui editor (`cuervo-editor`), hosts the engine; desktop only
@@ -108,7 +107,7 @@ tests/        cuervo/, pluma/ and editor/ doctest suites plus the end-to-end cte
               (internal; users get no test framework)
 ```
 
-Not in the tree yet (planned): `physics/` (9.6), a general ECS exposed to scripts (decision
+Not in the tree yet (planned): a general ECS exposed to scripts (decision
 in 12.4), `ui/` as native code (the UI is Pluma nodes, 4.10), networking (11.1).
 
 **Rule:** `pluma/` does not depend on `cuervo/`. The engine registers its API with the
@@ -129,9 +128,9 @@ language through `script/`. This keeps the language testable on its own and give
 | Editor UI | Dear ImGui (docking branch) | MIT | used |
 | Profiler bridge | Tracy | BSD-3-Clause | optional, off by default |
 | Internal tests | doctest | MIT | used |
-| General physics | Box2D v3 | MIT | planned (9.6) |
+| General physics | Box2D v3 | MIT | used (optional, 9.6) |
 | Text shaping | HarfBuzz | MIT | planned (11.3) |
-| Raster images | stb_image | public domain | planned (11.2) |
+| Raster images | stb_image | public domain | planned (11.2a) |
 
 The full list with versions and license texts is [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 Third-party components keep their own permissive licenses; the engine's own license is
@@ -271,6 +270,66 @@ new tier doesn't support before applying the change.
   The runtime already refuses a Full project on a device that cannot serve Full. The export
   gate no longer retargets the check to `compatible` for the web: migrate with `tier set`.
 
+**Clarified (Milestone 10.1, `cuervo/rhi/webgpu/`, `cmake/Shaders.cmake`, docs/WEB.md "WebGPU"):**
+- *A third, experimental backend.* `rhi::Backend::WebGPU` serves the Compatible tier only
+  (Full stays Vulkan-only). **Decision:** native WebGPU is **wgpu-native** (v29.0.1.1,
+  prebuilt release archives pinned by hash, linked statically), the same wgpu/naga release
+  line as the pinned naga-cli 29.0.4, so the WGSL the build writes is parsed by the naga
+  it came from; the browser uses Emscripten's **emdawnwebgpu** port, the same `webgpu.h`.
+  `CUERVO_WEBGPU` defaults on for native Linux x86_64 builds that find both host tools,
+  and is off for the web and for exported players until 10.3.
+- *One shader source.* Each GLSL 450 file is compiled a second time with `CUERVO_WEBGPU`
+  defined (WGSL has no point size, so `gl_PointSize` is skipped), `spirv-opt
+  --split-combined-image-sampler` splits the samplers, `shader_tool --webgpu-bindings`
+  renumbers set 1 (texture binding N -> texture 2N, sampler 2N + 1) and `naga
+  --keep-coordinate-space` writes the WGSL into the same generated header. The sources
+  already put NDC y = +1 at the top, WebGPU's convention, so nothing flips.
+- *GL semantics on WebGPU.* Queue writes land before the frame's commands run, so a buffer an
+  unsubmitted draw reads is renamed (refilled from a CPU shadow; retired buffers are reused
+  once their submission is out); stream buffers write disjoint ranges in place, as on Vulkan.
+  A full-target `clear` becomes the next render pass's load op, a scissored one draws a
+  triangle. Resources bind through two per-draw bind groups (uniforms with dynamic offsets;
+  textures), and blocks or textures a shader declares but the caller left unbound read a
+  zeroed dummy. Frames in flight are bounded at two natively, like GL's fence ring.
+- *Headless and the web.* Without a window surface (SDL's offscreen driver) the device
+  renders into an offscreen target, so `rhi_parity` compares WebGPU with GL in every
+  ctest run. In the browser, adapter and device requests block through JSPI (`-sJSPI`;
+  they run under `main`), and `capture_frame` maps its readback asynchronously because a
+  main-loop callback cannot suspend.
+- *Result.* Every `rhi_parity` scene matches GL with no interior differences and Vulkan
+  exactly except `points_lines` (WebGPU points are 1 px; 10.2 decides that scene); the
+  shmup and `lantern_cave` frames are within one level of GL with their usual state
+  hashes, and the shmup runs on WebGPU in headless Chrome to the native hash
+  `a3e57e79964421d3`.
+
+**Clarified (Milestone 10.2, `cuervo/rhi/README.md`):**
+- *Points.* **Decision:** Compatible-tier points are 1 px on every backend (what
+  `Feature::PointsAndLines` already promised); shaders that must write `gl_PointSize` for
+  Vulkan write 1.0. The engine draws no point lists (particles are instanced quads), so
+  nothing visible changes, and WebGPU needs no point-sprite emulation.
+- *Parity.* The audit table has a WebGPU column; every scene renders on WebGPU equal to
+  Vulkan's with tolerance 0 (wgpu-native on Vulkan shares its rasterization) and within the
+  Vulkan edge tolerance of GL. `rhi_parity frames` also checks WebGPU's two-frame bound, and
+  a unit test checks that every engine shader carries generated WGSL with the bindings its
+  reflection tables name.
+
+**Clarified (Milestone 10.3, `web/webgpu_init.js`, docs/WEB.md "WebGPU"):**
+- *One web build, two backends.* **Decision:** a web build has both WebGPU and GL in one
+  `.wasm` (`CUERVO_WEBGPU` now defaults on for the web when naga is found; exported web
+  players always have it) and picks at load: `rhi::default_backend()` is WebGPU when the page
+  got a device, else GL (WebGL2), and a WebGPU device that still fails to open falls back to
+  WebGL2 like Vulkan does to GL on the desktop. Two builds (a JSPI one and a plain one) were
+  rejected: double the download and the export, for a choice the page can make.
+- *No JSPI.* The page requests the adapter and device before `main` (a run dependency of a
+  `--pre-js`) and hands the device over as `Module.preinitializedWebGPUDevice`; the engine
+  never waits on a browser promise. 10.1's JSPI link flag is gone, so the build loads in
+  browsers without JSPI, which then get WebGL2.
+- *Errors* of a device the page made are logged by the page (`[error] WebGPU ...`), since the
+  engine's error callback can only be set when it creates the device itself.
+- *Result.* `examples/shmup` and `examples/lantern_cave` reach their native state hashes in
+  headless Chrome on WebGPU (the real GPU) and on the WebGL2 fallback, with and without
+  `CUERVO_WEB_THREADS`; `export --platform web` ships and verifies the dual-backend player.
+
 **Shaders** are written once in GLSL 450, compiled to SPIR-V for Vulkan and
 cross-compiled to GLSL 330 / ES 300 for GL. Shader variants are built at import time, not
 at runtime.
@@ -293,7 +352,7 @@ mode: `fit` (default; renders vectors at native resolution), `integer` (pixel ar
 **SVG subset:** paths, basic shapes, fills (nonzero/evenodd), strokes (width, joins, caps,
 miter limit, dashes), linear and radial gradients, transforms, groups, opacity, clip paths.
 Unsupported features (filters, masks, CSS, embedded text) are skipped with an import warning;
-the rasterized fallback is planned (11.2).
+the rasterized fallback is planned (11.2a).
 
 **Animation** (implemented in milestone 9.4, §4.17):
 - *Implemented:* `AnimationPlayer` with property tracks over any `@export` field, method
@@ -391,7 +450,7 @@ emitter {
   reports a pair whose proxies are both in A and B once, as (lower id, higher id).
   Proxies spanning more than 1024 cells go to a list every query scans (replaced in
   milestone 5.5 by a coarse secondary hash, §4.15).
-- General rigid-body physics is a separate, optional module (planned, 9.6).
+- General rigid-body physics is a separate, optional module (implemented, 9.6).
 
 ### 4.8 Input
 ```
@@ -554,12 +613,13 @@ themes. Rendered with SDF primitives and MSDF text.
   compatible-tier games) Vulkan off, builds `runtime` in Release into a cache keyed by the
   feature set and toolchain, and runs it headless on the exported pack before shipping it.
   Measured (EXPORT.md "Sizes"): tictak -40%, bench -37%, shmup -20% against the full
-  Release player. A player's state hash depends on its features (`ScriptHost::state_hash`
-  covers the optional preludes' globals), so one without audio/ui/particles/collision is
-  compared with its own dev run; the frames equal the full engine's. AOT packs need the
-  full script surface. Web exports build their player the same way with emscripten
-  (`CUERVO_WEB_PACK=fetch`, verified in headless Chrome); Windows players are a follow-up
-  (10.5a).
+  Release player. A player's state hash doesn't depend on its features: one built without
+  particles or the UI hashes what those hold in a game that doesn't use them (an idle
+  particle system's RNG fingerprint and tick count, the UI statics' initial values, at the
+  UI prelude's place among the globals; `ScriptHost::state_hash`), so every stripped player,
+  native or web, is checked against the full engine. AOT packs need the full script surface. Web exports build their player the same way with emscripten
+  (`CUERVO_WEB_PACK=fetch`, verified in headless Chrome); Windows players
+  build on a Windows host since 10.5a (docs/EXPORT.md).
 
   **Clarified (Milestone 8.9, `tests/workflow_smoke.cmake`):** the exporter's naming and
   launch contract is covered end to end by the workflow test: a project named `Workflow
@@ -864,7 +924,25 @@ results are bit-identical regardless of thread count or whether a SIMD path is t
 - *Measured.* On the reference machine (Ryzen 7 5800X3D, RTX 3060 Ti) the 50k and 100k workloads
   hold 60 fps in debug and release on GL and Vulkan with wide margins, and the release build holds
   about 1.5 million (GL) / 1.8 million (Vulkan) particles at 60 fps (after the GL frame limit and stream-buffer fixes, PERFORMANCE.md "Findings"). Web (WebGL2) is measured by hand
-  (PERFORMANCE.md "Web"); no web baseline is committed.
+  (PERFORMANCE.md "Web"); no web baseline is committed (superseded by 10.4).
+
+**Clarified (Milestone 10.4, `tools/bench.py --web`, PERFORMANCE.md "Web"):**
+- *Browser runs.* `tools/bench.py record|capacity --web <runtime dir> --backends webgpu webgl2`
+  runs `examples/bench` in headless Chrome on the real GPU through `tools/web/smoke_test.mjs`
+  and stores it under `builds.web` of the machine's baseline; `compare` treats it like any build.
+  The state-hash runs use the new `--screenshot-tick` flag (a page has no environment).
+- *Cliffs.* **Decision:** "stable" means no frame-time cliff: the runtime logs each second's mean
+  frame time (`bench windows |`), `record` keeps the worst run's slowest window over its median
+  window, and `compare` fails any record above 1.5 (an absolute limit, not a delta).
+- *Fixes it needed.* Uncapped web frames run on `setImmediate` (WebGPU was held to the 60 Hz
+  animation frame, WebGL2 to the 4 ms `setTimeout` clamp); the web frame clock is
+  `performance.now()` (SDL's advanced in whole milliseconds there); and the WebGPU backend keys
+  its pass state and bind groups on buffer serials and resource ids instead of object pointers,
+  which a released buffer hands to the next one (a grown stream buffer stayed bound at its old
+  size: a validation error natively and in the browser, now in the `rhi_parity` test).
+- *Measured.* On the reference machine the threaded web runtime runs 100k shapes at 390 FPS on
+  WebGPU (p95 3.9 ms) and 210 on WebGL2, every workload reaches its native state hash, the worst
+  cliff ratio is 1.21, and a second record compares clean against the committed one.
 
 ### 4.16 Polish milestones (8.1-8.4)
 The brand, a node library, an editor overhaul and
@@ -1272,7 +1350,7 @@ and N job threads (§3, §4.15). Nodes from 8.2 (`Shape`, `Path`, `Sprite`,
     recordings verify on 1 and 8 job threads, plus doctests that drive the same menus through
     real `DeviceState` key, pad button, stick, wheel, mouse and typed-text events. Every control
     there has an explicit `min_size`, so what a recorded click hits does not depend on the font
-    (the verifying editor may have none). Cut: raster images (11.2), IME composition, an
+    (the verifying editor may have none). Cut: raster images (11.2a), IME composition, an
     on-screen keyboard, horizontal wheel/shift-wheel, selection and clipboard in `LineEdit`.
 - **9.4 Animation.** `AnimationPlayer` with property tracks (any `@export` field) saved
   in scene files, `Tween`, and an `AnimationTree` state machine with blending. Time is
@@ -1346,20 +1424,204 @@ and N job threads (§3, §4.15). Nodes from 8.2 (`Shape`, `Path`, `Sprite`,
     track would write a blend-shape weight field; interpolation, blending, the state machine and scene
     saving would be reused as they are.
   - *Cut.* Bezier-handle key curves, per-track wrap, root motion, additive/layered blending and
-    blend-space nodes (only two-sided cross-fades), method tracks with arguments, a sibling `.anim`
-    file and editor timeline UI (9.8).
+    blend-space nodes (only two-sided cross-fades), method tracks with arguments and a sibling `.anim`
+    file. The editor timeline UI came with 9.8.
 - **9.5 Tilemaps and navigation.** `TileMapLayer` with tilesets, autotiling and an editor
   paint tool; `NavigationRegion2D` and `NavigationAgent2D` (grid/mesh A* with
   deterministic tie-breaking).
+  **Clarified (Milestone 9.5, `cuervo/script/prelude/tilemap.plm`, `editor/scene_view_panel.cpp`,
+  `editor/inspector_panel.cpp`, `tests/cuervo/tilemap_tests.cpp`, `tests/cuervo/navigation_tests.cpp`,
+  `examples/topdown_nav`):**
+  - *Layout and Prelude.* The subsystem is implemented cleanly as Pluma prelude code in
+    `cuervo/script/prelude/tilemap.plm`. It introduces `TileDef`, `TileSet`, `TileCell`,
+    `TileMapLayer`, `NavigationRegion2D` and `NavigationAgent2D`. Public symbols are fully documented
+    in `docs/API.md`. Internal structures (`_NavNode`, `_nav_node_less`) are private so they do not
+    pollute user namespace or alter the global script reflection table.
+  - *TileMapLayer.* A 2D uniform grid node extending `Node2D`:
+    - *Grid coordinates and packing:* 2D integer cell coordinates `(x, y)` map to and from local/global
+      pixel positions (`map_to_local`, `local_to_map`, `map_to_global`, `global_to_map`). Cells are stored
+      with fast packed 32-bit keys (`(y << 16) | (x & 0xFFFF)`) supporting negative and positive coordinates
+      via `tile_pack_coord`, `tile_unpack_x`, `tile_unpack_y`.
+    - *Autotiling:* 8-neighbor bitmask calculation (North: 1, East: 2, South: 4, West: 8, NorthEast: 16,
+      SouthEast: 32, SouthWest: 64, NorthWest: 128) matching against tile definition `peering_bits` with
+      subset fallback. Placing or erasing a cell automatically updates and propagates peering bitmask
+      recalculations across all 8 surrounding neighbors when `enabled_autotile` is active.
+    - *Scene serialization:* `TileMapLayer` defines `_serialize_cells` and `_deserialize_cells` with
+      `_before_save` and `_after_load` hooks. Cells are saved in strict deterministic coordinate-sorted order
+      to guarantee byte-identical `.scene` saves and text dumps across runs and platforms.
+    - *Canvas drawing:* In `draw()`, iterates all cells in coordinate order, drawing vector assets through
+      `g.vector` or colored procedural tiles through `g.rect`.
+  - *NavigationRegion2D & Pathfinding.* A 2D traversable grid region extending `Node2D`:
+    - *Traversability grid:* `set_cell_walkable`, `is_cell_walkable`, `set_cell_cost`, `get_cell_cost`.
+      Provides `bake_from_tilemap(layer, inherit_costs)` to automatically populate walkable cells and
+      custom navigation cost multipliers from a `TileMapLayer` and its `TileSet`.
+    - *Deterministic A\*:* `find_path(from, to)` uses a min-priority queue (`PriorityQueue<_NavNode>`)
+      with strict total-ordering tie-breaking: when f-scores match, it compares g-scores (preferring closer
+      to target), and when g-scores match, it breaks ties on a unique monotonic integer key
+      (`id = y * 65536 + x`). Diagonal movement (`allow_diagonal`, `diagonal_cost`) includes corner-cutting
+      prevention (both adjacent cardinal neighbors must be walkable). Returns world-space waypoints.
+  - *NavigationAgent2D.* An agent node extending `Node2D` for waypoint tracking:
+    - Automatically requests and tracks paths from a target `NavigationRegion2D`.
+    - Exposes waypoint progression (`get_next_path_position`), distance queries, and signals:
+      `waypoint_reached(vec2)`, `navigation_finished()`, `target_reached()`.
+  - *Editor Paint Tool.*
+    - Added `Tool::Paint` (shortcut `B`) to the editor toolbar with a custom brush icon.
+    - `SceneViewPanel`: Left-click paints active tile, Right-click erases, with continuous drag painting,
+      grid cell cursor hover highlight, and undo/redo command merging sealed on mouse release.
+    - `InspectorPanel`: Displays a tile palette selector when a `TileMapLayer` node is selected.
+  - *Replay Determinism and Verification.*
+    - `examples/topdown_nav/` implements a top-down level (room perimeter walls, doorway partitions,
+      and obstacle pillars) with an animated character pathing along waypoints.
+    - Validated in CTest (`topdown_nav`): tick-240 state hash `882ea24679ca2d41` is identical across
+      `--jobs 1` and `--jobs 4`, recorded replays verify across worker counts, and scene files round-trip
+      cleanly through text views. Zero compiler warnings.
 - **9.6 Physics.** Box2D v3 behind the physics interface (§7.2) as an optional feature
   (§4.11 feature build options). Scene-tree bodies: `StaticBody2D`, `CharacterBody2D`
   (`move_and_slide`), `RigidBody2D`, `Area2D`, `CollisionShape2D`, raycasts and joints.
   Determinism is verified by state hash across worker counts. The particle collision
   world (§4.7) stays separate.
+  **Clarified (Milestone 9.6, `cuervo/physics/`, `cuervo/script/physics_bindings.*`, `cuervo/script/prelude/physics/*.plm`,
+  `editor/icons.cpp`, `tests/cuervo/physics_tests.cpp`, `tests/platformer.cmake`, `examples/platformer`):**
+  - *Optional Build Feature & Dependencies:* Box2D v3.2.0 is fetched via CMake (`CUERVO_FEATURE_PHYSICS`, default ON).
+    Third-party notice and MIT license texts are added (`third_party/licenses/box2d.txt`, `THIRD_PARTY_NOTICES.md`).
+    Feature detection in `cuervo/script/features.cpp` identifies physics requirements. Stripped players compile physics
+    completely out with zero overhead when unneeded.
+  - *Native Physics Core (`PhysicsWorld` in `cuervo/physics/`):*
+    - Wraps `b2WorldId` with 32 px/meter length units scale (`b2SetLengthUnitsPerMeter(32.0f)`).
+    - Rigid body lifecycle management (`create_body`, `destroy_body`, `set_body_transform`, `get_body_position`,
+      `apply_force`, `apply_impulse`, `apply_torque`, `set_body_mass`, `set_body_gravity_scale`, `set_motion_locks`,
+      `set_body_damp`).
+    - Shape definitions (`ShapeKind::Circle`, `Box`, `Capsule`, `Segment`) with configurable density, friction, restitution,
+      collision layers, and masks.
+    - Joints: `PinJoint2D` backed by Box2D revolute joints with angular spring, limits, and motor support; `DistanceJoint2D`
+      backed by Box2D distance joints with stiffness and damping.
+    - Raycasts: `cast_ray` via `b2World_CastRay` returning hit status, intersection point, surface normal, and fraction.
+    - Kinematic sliding solver: `move_and_slide()` performs multi-step shape casting (`b2World_CastShape`), surface normal
+      deflection, contact angle classification (`is_on_floor`, `is_on_wall`, `is_on_ceiling`), slop offsets, and dynamic
+      body pushing proportional to contact momentum and mass ratios.
+    - Sensor overlap detection: `b2World_GetSensorEvents` dispatches touch begin/end events to `Area2D` nodes, emitting
+      `body_entered`, `body_exited`, `area_entered`, and `area_exited` signals.
+    - Determinism: Canonical state hashing (`state_hash()`) hashes sorted body positions, rotations, and linear velocities.
+      Verified bit-for-bit identical across 1 and 4 worker threads.
+  - *Pluma Script Prelude (`cuervo/script/prelude/physics/*.plm`):*
+    - Exposes `Shape2D`, `CircleShape2D`, `RectangleShape2D`, `CapsuleShape2D`, `SegmentShape2D`, `CollisionShape2D`,
+      `PhysicsBody2D`, `StaticBody2D`, `RigidBody2D`, `CharacterBody2D`, `Area2D`, `RayCast2D`, `PinJoint2D`,
+      `DistanceJoint2D`, `RayCastResult2D`, and global static query singleton `Physics2D`.
+    - Every public symbol is fully documented in `docs/API.md` (1480/1480 symbols). Internal bridge methods live on private
+      native class `_Physics`.
+  - *Editor Integration:* Added custom vector node icons in `editor/icons.cpp` for `CollisionShape2D` (`shape`),
+    `PhysicsBody2D` & `RigidBody2D` (`rigid_body`), `StaticBody2D` (`static_body`), `CharacterBody2D` (`character_body`),
+    `Area2D` (`area`), `RayCast2D` (`raycast`), and joints (`joint`).
+  - *Replay Determinism & Verification:*
+    - `examples/platformer/` implements four playable scenes showcasing all physics features: `level.scene` (classic platformer, character, crates, coins), `joints.scene` (all 9 Box2D joints including bridge, pendulum, spring pad, elevator, welded cross, pogo and motor), `vehicles.scene` (WheelJoint2D buggy with suspension and motor drive, towed trailer, chain terrain), and `sandbox.scene` (AnimatableBody2D moving platforms, polygon boulders, ShapeCast2D sweep scanner, Physics2D.explode, and CCD).
+    - Validated in CTest (`platformer`): tick-240 state hash `e458fa6c80754cc5` is identical across `--jobs 1` and `--jobs 4`,
+      recorded replays verify on 1 and 4 threads, and scene files round-trip cleanly through text views. Zero compiler warnings.
 - **9.7 2D lighting.** SDF lighting and raymarched shadows, `PointLight2D`, occluders;
   both backends in parity (§4.4).
+  **Clarified (Milestone 9.7, `cuervo/render/light_batcher.*`, `cuervo/render/shaders/light.{vert,frag}`,
+  `cuervo/script/light_bindings.cpp`, `cuervo/script/prelude/lighting.plm`, `tools/rhi_parity`,
+  `tests/cuervo/light_tests.cpp`, `tests/cuervo/lighting_script_tests.cpp`):**
+  - *Nodes.* `PointLight2D` (radius, color, energy, falloff, an optional cone: `spot_angle` and `spot_feather`
+    along the node's rotation, `source_radius`, shadows with `shadow_softness` and `shadow_color`, `light_mask`,
+    `subtract`), `DirectionalLight2D` (parallel light along its rotation, shadows traced `max_distance` back),
+    `AmbientLight2D` (darkens the world by `darkness`, tinted, except where lights reach; `glow` adds the lights'
+    color on top) and `LightOccluder2D` (circle, rounded rectangle, capsule, or polygon walls, with
+    `occluder_mask`). They queue into the frame through `Canvas.point_light`, `directional_light`,
+    `ambient_light` and `occluder_*` while the tree draws; `Scene.draw_frame` calls `Canvas.apply_lights()`
+    after the world and before the CanvasLayers, so HUDs and menus are never lit. Lights are drawn in the
+    current Camera2D's view.
+  - *Render only.* Nothing reads lighting back into the simulation: the state hash, replays and the 1/N
+    thread checks are the same with lighting on, off, or with no light target (the editor's unlit view, a
+    test host). `lighting_script_tests` checks the hash tick by tick against an unlit twin. A capture
+    (`--screenshot`) lights only its captured frame, which keeps software WebGL (the web export's verify
+    run) fast; the frames before it are never shown.
+  - *Shading.* Occluders are analytic signed distance fields (circle, rounded box, capsule; polygon edges
+    are capsules) in a std140 uniform block, so no render targets or new RHI features are needed and the
+    shader is the same GLSL 450 source on Vulkan, GL 3.3, GLES 3.0 and WebGL2. Each light is sphere-traced
+    toward per fragment. Soft shadows model a round source `shadow_softness` units across: where the ray
+    passes an occluder at distance t of total length L, the penumbra is softness * t / L wide (Quilez's
+    closest-approach estimate, counted only while the ray approaches a surface), so shadows are sharp
+    where they touch their occluder and widen toward the light. An earlier estimate (k * h / t) widened
+    them with the distance toward the light, so a lantern held over the floor darkened everything whose
+    ray skimmed the floor near it and left a lit wedge above it; `light_tests` keeps a low light over a
+    floor lit. The penumbra is centered on the hard shadow's edge, half that width to either side: the
+    march steps on into an occluder until the whole source is hidden (Quilez's inner penumbra). An
+    outer-only penumbra grew the shadow of an occluder right next to the light (a crate the lantern
+    touches) far past its outline and swung it with every small move of the light, and a light dipped
+    into a wall flipped between lit wedges and full shadow; with the centered penumbra it dims smoothly.
+    A point on a surface (within the march's 0.25 contact distance) starts as a face point: marching
+    from it hit its own surface at once, a hairline of shadow along every floor a light grazed.
+    Steps are capped at 1/48 of the distance so a penumbra is sampled smoothly. Without an
+    AmbientLight2D each light is an additive quad over its radius; with one, a single full-view quad
+    composites every light over the darkness.
+  - *Normal mapping.* An occluder's area is a face toward the viewer that bends outward over its last
+    `bevel` units (default 8; 0 = flat). The normal comes from the SDF gradient, tilted by the depth
+    from the edge; where two occluders touch (a tilemap's rectangles) a walk outward along it finds the
+    seam is not an edge, so it stays flat. When that walk had to cross a seam, walks all around (22.5
+    degrees apart) each drop their first sample outside onto the union's edge, where its distance is
+    exact, and the nearest edge point wins; at an inside corner (rock around a corner of open air) the
+    nearest two faces meet at the corner itself. So a wall of stacked strips keeps an even bevel past
+    every seam and inside corners round off; the bevel went flat in a wedge at each (bright notches
+    along walls, cut corners where a pillar meets the floor). A point on a surface (within the
+    march's 0.25 contact) is shaded as the face, as the shadow march takes it. Lights hang `height` units above the plane (PointLight2D,
+    default 48; directional lights shine at 45 degrees), and a face gets N.L relative to a flat surface:
+    every non-occluder pixel and a face's flat interior are lit as before, a bevel turned to the light
+    catches more (up to 2.5x), one turned away goes dark. Only other occluders shadow a face (the march
+    leaves the occluder it starts in). `eval_surface_factor` mirrors it on the CPU.
+  - *Limits.* Per view, 32 lights, 128 occluders and 512 occluder references. Each light only marches the
+    occluders that can reach it (its radius plus the penumbra margin; directional lights take those in
+    view), culled on the CPU in `LightBatcher::flush`; past the limits the rest are dropped and logged once.
+    `cuervo/render/light_batcher.cpp` mirrors the shader's math with `dmath` (`eval_light_at`,
+    `eval_raymarch_shadow`) for tests and tools.
+  - *Parity.* `rhi_parity` renders two lighting scenes (additive shadows, ambient composite) and the
+    `rhi_parity` test also captures `examples/lantern_cave` at tick 240: GL 3.3 and GLES 3.0 are identical
+    (tolerance 0) and Vulkan matches GL within one level per channel. On the reference machine the lit
+    cave runs at about 700 FPS at 1280x720 on both backends, and about 60 FPS in Chrome on WebGL2.
+  - *Cut.* Normal-map textures for sprites (normals come from occluder shapes only; textures arrive with
+    11.2a), light cookies, colored (translucent) occluders, per-sprite light masks and shadow casting
+    from arbitrary vector shapes; occluders are declared, not derived from what is drawn.
 - **9.8 Integration.** Editor support for every new node, tool and panel (§4.13), and a
   sample platformer using physics, tilemaps, animation and lighting.
+  **Clarified (Milestone 9.8, `editor/animation_panel.cpp`, `editor/anim_edit.*`, `editor/icons.cpp`,
+  `cuervo/script/prelude/tilemap.plm`, `cuervo/script/prelude/physics/tilemap_collision.plm`,
+  `examples/lantern_cave`, `tests/lantern_cave.cmake`, `tests/editor/editor_98_tests.cpp`):**
+  - *Animation timeline* (the editor UI §4.17 9.4 left out). An "Animation" panel in the bottom dock edits
+    the clips of the selected AnimationPlayer (or the one under the selected node): new/delete clip,
+    length, loop mode; one row per track with its keys on a tick ruler; click to scrub, drag a key to move
+    it, right-click to delete; "Key" records the track's field as the document stores it at the playhead;
+    the selected key's tick, value, interpolation and easing are editable. Every change rewrites the
+    player's `animations` field through the document (one undo step, a drag merges into one) and saves
+    with the scene. "Preview" poses the scene view at the playhead (`ProjectEnv::preview_animation`:
+    `play` then `seek` on the preview node, which never runs ready()).
+  - *Lighting in the editor.* The scene view and play-in-editor draw the scene's lights (View > Lighting
+    Preview turns it off for editing in the dark); the light nodes draw their reach, direction or outline
+    as gizmos in the editor only. New icons: light, sun, moon, occluder and animation (AnimationPlayer,
+    AnimationTree); TileMapCollision2D uses the static body icon. A panel that a saved layout predates
+    docks into its default dock as a tab instead of floating.
+  - *Tilemaps for platformers.* `TileMapLayer.solid_rects()` merges the solid tiles (`TileDef.walkable`
+    false) into rectangles: runs along each row joined with identical runs below, in row order (the same
+    list every run), cached until the cells change. `light_occluders` makes them light occluders, and the
+    physics prelude's `TileMapCollision2D` (a child of the layer) builds one transient StaticBody2D box per
+    rectangle when it enters the tree (`rebuild()` after editing cells).
+  - *Sample game.* `examples/lantern_cave`: a dark cave of tiles (collision and occluders), an explorer
+    (CharacterBody2D) with a Camera2D, a lantern light on a swinging arm and an AnimationPlayer walk cycle,
+    torches whose energy flickers through AnimationPlayer tracks, a sweeping spot-light beacon, crystal
+    and gem lights, pushable crates (RigidBody2D with a LightOccluder2D), four gems and a door. The
+    `lantern_cave` test plays it on 1 and 4 threads to tick 240 with pinned state hash `2dd8beccd71bc67e`,
+    verifies the recorded replay on 1 and 4 threads, plays the whole level (every gem, out of the door at
+    tick 587) and round-trips the scene; `examples_sweep_lantern_cave` exports it (bytecode, AOT) and hot
+    reloads it; `cuervo-tools export --platform web` verifies its stripped web player in headless Chrome.
+  - *One hash for every build.* Exported games used to reach another state hash on a stripped
+    player (native or web) than on the full one, because a missing feature changed what the hash
+    covered. A player without particles or the UI now hashes what those hold when unused (§4.11
+    "Clarified (Milestone 7.5)"), and `cuervo-tools export` checks every stripped player against
+    the full engine: the platformer reaches `8f557693da68a47e` and the cave `2bb36eb7e7e86508` at
+    tick 240 on the full player, a stripped Linux player and the stripped web player in Chrome.
+    Full-engine hashes (and recorded replays) are unchanged.
+  - *Hot reload with physics.* The physics world holds its bodies', shapes' and joints' nodes; a hot
+    reload migrates every script object to a new VM, and the world kept calling the old (freed) ones,
+    which hung or crashed a physics game on its next tick. `PhysicsWorld::remap_owners` now moves them
+    through the reload's Migrator (`physics_script_tests` reloads a running scene and keeps stepping).
 
 ### 4.18 Windows, language APIs and plugin ecosystem (10.5a-10.5d)
 Runs after Phase 10 (numbered 10.5 so Phases 11 and 12 can follow). It makes the
@@ -1373,20 +1635,106 @@ it. Each piece keeps replay hashes identical.
   mapping, and a GUI-subsystem release build. Windows export (§4.11) stops needing a
   hand-built player. Signed prebuilt editor and export templates are published so users
   don't compile from source.
-- **10.5b Modules and packages.** Today a project's files share one global namespace
+  - *Clarified (Milestone 10.5a).* MSVC (`cl` 19.44), MinGW-w64 GCC 16 (UCRT) and Clang
+    with the MSVC runtime build with zero warnings and pass `ctest`. The `msvc-*` and
+    `mingw-*` presets name the compiler, and CI runs MSVC Release and MinGW-w64 Debug
+    (MSVC Debug passes too, but its Debug STL makes the suite about three times slower). The shmup reaches `a3e57e79964421d3` on
+    every toolchain, on GL and Vulkan. `platform_tests` checks that `a * b + c` is not
+    contracted to FMA (`/fp:precise` doesn't contract since VS 2022). **Decision:** every
+    Windows program embeds one manifest and sets a UTF-8 console code page for its lifetime
+    (cmake/Windows.cmake). The manifest gives the UTF-8 active code page (argv and narrow
+    file names), PerMonitorV2 DPI awareness and long paths. SDL3 then reports window
+    coordinates in pixels (density 1 at 150 %), and pointer positions match the pixel under
+    the cursor. **Decision:** `cuervo-player.exe` is a GUI-subsystem build of the same
+    runtime sources, entered through a plain `main`. Exports ship it, `cuervo.exe` stays a
+    console program, and the editor is GUI-subsystem too. **Decision:** prebuilt packages
+    carry their export templates in `templates/<platform>/`, which `cuervo-tools export`
+    finds after the build tree's own player (docs/EXPORT.md "Players"). Release files are
+    listed in SHA256SUMS.txt, with Sigstore attestations once the repository is public. Authenticode signing uses a certificate the repository holds as a
+    secret, so unsigned releases are possible and documented. Stripped players build on
+    Windows too (a `CreateProcessW` process runner), so tictak's stripped export reaches the
+    full player's hash there. Fixes the toolchains exposed:
+    - MSVC's 16 KB limit on a string literal (embedded texts are split).
+    - Windows' 1-2 MB main stack (now 8 MB everywhere).
+    - MSVC's static-library naming for plugins, plus the Windows system libraries that a
+      statically linked Rust plugin needs in AOT modules.
+    - GNU-ld link flags for MinGW, in project flags and in AOT module builds.
+    - MinGW's duplicate default manifest, its runtime DLLs (now linked statically) and its
+      path-hashed DLL image base, which made AOT modules differ between exports.
+    - The Visual C++ runtime DLLs an MSVC player imports: Windows exports ship them
+      app-local.
+    - `@extern("", ...)`, which now searches every loaded module as `dlopen(NULL)` does.
+    - GCC's unaligned 32-byte stack spills on Win64 (bug 54412), which crashed Box2D's
+      AVX2 solver; the assembler emits unaligned moves, with identical results.
+    - Intel Arc's GL and Vulkan drivers light a few tile-seam pixels differently, so the
+      lit GL-vs-Vulkan parity check allows 0.01 % (docs/WINDOWS.md).
+- **10.5b Modules, packages and unit tests.** Today a project's files share one global namespace
   (LANGUAGE.md 9.12). Adds `import`, per-file or per-package namespaces and `pub`
   visibility across them, a `[dependencies]` table in project.toml with pinned versions,
   and packaging so libraries can be shared. Hot reload (§5.13) and the LSP follow imports.
+  Also adds native unit testing to Pluma: `@test fn test_name() { ... }` declarations (omitted from
+  release builds) executed via `cuervo-tools test` and `plm test` with deterministic assertions,
+  giving scripts pure-logic regression tests in CI alongside full-game replays.
+  - *Clarified (Milestone 10.5b).* A game's own scripts stay the root namespace, so
+    existing games and replay hashes are unchanged. A package (`package.toml` plus
+    `scripts/`) is a namespace of its own: its names are keyed `pkg.Name`, only `pub`
+    ones are visible outside it, and files import it one by one (`import tween`,
+    `import tween as tw`, `import tween.{Tween}`; LANGUAGE.md 9.26). A package sees the
+    preludes' names but never the game's. **Decision:** a dependency names one exact
+    version (`[dependencies]`, vendored under `packages/<name>/` or found by `path`), and
+    a project holds one version of each package; version ranges and a registry wait for
+    10.5d (docs/PACKAGES.md). A project is still checked as one unit: each source part
+    carries its package, so the session, hot reload, AOT and the language server need no
+    separate module loader. Exports pack every package under `packages/<name>/`.
+    `examples/garden` (the `tween` package from `examples/libs/tween`, a vendored
+    `palette`, and the game's own declarations with the same names) reaches its dev
+    state hash from source and AOT packs on Linux and in headless Chrome.
+    `cuervo-tools package new|check` makes and checks a package on its own. `@test`
+    functions (LANGUAGE.md 9.27) are left out of normal and release builds; `plm test`
+    and `cuervo-tools test` run a game's or a package's own tests, each in a fresh
+    session, and ctest runs those of `examples/garden` and `examples/libs/tween`.
+  - *Cycle collector fix (found while closing 10.5b).* Under ASan the `anim_character`
+    sweep showed a use-after-free that predates 10.5b. The scene bridge built every
+    saved list as a traced list, even where the list it replaced was untraced (an
+    acyclic element type) and held by an untraced object, and the collector then
+    freed such a list while still reading it. The bridge now keeps the replaced
+    list's tracing, and the collector reads all untraced children before it releases
+    any of them.
 - **10.5c Plugin, embedding and FFI APIs.** A stable, versioned C ABI for native modules
   that register nodes, `@native` functions and importers (the engine's own preludes are
   the model, §5.12), a Pluma FFI to call C libraries with explicit marshaling, and an
   embedding API for hosting the Pluma VM in other programs. Native code in the sim path
   must be deterministic, so the API flags modules as sim-safe or not, and AOT export
-  links plugins statically. **Decision:** the first bindings are C++, Rust and C#, all
+  links plugins statically. The C ABI serves as the long-term extension boundary for
+  proprietary store, audio, and console SDKs without requiring engine forks or closed-source
+  modifications. **Decision:** the first bindings are C++, Rust and C#, all
   over the one C ABI. C++ is a header-only wrapper (the engine's own language). Rust is a
   safe crate generated from the ABI's header. C# runs on .NET hosted in the player and
   editor on desktop; it is not available on the web or in AOT exports until a
   NativeAOT/WASM path is proven, so the web build is C++/Rust/Pluma only at first.
+  - *Clarified (Milestone 10.5c).* A plugin is a package (10.5b) with a `[plugin]` table
+    in `package.toml`: the ABI version, the sim-safe flag and the library for each
+    platform, shared and static. Its scripts declare the API in Pluma, and the library
+    implements the `@native` parts. That way types, defaults and inheritance come from the
+    checker, as they do for the engine's preludes. A plugin registers names only inside
+    its package's namespace. The ABI (`cuervo/plugin/cuervo_plugin.h`) is one versioned
+    host function table: new entries are appended, and `size` says which entries exist.
+    **Decision:** a plugin whose `abi` is not the engine's ABI version is refused at load.
+    The Rust and C# raw layers are generated from the header (`tools/gen_plugin_abi.py`),
+    and a ctest checks they match. AOT export links each plugin's static library into the
+    script module, which lists the plugins it contains. A plugin with only a shared
+    library ships it in the pack, and a .NET plugin makes an AOT export fail. Importers
+    produce the engine format under the output path. In development the VFS converts on
+    read, and export stores the converted file, so a release game never runs an
+    importer. The engine warns about plugins that are not sim-safe, since natives run
+    in the simulation. **Decision:** the FFI (`@extern("lib", "symbol")`, LANGUAGE.md
+    9.28) marshals numbers, `bool` and `str` only, with at most 4 parameters, and binds on
+    the first call, so a missing library panics there. Anything richer is a plugin.
+    The embedding API (`pluma/embed/pluma_embed.h`) is C over the language library and
+    has no engine dependency. Its values convert by the declared Pluma types, and panics
+    never unwind through C frames. `examples/plugin_demo` uses a node and functions from
+    `orbit` (C++), `noise` (Rust) and `hues` (C#). The C++ and Rust plugins linked into
+    AOT modules give the same results as in the VM (docs/PLUGINS.md).
 - **10.5d Plugin ecosystem, licenses and contribution.** Builds on 10.5b and 10.5c so
   other people can share and contribute code:
   - *Plugins:* a plugin manifest (name, version, engine and ABI version range, platforms,
@@ -1403,23 +1751,97 @@ it. Each piece keeps replay hashes identical.
     security policy for reports, issue and pull request templates, a contributor license
     or sign-off policy, a design-change process (proposals recorded in DESIGN.md as
     "Decision/Clarified" notes), and a public roadmap generated from the milestones table.
+  - *Clarified (Milestone 10.5d).* The manifest is `package.toml`, for every package and
+    not only plugins. `engine` takes a version range (`>=0.1, <0.3`, `^1.2`, `*`), and a
+    game whose engine is outside it doesn't build. `[plugin] abi` takes an ABI version or
+    a range of them, and `platforms` defaults to the platforms the library fields name.
+    **Decision:** a project still pins one exact version per package (10.5b). Ranges
+    choose what `cuervo-tools plugin install` fetches, and the version it installs is
+    pinned in project.toml. **Decision:** a registry is a directory (`index.json` plus one
+    archive per version), so a local folder, a shared drive or static file hosting can
+    serve it with no server code. HTTP fetching waits until a hosted registry exists. An
+    archive is a pack (platform "any") with the manifest, scripts, license and notices,
+    the conformance project and the built libraries, and no sources. The index records the
+    SHA-256 of each archive and of every file in it, and the platforms that have a built
+    library. `install` refuses any mismatch, and a version can't be republished with
+    other contents. Verification checks:
+    - the license, as an SPDX expression, and a license text in the package;
+    - the engine and ABI ranges;
+    - that the library loads, and that the scripts check against its natives.
+    A sim-safe plugin also needs a conformance project (`conformance/`, a game that depends
+    on the plugin by `path = ".."` and keeps its results in globals). It is packed and run
+    headless for 240 ticks; publish records the state hash, and install requires the same
+    hash on the installing machine. A vendored package resolves its dependencies among its
+    game's `packages/`, and archived manifests drop `path`. Exports write
+    `licenses/PACKAGES.md` (also `cuervo-tools license report`) and copy each package's
+    license text next to the engine's notices. Contribution:
+    - CONTRIBUTING.md covers the zero-warning, style and prelude/native rules, a
+      Developer Certificate of Origin sign-off (no CLA) and the design-change process;
+    - `CODE_OF_CONDUCT.md`, `SECURITY.md` (private advisories; scripts and plugins are
+      code, not a sandbox) and the issue and pull request templates are in the repository;
+    - `docs/ROADMAP.md` is generated from §6 by `tools/gen_roadmap.py`, and a ctest keeps
+      it current.
+    `examples/plugins/orbit` publishes to a registry, installs into a fresh project and
+    passes the checks there, and so does a script package with a dependency
+    (`tests/cuervo/registry_tests.cpp`).
 
 ### 4.19 Production features (11.1-11.4)
 Phase 11 holds what real shipped games need beyond the engine core, found by comparing
 with Godot and Bevy. Each piece keeps replay hashes identical and works on desktop and
-the web unless noted. Platform services (Steam, achievements, cloud saves, ads and
-purchases) are **out of scope** for now, as is the community and ecosystem work.
+the web unless noted. Platform services (Steam, achievements, cloud saves) and proprietary
+middleware (Spine, FMOD) sit behind the 10.5c C ABI plugin architecture.
 - **11.1 Networking.** A transport layer (UDP on desktop, WebSocket and WebRTC on the
   web), then two models on the deterministic sim (§4.1): lockstep (inputs only) and
   rollback (snapshots, re-simulation, input prediction), both reusing the replay frame
   format (§4.8, docs/REPLAYS.md) and the state hash to detect desync. Plus HTTP and
   WebSocket clients for services, outside the sim path. Scripts see networking as
   recorded input and events, never as raw sockets, so the sim stays deterministic.
-- **11.2 Shaders and raster pipeline.** User-written shaders in GLSL 450 through the
-  existing shader pipeline (§4.4), tier-checked by the migration report; post-process
-  passes; sprite sheets and texture atlases (import-time packing, batched draws);
-  9-slice; raster images beside the vector path. Shader parameters are `@export`-style
-  properties in the inspector.
+- **11.2a Raster processes.** While vector graphics remain Cuervo's primary art pipeline,
+  shipped games frequently incorporate raster assets, pixel art, sprite sheets, and
+  pre-rendered textures. This milestone establishes the complete offline asset processing
+  and runtime raster pipeline beside the vector path:
+  - *Asset ingestion and processing:* import decoders for standard image formats
+    (PNG, JPEG, WebP, QOI via `stb_image`) converting into engine texture formats in
+    `.import/`. Import-time generation of mipmaps, color space handling (sRGB to linear),
+    and texture format transcoding.
+  - *Texture atlases and sprite sheets:* automatic offline bin-packing (MaxRects algorithm)
+    of loose sprites into deterministic power-of-two texture atlases with configurable
+    padding and 1-pixel border extrusion to prevent filtering bleed. Slicing tools for
+    sprite sheets (fixed grid and JSON metadata) into named/indexed animation frames.
+  - *SVG rasterization fallback:* automated raster fallback (§4.5) for SVG documents that
+    use unsupported vector features (filters like `feGaussianBlur`, complex masks, drop shadows).
+    Rasterized to atlases at target game resolution/DPI and cached, avoiding runtime tessellation bottlenecks.
+  - *Runtime batching and nodes:* a dedicated textured quad batcher sharing RHI instancing
+    conventions with the SDF and vector batchers. Node support: `Sprite2D` (raster image and
+    atlas frame node with flipping, tinting, source rects, and material assignment),
+    `AnimatedSprite2D` (frame-based sprite animation playback with loop modes and speed), and
+    `NinePatchRect` (9-slice procedural scaling for UI panels and scalable world sprites without corner distortion).
+  - *Filtering and scale modes:* per-texture and global sampler filtering controls (`nearest`
+    for pixel art and `linear`/bilinear for smooth scaling), integrated with the project
+    scale modes (`fit`, `integer`, `stretch`, §4.4).
+  - *RHI and tier parity:* identical textured quad rendering on Vulkan, OpenGL 3.3,
+    OpenGL ES 3.0, and WebGL2 under the `compatible` render tier. Replay hashes remain
+    strictly deterministic as sim objects manipulate node transforms and frame indices, while
+    GPU rasterization remains purely visual.
+- **11.2b Custom shaders, post-processing and linear color.** User-written shaders, screen-space
+  raster post-processing passes, and configurable color spaces:
+  - *User shaders:* authoring custom vertex and fragment shaders in GLSL 450 through the
+    existing shader compilation and validation pipeline (§4.4), translated to target backends.
+    Shader parameters are exposed as inspector-editable `@export` uniforms (scalars, vectors,
+    colors, `sampler2D` textures). Tier-checked by `cuervo-tools tier check`.
+  - *Post-processing pipeline:* off-screen render targets (framebuffer attachments / render passes)
+    supporting multi-pass framebuffer ping-ponging. Built-in post-process passes (bloom
+    downsample/upsample blur pyramid, color grading LUT, vignette, CRT scanlines) and custom
+    full-screen quad blits.
+  - *Color space toggle:* `project.toml` supports `[render] color_space = "srgb"` (default;
+    1:1 match with Inkscape and web vector tools on UNORM framebuffers) or `"linear"` (hardware
+    sRGB framebuffers, sRGB-to-linear texture sampling, and linear lighting/blending,
+    eliminating dark fringe artifacts on blended sprites).
+- **11.2c Text scenes on save.** Project source directories (`scenes/`) store scenes in the
+  human-readable text format (emitted by `scene dump`) as their primary authoring format,
+  allowing Git 3-way auto-merging across branches without binary conflicts. During release export
+  (`cuervo-tools pack` and `export`), scenes are compiled into the packed binary format (`.pak`),
+  retaining instant startup times and zero runtime parsing overhead for release builds.
 - **11.3 Localization and text.** Translation tables (keys to strings per locale, with
   plural and format rules) and a locale switch at run time; complex-script shaping and
   bidirectional layout for the MSDF text path (a shaping library pinned in
@@ -1436,18 +1858,62 @@ Phase 12 makes the editor and runtime good for narrative, AI-heavy and accessibl
 - **12.1 Content tools.** A dialogue editor (branching, conditions, localization keys
   from 11.3), a cutscene/timeline editor built on 9.4's `AnimationPlayer`, a particle
   editor panel for the particle system (§4.6, currently script-defined), and a visual
-  shader editor producing 11.2 shaders.
+  shader editor producing 11.2b shaders. Graph-based panels use a virtualized node-canvas
+  backend (`imgui-node-editor`) for smooth zooming, link navigation, and box selection.
 - **12.2 AI.** Behavior trees and a state-machine tool (nodes in the scene tree, edited
   and debugged in the editor), and steering behaviors (seek, flee, arrive, avoid,
   flocking) that use 9.5 navigation. All deterministic and tick-driven.
-- **12.3 Accessibility.** Screen-reader support through the platform accessibility APIs
-  (desktop first, web through ARIA), UI scaling, runtime input remapping (building on
-  the input map editor, §4.13), colorblind palettes, reduced-motion and subtitle
-  options.
-- **12.4 ECS decision.** §4.3 says the runtime is an ECS but scripts only see nodes. This
-  milestone decides: either expose component queries and systems to Pluma (iterated in
-  the job system with a deterministic order) or drop the ECS from the design and say so.
-  The decision is recorded here before any work starts.
+- **12.3 Accessibility and editor polish.** Screen-reader support through **AccessKit**,
+  maintaining an in-memory semantic accessibility tree alongside the viewport that bridges
+  to platform accessibility APIs (Windows UI Automation, Linux AT-SPI, web ARIA). UI scaling,
+  runtime input remapping (building on the input map editor, §4.13), colorblind palettes,
+  reduced-motion and subtitle options. Editor polish: SDL3 `SDL_EVENT_DROP_FILE` support
+  for native OS file drag-and-drop into the scene view, dynamic high-DPI font atlas
+  re-sampling, and refined brand theme styling.
+- **12.4 The ECS resolution.** Settles the architecture: **Hybrid Model**. The `Node2D`
+  scene tree remains the user-facing model for composition, hierarchy, transforms, and UI.
+  High-throughput simulation systems (particles, bullets, spatial collision) remain in
+  contiguous C++ SoA pools, exposed to Pluma scripts through deterministic query iterators
+  (`for e in query(Enemy) { ... }`) executed cleanly in the job system. Low-level raw ECS
+  plumbing is kept internal.
+
+### 4.21 Extended platforms and drop-in console SDKs (Milestone 13)
+Brings the 2D engine to mobile and consoles before 3D expansion:
+- **Mobile platforms:** Android via SDL3 and OpenGL ES 3.0 / Vulkan with Gradle/NDK packaging;
+  iOS via SDL3 and Metal (MoltenVK). Handles mobile app lifecycle events (backgrounding,
+  suspend/resume state restoration), notch safe-area insets, and battery/thermal-aware
+  frame pacing that protects fixed-timestep determinism.
+- **Desktop parity:** macOS support via SDL3 and MoltenVK on Apple Silicon and Intel.
+- **Drop-in console architecture:** The core engine remains 100% open-source MIT with zero
+  proprietary NDA code. Console backends (Nintendo Switch, PlayStation, Xbox) are implemented
+  against the 10.5c C ABI. Authorized developers compile private closed-source platform
+  shims (`cuervo_platform_switch.so` / `.dll`) and drop them directly into export directories
+  without needing private forks or closed engine sources.
+
+### 4.22 Zero-bloat 3D expansion (Milestone 14)
+Extends the engine into 3D while preserving 2D performance and binary footprint:
+- **Unified math:** Generic `Vec<T,N>` already provides `vec3`, `vec4`, matrices, and
+  quaternions with zero duplicate math abstractions.
+- **3D systems:** 3D scene/camera transforms, 3D mesh batcher, glTF 2.0 import, and PBR
+  materials (albedo, roughness, metallic, normal maps).
+- **Zero-bloat guarantee:** Milestone 7.5 feature-stripping (`--engine stripped`) compiles
+  out all 3D mesh batchers, PBR shaders, and glTF loaders for 2D games at export time.
+  2D release binaries incur zero bytes of 3D overhead.
+
+### 4.23 First-party jumpstart ecosystem (Milestone 15)
+Seeds the ecosystem with official plugins, wrappers, and reference templates:
+- **Official C ABI plugin wrappers:**
+  - `cuervo-steamworks`: Achievements, leaderboards, stats, cloud saves, and overlay hooks.
+  - `cuervo-spine`: Runtime Spine2D skeletal mesh animation and atlas binding.
+  - `cuervo-fmod`: Optional drop-in commercial audio engine for pro sound designers (keeping
+    lightweight, zero-cost `miniaudio` as the built-in engine default).
+  - `cuervo-console-template`: A turn-key boilerplate repository showing authorized developers
+    how to insert proprietary console SDK calls behind the C ABI.
+- **Reference showcase demos:**
+  - A 2-player rollback netcode arena brawler (demonstrating 11.1 zero-desync netplay).
+  - A 100k-particle bullet hell / survivors clone (demonstrating 4.15 / 5.5 throughput).
+  - A multi-platform narrative vertical slice (demonstrating 12.1 dialogue, 11.3 localization,
+    and 12.3 AccessKit screen-reader integration).
 
 ## 5. The language
 
@@ -1801,7 +2267,7 @@ support status of what exists is in [STATUS.md](STATUS.md).
 
 | # | Phase | Done when |
 |---|---|---|
-| 0 | **Skeleton:** CMake, SDL3 window, fixed-timestep loop, input actions, logging, `Vec<T,N>`, RHI interface + GL and Vulkan backends (Vulkan pulled forward from Phase 5) | A window clears to a color and responds to actions, on Linux and Windows (done on Linux; the Windows check is part of 10.5a) |
+| 0 | **Skeleton:** CMake, SDL3 window, fixed-timestep loop, input actions, logging, `Vec<T,N>`, RHI interface + GL and Vulkan backends (Vulkan pulled forward from Phase 5) | A window clears to a color and responds to actions, on Linux and Windows (done on Linux and, with milestone 10.5a, on Windows) |
 | 1 | **Language core** (in parallel): lexer, parser, type checker, bytecode, VM, refcounting, REPL | Closures, structs, classes and enums run in the REPL; language test suite passes (done: `pluma_tests`) |
 | 2 | **Vector rendering:** SDF batcher, SVG import + tessellation, MSDF text, camera, scale modes | 50k SDF shapes at 60 fps; an SVG character drawn sharp at any zoom (done: `examples/bench`, `cuervo --demo vector`) |
 | 3 | **Integration:** bindings, scripts on nodes, coroutines, hot reload | **A shmup stage written entirely in the language** (done: `cuervo --game examples/shmup`) |
@@ -1810,7 +2276,7 @@ support status of what exists is in [STATUS.md](STATUS.md).
 | 5.5 | **Performance core** (§4.15): activate the job system, explicit SIMD (AVX2 / WASM SIMD128), sub-seeded RNG streams, secondary spatial hash for large shapes | The particle demo's sim time scales with worker count, SIMD and scalar paths are bit-identical, and the replay hash is unchanged at 1 and N threads (done: §4.15 "Verified") |
 | 6 | **Editor:** scene view, inspector, assets, play-in-editor, replay viewer | A level can be built without code (done: 6A, the editor shell, §4.13 "Clarified (Phase 6A)" -- `examples/editor_level` was built from editor operations only and runs with `cuervo --game`; 6B, the asset browser, input-map editor, play-in-editor with hot reload, replays and the debugger, and the tier report, §4.13 "Clarified (Phase 6B)") |
 | 7 | **Release path:** AOT-to-C, cycle collector, manual memory, packing, export | A shipped build runs measurably faster than the VM (done: 7A cycle collector + manual memory, §5.10 "Clarified (Phase 7A)"; 7B AOT-to-C compilation, §5.12 "Clarified (Phase 7B)"; 7C packing + export, §4.11 "Clarified (Phase 7C)", docs/EXPORT.md. Both source and AOT native exports of `examples/shmup` reach the dev state hash `a3e57e79964421d3`, and AOT runs measurably faster than the bytecode VM) |
-| 7.5 | **Modular footprint:** Feature-stripping build system, dead-code elimination, unreferenced module pruning | An exported project strips unused engine subsystems (e.g., audio, unused RHI features, UI) resulting in measurably smaller release binaries and web payloads (done: §4.11 "Clarified (Milestone 7.5)", docs/EXPORT.md "Stripped players". Per-export Release players of `examples/tictak`, `examples/bench` and `examples/shmup` are 40%, 37% and 20% smaller than the full Release player on Linux, and their web `index.wasm` 18%, 15% and 4% smaller than the full web runtime; each runs its exported pack to its dev run's state hash, the web ones in headless Chrome. Windows players remain part of the active 10.5a validation) |
+| 7.5 | **Modular footprint:** Feature-stripping build system, dead-code elimination, unreferenced module pruning | An exported project strips unused engine subsystems (e.g., audio, unused RHI features, UI) resulting in measurably smaller release binaries and web payloads (done: §4.11 "Clarified (Milestone 7.5)", docs/EXPORT.md "Stripped players". Per-export Release players of `examples/tictak`, `examples/bench` and `examples/shmup` are 40%, 37% and 20% smaller than the full Release player on Linux, and their web `index.wasm` 18%, 15% and 4% smaller than the full web runtime; each runs its exported pack to its dev run's state hash, the web ones in headless Chrome. stripped Windows players build on Windows since 10.5a) |
 | 8 | **Tooling:** formatter, LSP, debugger, animation (cutout, skeletal, morph), docs (expanded as 8.4) | Someone else makes a game with it (tooling done, animation deferred to 9.4: formatter and LSP, debugger over DAP, and profiler, §5.14 "Clarified (Phase 8 — ...)"; the VS Code extension `tools/vscode-pluma`; docs/GUIDE.md with the `examples/tutorial` game and the generated docs/API.md, expanded further by 8.4. All of 8.1-8.9 are done; the done-when needs an outside user to confirm) |
 | 8.1 | **Brand integration** (§4.16): Cuervo Mark, wordmark, palette and type from the design kit, synced into `assets/brand/`, plus generated color tokens | The editor and runtime show the mark as window icon and splash in light and dark themes, and a sync script regenerates the brand assets from the kit (done: §4.16 "Clarified (Milestone 8.1)". `tools/sync_brand.py` syncs `assets/brand/` and records the kit commit; `cuervo` and `cuervo-editor` set the embedded app icon as their window icon; the editor's splash draws the imported mark and wordmark in the Bone and Raven themes on Vulkan and GL, and its UI switches between the two token-generated themes) |
 | 8.2 | **Node library** (§4.16): Shape, Path, Sprite, Text, Camera2D, Timer, Area, Emitter2D, AudioPlayer as prelude nodes | A level using every new node is built in the editor without code and round-trips through scene files with the same state hash (done: §4.16 "Clarified (Milestone 8.2)"; `examples/node_level` from `level.cmds`, the `node_level` test: editor-built, dump/build round trip and editor-played runs all reach `115a6d76bb125635` at tick 240) |
@@ -1821,34 +2287,41 @@ support status of what exists is in [STATUS.md](STATUS.md).
 | 8.7 | **Stabilization pass** (§4.12, §4.13, §5): prioritize Pluma semantics, scene serialization and migrations, editor workflows, replay behavior and export reliability before another major subsystem | A clean checkout can build the reference examples, round-trip scenes, hot-reload scripts, verify replays and launch source, AOT and stripped exports without known correctness regressions (done: §4.12 and §4.13 "Clarified (Milestone 8.7)", LANGUAGE.md 9.25. `examples_sweep_<name>` takes every example through runs, scene round-trips, replays, hot reload and exports; Pluma has a VM/AOT differential corpus and an integer reference model. Known limit: hot reload is not bit-exact for projects holding emitters or coroutines) |
 | 8.8 | **Supported-features contract** (§4.4, §4.16): classify features as stable, experimental, desktop-only, Web-compatible or unsupported; document the guarantees and limits of `compatible` and `full` render tiers | The README and generated/user documentation expose the same support matrix, and tier checks reject configurations that claim support the selected target does not provide(done: §4.4 "Clarified (Milestone 8.8)". [STATUS.md](STATUS.md) and the README summary are generated from `docs/support.json`, which the tier check and the exporter also read; `tier check --platform` and `export` refuse a Full project for the web and AOT when the export host is not the target) |
 | 8.9 | **End-to-end user workflow** (§4.11, §4.13): automate the fresh-checkout path from project creation through scene editing, running, exporting and launching the exported game | A workflow smoke test creates or opens a project, edits and saves a scene, runs it, exports it, launches the shipped artifact outside the project directory and verifies its exit status and deterministic state hash(done: §4.11 and §4.13 "Clarified (Milestone 8.9)". `workflow_smoke` starts from an empty directory with the shipped binaries: `cuervo-editor --new-project`, an editor command script that edits, saves and plays a scene, a hand-added script with a hot reload, bytecode and AOT (and stripped with `CUERVO_SLOW_TESTS`) exports launched from another directory, and the same state hash in the editor, `cuervo --game` and the shipped game) |
-| 9 | **Advanced Local Systems** (§4.17): transform hierarchy and more nodes, Pluma library, UI widgets, animation, tilemaps and navigation, Box2D v3 physics, 2D SDF lighting/raymarching | A physics-based platformer with 2D lighting is playable |
+| 9 | **Advanced Local Systems** (§4.17): transform hierarchy and more nodes, Pluma library, UI widgets, animation, tilemaps and navigation, Box2D v3 physics, 2D SDF lighting/raymarching | A physics-based platformer with 2D lighting is playable (done: milestones 9.1 to 9.8, §4.17; `examples/lantern_cave` and its `lantern_cave` test) |
 | 9.1 | **Transform hierarchy and node gaps** (§4.17): parent-relative transforms (toggleable), `Line2D`, `Polygon2D`, `Marker2D`, `VisibleOnScreenNotifier2D` | Moving a parent moves its children when the hierarchy is on, and world-space scenes behave exactly as before with it off (done: §4.17 "Clarified (Milestone 9.1)"; `hierarchy_tests` move a parent and check the child with the hierarchy on and off, and the shmup, tictak and editor_level hashes are unchanged with it off) |
 | 9.2a | **Pluma collections, strings and language** (§4.17): `Map`/`Set`/fixed arrays/`StrBuilder`, `List` and `str` methods, conversions, property accessors, `Result` and `?`, method values | A script uses each feature and the language test suite passes under the VM and AOT (done: §4.17 "Clarified (Milestone 9.2a)"; `tests/pluma/library_tests.cpp` runs the same program in the VM and AOT) |
 | 9.2b | **Pluma math, geometry and random** (§4.17): scalar/integer/vector math, `Rect2`, `Transform2D`, geometry helpers, noise, seeded `Random` streams | Every function is bit-identical across SIMD, scalar, VM and AOT, and the replay hash is unchanged (done: §4.17 "Clarified (Milestone 9.2b)") |
 | 9.3 | **UI widgets** (§4.17): `GridContainer`, `ScrollContainer`, Flow/Split/AspectRatio, `Image`/`TextureRect`, `ProgressBar`, `LineEdit`, `OptionButton`, tabs, popups | A settings and inventory menu built from them is driven by keyboard, gamepad and pointer, and replays (done: §4.17 "Clarified (Milestone 9.3)" -- `examples/ui_menus` is driven by keyboard, gamepad and pointer in `tests/ui_menus.cmake`; each run is recorded and replays with identical state hashes on 1 and 8 threads, and the shmup hash `a3e57e79964421d3` is unchanged) |
 | 9.4 | **Animation** (§4.17): `AnimationPlayer` (property tracks), `Tween`, `AnimationTree` state machine | An animated character blends between states and the replay hash is unchanged at 1 and N threads (done: §4.17 "Clarified (Milestone 9.4)"; the `anim_character` ctest runs `examples/anim_character` with scripted input to tick 240 on `--jobs 1` and `--jobs 4` with one state hash, verifies its recorded replay on 1 and 4 threads and round-trips its scene) |
-| 9.5 | **Tilemaps and navigation** (§4.17): `TileMapLayer`, tilesets, autotiling, `NavigationRegion2D`, `NavigationAgent2D` | A top-down level is painted in the editor and an agent paths around obstacles |
-| 9.6 | **Physics** (§4.17): Box2D v3 behind the physics interface; `StaticBody2D`, `CharacterBody2D`, `RigidBody2D`, `Area2D`, `CollisionShape2D`, raycasts, joints | A platformer character runs, jumps and pushes bodies deterministically |
-| 9.7 | **2D lighting** (§4.17): SDF lighting/raymarching, `PointLight2D`, occluders | Lights and shadows render identically on Vulkan and GL |
-| 9.8 | **Integration** (§4.17): editor support for all of the above and a sample game | A physics-based platformer with 2D lighting is playable |
-| 10 | **Next-Gen Web:** WebGPU, WASM multithreading (SharedArrayBuffer)| A stable benchtest runs natively in the browser (WASM threads done early: docs/WEB.md "Threads", `CUERVO_WEB_THREADS`. **Design decision:** the WebGPU backend's shaders are translated SPIR-V → WGSL by **naga** (Rust; a host build tool), keeping one GLSL 450 source per shader; WebGPU starts only after Phases 8 and 9 are done) |
-| 10.5 | **Windows and language APIs** (§4.18): Windows builds, module/package system, plugin and embedding API, FFI | The shmup builds, passes its tests and exports on Windows with the same state hash as Linux, and a third-party plugin and package are used by a game |
-| 10.5a | **Windows builds** (§4.18): MSVC and MinGW builds, CI, determinism check, signed prebuilt editor and export templates | `ctest` passes on Windows and a Windows export of `examples/shmup` reaches the Linux state hash |
-| 10.5b | **Modules and packages** (§4.18): `import`, namespaces, project dependencies, versioning | A game imports a package from another directory with no global name clashes |
-| 10.5c | **Plugin, embedding and FFI APIs** (§4.18): stable C ABI for native modules, C++, Rust and C# bindings, Pluma FFI to C libraries, API versioning | A native plugin written in each of C++, Rust and C# adds a node and a function that a script uses (C# on desktop), in the VM and in AOT where supported |
-| 10.5d | **Plugin ecosystem, licenses and contribution** (§4.18): plugin manifest and registry, project license, third-party notices, contribution guides | The repo has a license, generated third-party notices and contribution docs, and a plugin published to the registry installs into a fresh project and passes the checks |
-| 11 | **Production features** (§4.19): rollback/lockstep networking, custom shaders and a raster sprite pipeline, localization and text shaping, profiler and save/settings API | A networked two-player game with a localized UI, a custom post-process shader and an atlas-based sprite scene is shipped and profiled |
+| 9.5 | **Tilemaps and navigation** (§4.17): `TileMapLayer`, tilesets, autotiling, `NavigationRegion2D`, `NavigationAgent2D` | A top-down level is painted in the editor and an agent paths around obstacles (done: §4.17 "Clarified (Milestone 9.5)"; `tests/topdown_nav.cmake` runs `examples/topdown_nav` to tick 240 on 1 and 4 threads with pinned state hash `882ea24679ca2d41`, verifies replay recording on 1 and 4 threads, and round-trips the scene through text dump) |
+| 9.6 | **Physics** (§4.17): Box2D v3 behind the physics interface; `StaticBody2D`, `CharacterBody2D`, `RigidBody2D`, `Area2D`, `CollisionShape2D`, raycasts, joints | A platformer character runs, jumps and pushes bodies deterministically (done: §4.17 "Clarified (Milestone 9.6)"; `tests/platformer.cmake` runs `examples/platformer` to tick 240 on 1 and 4 threads with pinned state hash `e458fa6c80754cc5`, verifies replay recording on 1 and 4 threads, and round-trips the scene through text dump) |
+| 9.7 | **2D lighting** (§4.17): SDF lighting/raymarching, `PointLight2D`, occluders | Lights and shadows render identically on Vulkan and GL (done: §4.17 "Clarified (Milestone 9.7)"; the `rhi_parity` test compares two lighting scenes and a frame of the lit `examples/lantern_cave`: GL and GLES identical, Vulkan within one level per channel) |
+| 9.8 | **Integration** (§4.17): editor support for all of the above and a sample game | A physics-based platformer with 2D lighting is playable (done: §4.17 "Clarified (Milestone 9.8)"; the `lantern_cave` test plays `examples/lantern_cave` through every gem and out of the door, with the same state hash on 1 and 4 threads and a replay that verifies on both; the editor gained the animation timeline, lighting preview and icons for the 9.x nodes) |
+| 10 | **Next-Gen Web:** WebGPU, WASM multithreading (SharedArrayBuffer)| A stable benchtest runs natively in the browser (WASM threads done early: docs/WEB.md "Threads", `CUERVO_WEB_THREADS`. **Design decision:** the WebGPU backend's shaders are translated SPIR-V → WGSL by **naga** (Rust; a host build tool), keeping one GLSL 450 source per shader; WebGPU starts only after Phases 8 and 9 are done) (done: 10.1-10.4; the browser benchtest runs stably on WebGPU with threads, PERFORMANCE.md "Web") |
+| 10.1 | **WebGPU backend skeleton** (§4.4): naga pinned as a host tool, `cuervo_add_shaders` also emits WGSL from the same SPIR-V, an `rhi` WebGPU device that clears, draws a triangle and presents on native and in the browser | The clear and triangle scenes of `rhi_parity` render through WebGPU and match GL; the native WebGPU implementation used for testing is chosen here and recorded in §4.4 (done: §4.4 "Clarified (Milestone 10.1)" -- wgpu-native natively, emdawnwebgpu in the browser; the `rhi_parity` test renders every scene, the many-frames check and the shmup and `lantern_cave` frames headless on WebGPU and compares them with GL, and the shmup reaches `a3e57e79964421d3` on WebGPU in headless Chrome) |
+| 10.2 | **WebGPU feature parity** (§4.4–4.6): every RHI feature in the `cuervo/rhi/README.md` audit table (buffers, textures, pipelines, stream buffers, frame limit, particle compute, SDF lighting) on WebGPU | `rhi_parity` compares every scene on WebGPU against GL within the Vulkan tolerance, and the WGSL for every engine shader is generated with no hand-written WGSL (done: §4.4 "Clarified (Milestone 10.2)" -- points are 1 px everywhere; every scene equals Vulkan exactly and GL within the Vulkan tolerance; stream buffers, the frame bound, particles (shmup) and SDF lighting (`lighting_*`, `lantern_cave`) all compared; WGSL for all 15 shaders generated) |
+| 10.3 | **WebGPU web runtime and export** (§4.11): the web build uses WebGPU when the browser has it and falls back to WebGL2 otherwise; `export --platform web` ships both; works with `CUERVO_WEB_THREADS` | `examples/shmup` and `examples/lantern_cave` run in headless Chrome on WebGPU and on the WebGL2 fallback, reaching their dev state hashes (done: §4.4 "Clarified (Milestone 10.3)" -- one `.wasm` with both backends, the page requests the WebGPU device before `main` (no JSPI); shmup `a3e57e79964421d3` and `lantern_cave` `2dd8beccd71bc67e` on WebGPU and on the WebGL2 fallback, single-threaded and with threads) |
+| 10.4 | **Browser benchtest** (§4.6): `examples/bench` in the browser on WebGPU with threads, `tools/bench.py` browser runs and recorded web baselines in docs/perf | The browser benchtest runs stably on WebGPU (no frame-time cliffs over its run, regression compare passing), which closes milestone 10 (done: §4.15 "Clarified (Milestone 10.4)" -- `bench.py --web`, `builds.web` in the reference baseline: 100k shapes at 390 FPS on WebGPU with 8 threads, worst cliff ratio 1.21, a second record compares clean; fixed on the way: a stale WebGPU vertex binding, the 60 Hz web cap and the millisecond web clock) |
+| 10.5 | **Windows and language APIs** (§4.18): Windows builds, module/package system, plugin and embedding API, FFI | The shmup builds, passes its tests and exports on Windows with the same state hash as Linux, and a third-party plugin and package are used by a game (done: 10.5a-10.5d below) |
+| 10.5a | **Windows builds** (§4.18): MSVC and MinGW builds, CI, determinism check, signed prebuilt editor and export templates | `ctest` passes on Windows and a Windows export of `examples/shmup` reaches the Linux state hash (done: §4.18 "Clarified (Milestone 10.5a)"; `ctest` passes with MSVC, MinGW-w64 GCC and Clang, and `export_shmup` ships the GUI-subsystem player and reaches `a3e57e79964421d3` from another directory with bytecode and AOT scripts. The release workflow builds attested editor, tools and export templates, Authenticode-signed when a certificate is configured (docs/WINDOWS.md)) |
+| 10.5b | **Modules, packages and unit tests** (§4.18): `import`, namespaces, project dependencies, versioning, plus native `@test` runner in Pluma | A game imports a package from another directory with no global name clashes, and `cuervo-tools test` / `plm test` runs pure-logic `@test` functions with pass/fail reporting in CI (done: §4.18 "Clarified (Milestone 10.5b)"; `examples/garden` imports `tween` from `examples/libs/tween` and the vendored `palette` beside its own same-named declarations, and reaches its dev state hash from source and AOT packs and in headless Chrome; `@test` runs through `plm test` and `cuervo-tools test`) |
+| 10.5c | **Plugin, embedding and FFI APIs** (§4.18): stable C ABI for native modules, C++, Rust and C# bindings, Pluma FFI to C libraries, API versioning | A native plugin written in each of C++, Rust and C# adds a node and a function that a script uses (C# on desktop), in the VM and in AOT where supported (done: §4.18 "Clarified (Milestone 10.5c)"; `examples/plugin_demo` uses nodes and functions from `orbit` (C++), `noise` (Rust) and `hues` (C#). `orbit` and `noise` linked statically into AOT modules match their VM results, and C# AOT is refused as decided. `@extern` calls libc and libm in the VM and AOT, and `pluma/embed/pluma_embed.h` is exercised from plain C (docs/PLUGINS.md)) |
+| 10.5d | **Plugin ecosystem, licenses and contribution** (§4.18): plugin manifest and registry, project license, third-party notices, contribution guides | The repo has a license, generated third-party notices and contribution docs, and a plugin published to the registry installs into a fresh project and passes the checks (done: §4.18 "Clarified (Milestone 10.5d)". `cuervo-tools plugin publish` puts `examples/plugins/orbit` in a directory registry with SHA-256 checksums and its conformance hash, and `plugin install` vendors it into a fresh project, pins it, and verifies the license, the engine and ABI ranges, the library, the checksums and the conformance hash there. Exports carry `licenses/PACKAGES.md`, and CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md and the generated docs/ROADMAP.md are in place) |
+| 11 | **Production features** (§4.19): rollback/lockstep networking, raster processes and sprite pipeline, custom shaders and post-processing, localization and text shaping, profiler and save/settings API | A networked two-player game with a localized UI, a custom post-process shader and an atlas-based sprite scene is shipped and profiled |
 | 11.1 | **Networking** (§4.19): transport, lockstep and rollback on the deterministic sim, HTTP and WebSocket | Two clients on different machines (native and web) stay in sync, with the same state hash every tick |
-| 11.2 | **Shaders and raster pipeline** (§4.19): user shaders, post-processing, sprite sheets, texture atlases, 9-slice | A custom shader and an atlas-batched sprite scene render identically on Vulkan and GL |
+| 11.2a | **Raster processes** (§4.19): image import, texture atlasing, sprite sheet slicing, SVG rasterized fallback, textured quad batcher, `Sprite2D`/`AnimatedSprite2D`, 9-slice, filtering modes | An atlas-batched sprite scene with 9-slice panels and rasterized SVG fallbacks renders identically on Vulkan, GL and WebGL2 |
+| 11.2b | **Shaders, post-processing and linear color** (§4.19): user shaders (GLSL 450), parameter binding in inspector, off-screen render targets, multi-pass post-processing (bloom, blur, blits), optional linear color space | A custom user shader and a multi-pass post-process effect render identically on Vulkan and GL; `project.toml` supports `color_space = "srgb"` or `"linear"` |
+| 11.2c | **Text scenes on save** (§4.19): human-readable text format becomes the default save format in `scenes/`; automatic compile to binary `.pak` on export | Saving in the editor writes human-readable scene text that Git can 3-way auto-merge without binary merge conflicts; release exports pack them into binary `.scene` files with zero runtime overhead |
 | 11.3 | **Localization and text** (§4.19): translation tables, complex-script shaping, bidirectional text, IME | A UI switches between English, Arabic and Japanese at run time and `LineEdit` accepts IME input |
 | 11.4 | **Profiling and save API** (§4.19): frame/job/GPU profiler, memory profiler, general save/load and settings API | A profile of the shmup shows per-system tick cost, and a game saves and restores progress and settings |
-| 12 | **Content tools, AI and accessibility** (§4.20): dialogue and cutscene tools, particle and shader editors, behavior trees and steering, accessibility, the ECS decision | A narrative game with AI enemies and a screen-reader-usable menu is built mostly in the editor |
-| 12.1 | **Content tools** (§4.20): dialogue and cutscene/timeline editor, particle editor UI, visual shader editor | A cutscene with dialogue and a particle effect is authored without code |
+| 12 | **Content tools, AI and accessibility** (§4.20): dialogue and cutscene tools, particle and shader editors, behavior trees and steering, accessibility, the ECS resolution | A narrative game with AI enemies and a screen-reader-usable menu is built mostly in the editor |
+| 12.1 | **Content tools** (§4.20): visual node-graph canvas (`imgui-node-editor`), dialogue and cutscene/timeline editor, particle editor UI, visual shader editor | A cutscene with dialogue and a particle effect is authored without code using visual graph panels |
 | 12.2 | **AI** (§4.20): behavior trees, state-machine tool, steering behaviors | An enemy with a behavior tree is built and debugged in the editor |
-| 12.3 | **Accessibility** (§4.20): screen-reader support, UI scaling, remapping, colorblind and reduced-motion options | The shmup menus can be used with a screen reader and at 200% UI scale |
-| 12.4 | **ECS decision** (§4.20): expose the ECS to scripts as queries and systems, or remove it from the design | The decision is documented and, if exposed, a script system iterates a component query in the job system |
-| 13 | **3D Expansion:** 3D rendering pipeline, 3D math, 3D scene/camera transforms, glTF import | A full 3D scene runs with PBR materials and 3D transforms |
-| 14 | **Extended Platforms:** macOS, iOS, Android (Metal, JNI), drop-in Console SDK architecture | The shmup runs natively on a Mac, iPhone, and Android device |
+| 12.3 | **Accessibility and editor polish** (§4.20): AccessKit integration (screen-reader support), UI scaling, remapping, desktop file drag-and-drop, crisp DPI font oversampling | The shmup menus can be used with a screen reader and at 200% UI scale; platform screen readers read UI elements via AccessKit; desktop file drag-and-drop into viewport functions |
+| 12.4 | **The ECS resolution** (§4.20): finalize the Hybrid Architecture (Godot-style `Node2D` hierarchy for scene logic + contiguous internal SoA pools exposed via Pluma query loops) | The decision is documented: scripts iterate bulk entities via deterministic queries (`for e in query(Enemy)`) in the job system without exposing raw low-level ECS internals |
+| 13 | **Extended Platforms & drop-in console SDKs** (§4.21): macOS (MoltenVK), iOS, Android (SDL3 + GLES 3.0), mobile lifecycle/thermal mitigation, drop-in Console C ABI | The shmup runs natively on a Mac, iPhone, and Android device; developers with private console DevKits drop closed-source C ABI shims in without engine forks |
+| 14 | **Zero-bloat 3D Expansion** (§4.22): 3D rendering pipeline, 3D math (`Vec<T,N>`), 3D scene/camera transforms, glTF import, PBR materials | A full 3D scene runs with PBR materials and 3D transforms; 2D exports strip all 3D pipelines via Milestone 7.5 dead-code elimination with 0 bytes overhead |
+| 15 | **First-party jumpstart ecosystem** (§4.23): official C ABI plugin wrappers (`cuervo-steamworks`, `cuervo-spine`, `cuervo-fmod`, `cuervo-console-template`) and genre showcase demos | Shipped templates for a 2-player rollback brawler, a 100k-particle survivors game, and turn-key Steamworks/Spine/FMOD wrappers unblock commercial shipping |
 Both backends exist from Phase 0, so every RHI feature is built for both at once and the
 interface can't drift toward either API.
 
@@ -1873,10 +2346,10 @@ interface can't drift toward either API.
 |---|---|
 | Script lifecycle | `ready()` once; `update(dt: float)` every fixed tick (`dt` is constant); `draw(g: Canvas)` every rendered frame (render only, may not change state); `exit()` on removal |
 | Integer math | `/` truncates toward zero; `%` takes the dividend's sign; division by zero panics; `float as int` truncates and saturates |
-| Color | Colors are authored in sRGB and blended in sRGB space, matching browsers and vector tools, so SVGs look as they do in Inkscape. Swapchain/framebuffer stays UNORM |
+| Color | Colors are authored in sRGB and blended in sRGB space by default (matching browsers and vector tools; UNORM swapchain). Optional linear color space (hardware sRGB framebuffers, gamma-correct blending) in 11.2b |
 | Text | UTF-8; FreeType + HarfBuzz for shaping, then MSDF atlases; right-to-left and CJK shaping and bidi layout are planned (11.3); today text is MSDF without shaping |
 | Localization | Planned (11.3): string tables (CSV) keyed by `#name`, with `tr(#key)` in scripts; switchable at runtime |
-| General physics | Box2D v3 behind the physics interface, as an optional module (planned, 9.6) |
+| General physics | Box2D v3 behind the physics interface, as an optional module (implemented, 9.6) |
 | Audio formats | WAV, OGG Vorbis, FLAC, MP3 (miniaudio's decoders) |
 | Fonts | TTF/OTF imported into MSDF atlases |
 | Project layout | `project.toml`, `assets/`, `scenes/`, `scripts/`, `.import/` (generated, gitignored) |
@@ -1886,20 +2359,18 @@ interface can't drift toward either API.
 | AOT export | Uses the system C compiler (Clang/GCC/MSVC); web export uses Emscripten |
 | Editor layout | Godot-like dock layout: scene tree left, viewport center, inspector right, console bottom; panels are dockable (4.16) |
 | Accessibility | Rebindable input today; a UI scale setting and a reduced-flashing toggle exposed to games are planned (12.3) |
-| Platforms | Linux, Windows, Web only. macOS, mobile and consoles are unsupported; they appear only as the long-term Phase 14 |
+| Platforms | Linux, Windows, Web verified/in-progress; macOS, mobile (Android/iOS) and drop-in console SDKs are Phase 13 |
 | Engine versioning | SemVer; scene/project migrations keyed by format version |
 
-### 7.3 Open decisions (not blocking)
-- Whether the ECS is exposed to scripts (milestone 12.4).
+### 7.3 Resolved decisions
+- Architecture model (milestone 12.4): Hybrid (Node2D hierarchy for scene structure + contiguous internal SoA pools exposed via deterministic query loops).
 
 ### 7.4 Validation environments
 - **Primary Arch development machine:** AMD Ryzen 7 5800X3D with an NVIDIA RTX 3060 Ti.
   This is the reference environment for day-to-day engine, renderer and web development.
 - **Windows validation machine:** Intel Core Ultra 9 185H laptop with Intel Arc integrated
-  graphics and an NVIDIA RTX 4070 discrete GPU. Windows builds and runtime behavior are
-  being tested actively on both GPU paths where selectable; Windows support is not marked
-  complete until the required compiler, test, determinism and export checks in milestone
-  10.5a pass.
+  graphics and an NVIDIA RTX 4070 discrete GPU. The compiler, test, determinism and export checks
+  of milestone 10.5a passed there (docs/WINDOWS.md "Validation results").
 
 ## 8. Risks
 | Risk | Mitigation |

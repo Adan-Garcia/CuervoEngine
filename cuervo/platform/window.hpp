@@ -14,7 +14,7 @@ namespace cuervo {
 
 // Which graphics API the window must be prepared for. Kept here (not in rhi/)
 // so the platform layer doesn't depend on the renderer.
-enum class GraphicsApi { OpenGL, Vulkan };
+enum class GraphicsApi { OpenGL, Vulkan, WebGPU };
 
 struct WindowDesc {
     std::string title = "Cuervo Engine";

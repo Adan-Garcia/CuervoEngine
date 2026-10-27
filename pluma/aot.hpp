@@ -22,6 +22,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "pluma/sema.hpp"
 #include "pluma/vm.hpp"
@@ -36,8 +37,10 @@ std::string emit_c(const Program& program, const VM& vm);
 // Compiles `c_source` into a shared library at `so_path` using the host C
 // compiler (`CC` or `cc`), with `-ffp-contract=off -fno-fast-math` so floating-
 // point results match the bytecode VM bit for bit (DESIGN.md 4.1).
+// `link_args` are added to the link (static libraries linked into the
+// module, e.g. a host's native plugins).
 bool compile_c_module(std::string_view c_source, const std::filesystem::path& so_path, std::string& error,
-                      int opt_level = 2);
+                      int opt_level = 2, const std::vector<std::string>& link_args = {});
 
 // A loaded native AOT shared object. Keep alive at least as long as the `VM`
 // it is bound or loaded into.
@@ -60,6 +63,10 @@ public:
     // Populates a fresh `VM` with the module's interned names, types, globals,
     // and protos (without `.plm` sources) and runs its initialization chunks.
     RunResult load(VM& vm, std::string& error) const;
+
+    // A symbol the module exports (null if none): host data linked in with
+    // compile_c_module's `link_args`.
+    void* symbol(const char* name) const;
 
 private:
     void* handle_ = nullptr;

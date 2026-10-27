@@ -2,9 +2,9 @@
 // so the Vulkan and GL backends (and GL vs GLES 3.0) can be compared pixel by
 // pixel (DESIGN.md 6, Phase 5 "Vulkan feature parity"; DESIGN.md 4.4 Clarified).
 //
-//   rhi_parity render --backend gl|vulkan [--gl-es] [--tier compatible|full] --out <dir>
+//   rhi_parity render --backend gl|vulkan|webgpu [--gl-es] [--tier compatible|full] --out <dir>
 //   rhi_parity compare <a.ppm|dirA> <b.ppm|dirB> [--tolerance <0-255>] [--max-fraction <f>]
-//   rhi_parity features --backend gl|vulkan [--gl-es]
+//   rhi_parity features --backend gl|vulkan|webgpu [--gl-es]
 //
 // `render` writes <dir>/<scene>.ppm for every scene below. With --tier full
 // on a device that has base-vertex draws, it also checks in-process that
@@ -37,8 +37,12 @@
 
 #include "cuervo/core/log.hpp"
 #include "cuervo/platform/window.hpp"
+#include "cuervo/render/camera.hpp"
+#include "cuervo/render/light_batcher.hpp"
+#include "cuervo/render/sdf_batcher.hpp"
 #include "cuervo/rhi/gl/gl_device.hpp"
 #include "cuervo/rhi/rhi.hpp"
+#include "cuervo/rhi/webgpu/webgpu_device.hpp"
 #include "shaders/parity_color_frag.hpp"
 #include "shaders/parity_color_vert.hpp"
 #include "shaders/parity_instanced_vert.hpp"
@@ -281,11 +285,16 @@ public:
         mask_ = d_.create_texture({8, 8, rhi::TextureFormat::R8, rhi::Filter::Nearest, ramp.data(), "parity_mask"});
         blank_ = d_.create_texture({2, 2, rhi::TextureFormat::RGBA8, rhi::Filter::Nearest, nullptr, "parity_blank"});
 
-        return blend_[0] && blend_[3] && strip_ && points_ && lines_ && line_strip_ && instanced_ && textured_ &&
+        // 2D lighting (milestone 9.7): SDF shadows must match across backends.
+        const bool lit = lights_.init(d_) && lit_shapes_.init(d_);
+
+        return lit && blend_[0] && blend_[3] && strip_ && points_ && lines_ && line_strip_ && instanced_ && textured_ &&
                params_ && palette_ && quad_ && uv_quad_ && checker_[0] && checker_[1] && mask_ && blank_;
     }
 
     void shutdown() {
+        lights_.shutdown();
+        lit_shapes_.shutdown();
         for (rhi::PipelineHandle p : {blend_[0], blend_[1], blend_[2], blend_[3], strip_, points_, lines_, line_strip_,
                                       instanced_, textured_}) {
             d_.destroy_pipeline(p);
@@ -311,6 +320,8 @@ public:
             {"stream_large", [this] { stream_large(); }},
             {"base_vertex", [this] { base_vertex(true); }},
             {"base_vertex_reference", [this] { base_vertex(false); }},
+            {"lighting_shadows", [this] { lighting(false); }},
+            {"lighting_ambient", [this] { lighting(true); }},
         };
     }
 
@@ -341,6 +352,45 @@ private:
         d_.bind_vertex_buffer(0, quad_);
         use_params(slot, x, y, w, h, color);
         d_.draw(6);
+    }
+
+    // A lit room (DESIGN.md 4.17, 9.7): a box, a circle and a rotated capsule
+    // cast soft and hard shadows from a point light and a spot light. Additive
+    // lights alone, or composited over an ambient darkness.
+    void lighting(bool ambient) {
+        const float s = static_cast<float>(target_size);
+        const Affine2 to_ndc = render::virtual_to_ndc({s, s});
+        lit_shapes_.clear();
+        lit_shapes_.rounded_rect({s * 0.5f, s * 0.5f}, {s * 0.45f, s * 0.45f}, 12.0f, 0.0f, {0.45f, 0.42f, 0.38f, 1.0f});
+        lit_shapes_.rounded_rect({96.0f, 120.0f}, {18.0f, 12.0f}, 3.0f, 0.0f, {0.7f, 0.2f, 0.2f, 1.0f});
+        lit_shapes_.circle({170.0f, 90.0f}, 14.0f, {0.2f, 0.6f, 0.8f, 1.0f});
+        lit_shapes_.flush(to_ndc, 1.0f);
+
+        lights_.clear();
+        lights_.add_occluder_box({96.0f, 120.0f}, {18.0f, 12.0f}, 0.0f, 3.0f);
+        lights_.add_occluder_circle({170.0f, 90.0f}, 14.0f);
+        lights_.add_occluder_capsule({150.0f, 180.0f}, 26.0f, 6.0f, 0.6f);
+        render::LightDef point;
+        point.position = {128.0f, 72.0f};
+        point.radius = 170.0f;
+        point.color = {1.0f, 0.85f, 0.6f, 1.0f};
+        point.shadow_softness = 6.0f;
+        lights_.add_light(point);
+        render::LightDef spot;
+        spot.position = {40.0f, 220.0f};
+        spot.rotation = -0.7f;
+        spot.radius = 200.0f;
+        spot.spot_angle_rad = 1.1f;
+        spot.color = {0.4f, 0.6f, 1.0f, 1.0f};
+        spot.shadow_softness = 0.0f;
+        lights_.add_light(spot);
+        if (ambient) {
+            render::AmbientLightDef amb;
+            amb.enabled = true;
+            amb.darkness = 0.85f;
+            lights_.set_ambient(amb);
+        }
+        lights_.flush(to_ndc, {s * 0.5f, s * 0.5f}, {s * 0.5f, s * 0.5f});
     }
 
     void clear_scissor_viewport() {
@@ -605,6 +655,8 @@ private:
     }
 
     rhi::Device& d_;
+    render::LightBatcher lights_;
+    render::SdfBatcher lit_shapes_;
     std::array<rhi::PipelineHandle, 4> blend_{};
     rhi::PipelineHandle strip_, points_, lines_, line_strip_, instanced_, textured_;
     rhi::BufferHandle params_, palette_, quad_, uv_quad_, dynamic_, stream_, big_stream_, bv_vertices_, bv_indices_;
@@ -621,13 +673,8 @@ struct DeviceArgs {
 };
 
 bool parse_device_args(int argc, char** argv, DeviceArgs& out) {
-    const std::string_view backend = arg_value(argc, argv, "--backend");
-    if (backend == "vulkan" || backend == "vk") {
-        out.backend = rhi::Backend::Vulkan;
-    } else if (backend == "gl" || backend == "opengl") {
-        out.backend = rhi::Backend::OpenGL;
-    } else {
-        LOG_ERROR("--backend gl|vulkan is required");
+    if (!rhi::parse_backend(arg_value(argc, argv, "--backend"), out.backend)) {
+        LOG_ERROR("--backend gl|vulkan|webgpu is required");
         return false;
     }
     out.gl_es = has_flag(argc, argv, "--gl-es");
@@ -646,7 +693,7 @@ std::unique_ptr<rhi::Device> open(Window& window, const DeviceArgs& args) {
     if (!window.create({.title = "rhi_parity",
                         .width = target_size,
                         .height = target_size,
-                        .graphics = args.backend == rhi::Backend::Vulkan ? GraphicsApi::Vulkan : GraphicsApi::OpenGL,
+                        .graphics = rhi::graphics_api(args.backend),
                         .resizable = false,
                         .gl_es = args.gl_es})) {
         return nullptr;
@@ -687,7 +734,7 @@ int features(int argc, char** argv) {
     return 0;
 }
 
-int render(int argc, char** argv) {
+int render_scenes(int argc, char** argv) {
     DeviceArgs args;
     if (!parse_device_args(argc, argv, args)) return 2;
     const fs::path out(arg_value(argc, argv, "--out"));
@@ -799,8 +846,8 @@ int compare(int argc, char** argv) {
 
 // Renders the large-stream scene for --count frames on one device, as a game
 // does, and checks that the first and last frames are identical (the rotating
-// stream versions must not leak stale data) and, on GL, that the fence ring
-// never let more than the bound queue up.
+// stream versions must not leak stale data) and, on GL and WebGPU, that the
+// device never let more than the bound queue up.
 int frames(int argc, char** argv) {
     DeviceArgs args;
     if (!parse_device_args(argc, argv, args)) return 2;
@@ -855,6 +902,14 @@ int frames(int argc, char** argv) {
             ++failures;
         }
     }
+    if (args.backend == rhi::Backend::WebGPU) {
+        const std::size_t peak = webgpu::peak_frames_in_flight(*device);
+        LOG_INFO("WebGPU frames in flight: peak {} (bound {})", peak, webgpu::frame_limit());
+        if (peak == 0 || peak > webgpu::frame_limit()) {
+            LOG_ERROR("The WebGPU device let {} frames queue (bound {})", peak, webgpu::frame_limit());
+            ++failures;
+        }
+    }
     scenes.shutdown();
     device.reset();
     window.destroy();
@@ -863,10 +918,10 @@ int frames(int argc, char** argv) {
 
 int usage() {
     std::fputs("usage:\n"
-               "  rhi_parity render --backend gl|vulkan [--gl-es] [--tier compatible|full] --out <dir>\n"
-               "  rhi_parity frames --backend gl|vulkan [--gl-es] [--count <n>] --out <dir>\n"
+               "  rhi_parity render --backend gl|vulkan|webgpu [--gl-es] [--tier compatible|full] --out <dir>\n"
+               "  rhi_parity frames --backend gl|vulkan|webgpu [--gl-es] [--count <n>] --out <dir>\n"
                "  rhi_parity compare <a.ppm|dirA> <b.ppm|dirB> [--tolerance <0-255>] [--max-fraction <f>]\n"
-               "  rhi_parity features --backend gl|vulkan [--gl-es]\n",
+               "  rhi_parity features --backend gl|vulkan|webgpu [--gl-es]\n",
                stderr);
     return 2;
 }
@@ -876,7 +931,7 @@ int usage() {
 int main(int argc, char** argv) {
     if (argc < 2) return usage();
     const std::string_view cmd = argv[1];
-    if (cmd == "render") return render(argc, argv);
+    if (cmd == "render") return render_scenes(argc, argv);
     if (cmd == "frames") return frames(argc, argv);
     if (cmd == "compare") return argc >= 4 ? compare(argc, argv) : usage();
     if (cmd == "features") return features(argc, argv);

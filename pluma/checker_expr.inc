@@ -537,15 +537,70 @@
         return nullptr;
     }
 
-    const Program::Symbol* global_symbol(std::string_view name) {
+    // A global as seen from `at` (LANGUAGE.md 9.26): the file's package
+    // first, then the names the file imports, then the root namespace, of
+    // which a package sees only the preludes' names. Qualified keys
+    // ("tween.Tween", from `package_member`) are found directly.
+    const Program::Symbol* global_symbol(std::string_view name, Span at) {
+        std::string_view mod = src_.module_at(at.begin);
+        if (!mod.empty()) {
+            auto it = P.globals.find(std::format("{}.{}", mod, name));
+            if (it != P.globals.end()) return &it->second;
+        }
+        if (const ImportBinding* b = import_binding(name, at); b != nullptr && !b->item.empty()) {
+            auto it = P.globals.find(std::format("{}.{}", b->package, b->item));
+            if (it != P.globals.end()) return &it->second;
+        }
         auto it = P.globals.find(name);
-        return it != P.globals.end() ? &it->second : nullptr;
+        if (it == P.globals.end()) return nullptr;
+        if (!mod.empty() && it->second.module.empty() && !it->second.prelude) return nullptr;
+        return &it->second;
+    }
+
+    const ImportBinding* import_binding(std::string_view name, Span at) const {
+        std::size_t part = src_.part_index(at.begin);
+        if (part >= imports_.size()) return nullptr;
+        for (const ImportBinding& b : imports_[part]) {
+            if (b.name == name) return &b;
+        }
+        return nullptr;
+    }
+
+    // `package.member`'s qualified key, checking that it exists and, from
+    // outside the package, that it is `pub`. Empty after an error.
+    std::string_view package_key(std::string_view package, Ident member, bool report = true) {
+        auto it = P.globals.find(std::format("{}.{}", package, member.name));
+        if (it == P.globals.end()) {
+            if (report) error(member.span, std::format("package '{}' has no '{}'", package, member.name));
+            return {};
+        }
+        if (report && !it->second.is_pub && it->second.module != src_.module_at(member.span.begin)) {
+            error(member.span, std::format("'{}' is not public in package '{}' (declare it 'pub')", member.name,
+                                           package));
+        }
+        return it->first;
+    }
+
+    // `alias.member` where `alias` is a package imported by this file and
+    // nothing closer has that name: the member's qualified key (empty after
+    // an error). nullopt when `object` is not such an alias.
+    std::optional<std::string_view> package_member(const Expr* object, Ident member, bool report = true) {
+        auto* id = as<IdentExpr>(object);
+        if (id == nullptr || !id->type_args.empty()) return std::nullopt;
+        const ImportBinding* b = import_binding(id->name, id->span);
+        if (b == nullptr || !b->item.empty() || has_local(id->name)) return std::nullopt;
+        if (cx_ != nullptr && cx_->record != nullptr &&
+            (find_field(cx_->record, id->name) != nullptr || find_static(cx_->record, id->name) != nullptr ||
+             find_method(cx_->record, id->name) != nullptr)) {
+            return std::nullopt;
+        }
+        return package_key(b->package, member, report);
     }
 
     ir::Expr* resolve_value(std::string_view name, Span span) {
         if (ir::Expr* x = lookup_var(cx_, name, span)) return x;
         if (ir::Expr* x = member_value(name, span)) return x;
-        if (const Program::Symbol* s = global_symbol(name)) {
+        if (const Program::Symbol* s = global_symbol(name, span)) {
             switch (s->kind) {
                 case Program::SymKind::Global: return global_ref(static_cast<GlobalVar*>(s->ptr), span);
                 case Program::SymKind::Function: return fn_ref(static_cast<Function*>(s->ptr), span);
@@ -569,13 +624,25 @@
     // `Phase`, `Boss` in `Phase.Rage` / `Boss.spawn()`: a type used as a
     // namespace (only when no variable of that name is visible).
     const Program::Symbol* type_target(Expr* e) {
+        // `tween.Mode` in `tween.Mode.Fast`: a package's type.
+        if (auto* m = as<MemberExpr>(e); m != nullptr && !m->safe && m->type_args.empty()) {
+            auto key = package_member(m->object, m->member, false);
+            if (!key || key->empty()) return nullptr;
+            const Program::Symbol* s = global_symbol(*key, m->span);
+            if (s == nullptr || (s->kind != Program::SymKind::Class && s->kind != Program::SymKind::Struct &&
+                                 s->kind != Program::SymKind::Enum)) {
+                return nullptr;
+            }
+            if (!s->is_pub && s->module != src_.module_at(m->span.begin)) package_key(s->module, m->member);
+            return s;
+        }
         auto* id = as<IdentExpr>(e);
         if (id == nullptr || has_local(id->name)) return nullptr;
         if (cx_->record != nullptr && (find_field(cx_->record, id->name) != nullptr ||
                                        find_static(cx_->record, id->name) != nullptr)) {
             return nullptr;
         }
-        const Program::Symbol* s = global_symbol(id->name);
+        const Program::Symbol* s = global_symbol(id->name, id->span);
         if (s == nullptr) return nullptr;
         if (s->kind == Program::SymKind::Class || s->kind == Program::SymKind::Struct ||
             s->kind == Program::SymKind::Enum) {
@@ -1107,6 +1174,12 @@
         }
         if (!m->type_args.empty()) error(m->span, "type arguments are only allowed before a call");
         if (const Program::Symbol* s = type_target(m->object)) return static_member(*s, m->member, m->span);
+        if (!m->safe) {
+            if (auto key = package_member(m->object, m->member)) {
+                if (key->empty()) return error_node(m->span);
+                return resolve_value(*key, m->span);
+            }
+        }
         if (m->safe) {
             ir::Expr* obj = expr(m->object);
             return safe_nav(obj, m->span, [&](ir::Expr* tmp) { return member_access(tmp, m->member, m->span); });
@@ -1277,7 +1350,17 @@
 
     ir::Expr* struct_literal(StructLit* sl, const Type* expected) {
         NamedType* nt = sl->type;
-        const Program::Symbol* sym = has_local(nt->name.name) ? nullptr : global_symbol(nt->name.name);
+        const Program::Symbol* sym = nullptr;
+        if (!nt->qualifier.empty()) {
+            std::string_view key = qualified_type_key(nt);
+            if (key.empty()) {
+                for (const FieldInit& fi : sl->fields) expr(fi.value);
+                return error_node(sl->span);
+            }
+            sym = global_symbol(key, nt->span);
+        } else if (!has_local(nt->name.name)) {
+            sym = global_symbol(nt->name.name, nt->name.span);
+        }
         if (sym == nullptr || sym->kind != Program::SymKind::Struct) {
             if (sym != nullptr && sym->kind == Program::SymKind::Class) {
                 error(nt->span, std::format("'{}' is a class; construct it with '{}(...)'", nt->name.name,
@@ -1557,7 +1640,7 @@
                 Ident n{name, id->span};
                 return method_call_on(self_expr(id->span), n, c, id->type_args, expected);
             }
-            if (const Program::Symbol* s = global_symbol(name)) {
+            if (const Program::Symbol* s = global_symbol(name, id->span)) {
                 switch (s->kind) {
                     case Program::SymKind::Function:
                         return direct_call(static_cast<Function*>(s->ptr), c, id->type_args, expected);
@@ -1751,6 +1834,24 @@
     ir::Expr* member_call(MemberExpr* m, CallExpr* c, const Type* expected) {
         if (as<SuperExpr>(m->object) != nullptr) return super_call(m, c, expected);
         if (const Program::Symbol* s = type_target(m->object)) return static_call(*s, m, c, expected);
+        if (!m->safe) {
+            if (auto key = package_member(m->object, m->member)) {
+                if (key->empty()) {
+                    check_args_loosely(c->args);
+                    return error_node(c->span);
+                }
+                // `tween.ease(t)`, `tween.Tween(...)`: a call of the qualified name.
+                auto* id = A.make<IdentExpr>();
+                id->kind = ExprKind::Identifier;
+                id->span = m->span;
+                id->name = *key;
+                id->type_args = m->type_args;
+                auto* qc = A.make<CallExpr>();
+                *qc = *c;
+                qc->callee = id;
+                return call_inner(qc, expected);
+            }
+        }
         ir::Expr* obj = expr(m->object);
         if (m->safe) {
             return safe_nav(obj, c->span, [&](ir::Expr* tmp) {
@@ -2291,7 +2392,7 @@
             id != nullptr && is_await_only(id->name) && !has_local(id->name) &&
             (cx_->record == nullptr || (find_method(cx_->record, id->name) == nullptr &&
                                         find_field(cx_->record, id->name) == nullptr)) &&
-            global_symbol(id->name) == nullptr) {
+            global_symbol(id->name, id->span) == nullptr) {
             std::string what = std::format("'{}'", id->name);
             ir::AwaitKind kind = ir::AwaitKind::Seconds;
             const Type* param = T.float_();
@@ -2559,7 +2660,8 @@
                 if (auto* b = ir::as<ir::BuiltinCall>(x)) b->arena = arena;
                 return x;
             }
-            if (const Program::Symbol* sym = global_symbol(nt->name.name);
+            if (const Program::Symbol* sym = nt->qualifier.empty() ? global_symbol(nt->name.name, nt->name.span)
+                                                                   : global_symbol(qualified_type_key(nt), nt->span);
                 sym != nullptr && sym->kind == Program::SymKind::Class) {
                 ir::Expr* x = construct(static_cast<ClassInfo*>(sym->ptr), nt->args, &call, expected);
                 if (auto* n = ir::as<ir::New>(x)) n->arena = arena;

@@ -8,9 +8,19 @@
 #include "cuervo/rhi/rhi_internal.hpp"
 
 #include "cuervo/core/log.hpp"
+#include "cuervo/platform/window.hpp"
 #include "cuervo/rhi/gl/gl_device.hpp"
 #ifdef CUERVO_HAS_VULKAN
 #include "cuervo/rhi/vulkan/vk_device.hpp"
+#endif
+#include "cuervo/rhi/webgpu/webgpu_device.hpp"
+
+#ifndef CUERVO_HAS_WEBGPU
+// Without the backend (CUERVO_WEBGPU=OFF) tools still link its frame-limit queries.
+namespace cuervo::webgpu {
+std::size_t peak_frames_in_flight(const rhi::Device&) { return 0; }
+std::size_t frame_limit() { return 0; }
+} // namespace cuervo::webgpu
 #endif
 
 namespace cuervo::rhi {
@@ -26,8 +36,45 @@ std::unique_ptr<Device> create_device(Backend backend, Window& window, const Dev
             LOG_ERROR("This build has no Vulkan backend (CUERVO_VULKAN=OFF)");
             return nullptr;
 #endif
+        case Backend::WebGPU:
+#ifdef CUERVO_HAS_WEBGPU
+            return webgpu::create_device(window, options);
+#else
+            LOG_ERROR("This build has no WebGPU backend (CUERVO_WEBGPU=OFF)");
+            return nullptr;
+#endif
     }
     return nullptr;
+}
+
+Backend default_backend() {
+    if (backend_compiled_in(Backend::Vulkan)) return Backend::Vulkan;
+#if defined(CUERVO_HAS_WEBGPU) && defined(__EMSCRIPTEN__)
+    if (webgpu::browser_device_ready()) return Backend::WebGPU;
+#endif
+    return Backend::OpenGL;
+}
+
+bool parse_backend(std::string_view text, Backend& out) {
+    if (text == "gl" || text == "opengl") {
+        out = Backend::OpenGL;
+    } else if (text == "vulkan" || text == "vk") {
+        out = Backend::Vulkan;
+    } else if (text == "webgpu" || text == "wgpu") {
+        out = Backend::WebGPU;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+GraphicsApi graphics_api(Backend backend) {
+    switch (backend) {
+        case Backend::OpenGL: return GraphicsApi::OpenGL;
+        case Backend::Vulkan: return GraphicsApi::Vulkan;
+        case Backend::WebGPU: return GraphicsApi::WebGPU;
+    }
+    return GraphicsApi::OpenGL;
 }
 
 std::size_t texture_format_size(TextureFormat format) {
@@ -112,6 +159,12 @@ bool backend_compiled_in(Backend backend) {
 #else
             return false;
 #endif
+        case Backend::WebGPU:
+#ifdef CUERVO_HAS_WEBGPU
+            return true;
+#else
+            return false;
+#endif
     }
     return false;
 }
@@ -120,6 +173,7 @@ std::string_view backend_name(Backend backend) {
     switch (backend) {
         case Backend::OpenGL: return "OpenGL";
         case Backend::Vulkan: return "Vulkan";
+        case Backend::WebGPU: return "WebGPU";
     }
     return "unknown";
 }

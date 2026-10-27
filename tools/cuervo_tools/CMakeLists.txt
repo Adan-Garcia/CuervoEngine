@@ -1,7 +1,7 @@
 # `cuervo-tools`: command-line tools for project files (DESIGN.md 3 "tools/").
 # The release pipeline (pack/export, docs/EXPORT.md) is a library so the tests
 # can drive it too.
-add_library(cuervo_export STATIC export.cpp player.cpp)
+add_library(cuervo_export STATIC export.cpp packages.cpp player.cpp registry.cpp)
 target_link_libraries(cuervo_export PUBLIC cuervo)
 
 # The API reference generator (`cuervo-tools docs`, docs/API.md) only needs
@@ -11,6 +11,7 @@ target_link_libraries(cuervo_api_docs PUBLIC pluma)
 
 add_executable(cuervo_tools main.cpp)
 set_target_properties(cuervo_tools PROPERTIES OUTPUT_NAME cuervo-tools)
+cuervo_windows_app(cuervo_tools)
 target_link_libraries(cuervo_tools PRIVATE cuervo_export cuervo_api_docs)
 # Export defaults: the engine font, this build tree's player (the native
 # runtime target) and the pack-loading web runtime (the web-pack preset).
@@ -30,3 +31,7 @@ target_compile_definitions(cuervo_tools PRIVATE
     CUERVO_TOOLS_C_COMPILER="${CMAKE_C_COMPILER}"
     CUERVO_TOOLS_CXX_COMPILER="${CMAKE_CXX_COMPILER}"
     CUERVO_TOOLS_DEPS_DIR="${FETCHCONTENT_BASE_DIR}")
+if(WIN32)
+    # Windows exports ship the GUI-subsystem player (runtime/CMakeLists.txt).
+    target_compile_definitions(cuervo_tools PRIVATE CUERVO_TOOLS_PLAYER="$<TARGET_FILE:player>")
+endif()

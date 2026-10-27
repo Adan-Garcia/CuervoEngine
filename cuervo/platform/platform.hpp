@@ -65,9 +65,10 @@ std::filesystem::path executable_dir();
 // Searches:
 // 1. CUERVO_ASSETS_DIR environment variable
 // 2. Compiled fallback path (if non-empty and exists on disk)
-// 3. Upwards from executable_dir: <dir>/assets/<subpath>
-// 4. <executable_dir>/../share/cuervo/assets/<subpath>
-// 5. Upwards from current working directory: <dir>/assets/<subpath>
+// 3. <executable_dir>/assets/<subpath>
+// 4. <executable_dir>/../assets/<subpath>
+// 5. <executable_dir>/../share/cuervo/assets/<subpath>
+// 6. ./assets/<subpath>
 // Returns the first path that exists on disk, or the fallback path if none exist.
 std::filesystem::path find_asset(std::string_view subpath, std::string_view fallback = {});
 

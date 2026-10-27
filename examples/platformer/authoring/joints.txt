@@ -1,0 +1,388 @@
+node Node2D "Level" {
+    position: vec2 = (0.0, 0.0)
+
+    // --- Static Boundaries ---
+    node StaticBody2D "Floor" {
+        position: vec2 = (640.0, 680.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (1280.0, 40.0)
+        }
+    }
+    node StaticBody2D "WallLeft" {
+        position: vec2 = (20.0, 360.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (40.0, 720.0)
+        }
+    }
+    node StaticBody2D "WallRight" {
+        position: vec2 = (1260.0, 360.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (40.0, 720.0)
+        }
+    }
+
+    // --- 1. Suspension Bridge (PinJoint2D / Revolute) ---
+    node StaticBody2D "BridgeLeftAnchor" {
+        position: vec2 = (78.0, 420.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (24.0, 24.0)
+        }
+    }
+    node StaticBody2D "BridgeRightAnchor" {
+        position: vec2 = (462.0, 420.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (24.0, 24.0)
+        }
+    }
+    node BridgePlank "Plank1" {
+        position: vec2 = (120.0, 420.0)
+        mass: float = 15.0
+        linear_damp: float = 2.0
+        angular_damp: float = 6.0
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (58.0, 12.0)
+        }
+    }
+    node BridgePlank "Plank2" {
+        position: vec2 = (180.0, 420.0)
+        mass: float = 15.0
+        linear_damp: float = 2.0
+        angular_damp: float = 6.0
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (58.0, 12.0)
+        }
+    }
+    node BridgePlank "Plank3" {
+        position: vec2 = (240.0, 420.0)
+        mass: float = 15.0
+        linear_damp: float = 2.0
+        angular_damp: float = 6.0
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (58.0, 12.0)
+        }
+    }
+    node BridgePlank "Plank4" {
+        position: vec2 = (300.0, 420.0)
+        mass: float = 15.0
+        linear_damp: float = 2.0
+        angular_damp: float = 6.0
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (58.0, 12.0)
+        }
+    }
+    node BridgePlank "Plank5" {
+        position: vec2 = (360.0, 420.0)
+        mass: float = 15.0
+        linear_damp: float = 2.0
+        angular_damp: float = 6.0
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (58.0, 12.0)
+        }
+    }
+    node BridgePlank "Plank6" {
+        position: vec2 = (420.0, 420.0)
+        mass: float = 15.0
+        linear_damp: float = 2.0
+        angular_damp: float = 6.0
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (58.0, 12.0)
+        }
+    }
+    node PinJoint2D "BridgePin0" {
+        position: vec2 = (90.0, 420.0)
+        node_a: str = "Level/BridgeLeftAnchor"
+        node_b: str = "Level/Plank1"
+        angular_limit_enabled: bool = true
+        angular_limit_lower: float = -0.22
+        angular_limit_upper: float = 0.22
+    }
+    node PinJoint2D "BridgePin1" {
+        position: vec2 = (150.0, 420.0)
+        node_a: str = "Level/Plank1"
+        node_b: str = "Level/Plank2"
+        angular_limit_enabled: bool = true
+        angular_limit_lower: float = -0.22
+        angular_limit_upper: float = 0.22
+    }
+    node PinJoint2D "BridgePin2" {
+        position: vec2 = (210.0, 420.0)
+        node_a: str = "Level/Plank2"
+        node_b: str = "Level/Plank3"
+        angular_limit_enabled: bool = true
+        angular_limit_lower: float = -0.22
+        angular_limit_upper: float = 0.22
+    }
+    node PinJoint2D "BridgePin3" {
+        position: vec2 = (270.0, 420.0)
+        node_a: str = "Level/Plank3"
+        node_b: str = "Level/Plank4"
+        angular_limit_enabled: bool = true
+        angular_limit_lower: float = -0.22
+        angular_limit_upper: float = 0.22
+    }
+    node PinJoint2D "BridgePin4" {
+        position: vec2 = (330.0, 420.0)
+        node_a: str = "Level/Plank4"
+        node_b: str = "Level/Plank5"
+        angular_limit_enabled: bool = true
+        angular_limit_lower: float = -0.22
+        angular_limit_upper: float = 0.22
+    }
+    node PinJoint2D "BridgePin5" {
+        position: vec2 = (390.0, 420.0)
+        node_a: str = "Level/Plank5"
+        node_b: str = "Level/Plank6"
+        angular_limit_enabled: bool = true
+        angular_limit_lower: float = -0.22
+        angular_limit_upper: float = 0.22
+    }
+    node PinJoint2D "BridgePin6" {
+        position: vec2 = (450.0, 420.0)
+        node_a: str = "Level/Plank6"
+        node_b: str = "Level/BridgeRightAnchor"
+        angular_limit_enabled: bool = true
+        angular_limit_lower: float = -0.22
+        angular_limit_upper: float = 0.22
+    }
+
+    // --- 2. Wrecking Ball Pendulum (DistanceJoint2D) ---
+    node StaticBody2D "PendulumMount" {
+        position: vec2 = (680.0, 100.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (20.0, 20.0)
+        }
+    }
+    node PendulumBall "WreckingBall" {
+        position: vec2 = (560.0, 220.0)
+        mass: float = 5.0
+        linear_damp: float = 0.0
+        angular_damp: float = 0.0
+        can_sleep: bool = false
+        node CollisionShape2D "Shape" {
+            shape_type: int = 2
+            radius: float = 24.0
+        }
+    }
+    node DistanceJoint2D "PendulumJoint" {
+        position: vec2 = (680.0, 100.0)
+        node_a: str = "Level/PendulumMount"
+        node_b: str = "Level/WreckingBall"
+        length: float = 170.0
+        stiffness: float = 0.0
+    }
+
+    // --- 3. Trampoline Pad (DampedSpringJoint2D + PrismaticJoint2D Guide) ---
+    node StaticBody2D "SpringBase" {
+        position: vec2 = (880.0, 650.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (100.0, 20.0)
+        }
+    }
+    node TrampolinePad "SpringPad" {
+        position: vec2 = (880.0, 590.0)
+        mass: float = 8.0
+        lock_rotation: bool = true
+        can_sleep: bool = false
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (90.0, 16.0)
+        }
+    }
+    node PrismaticJoint2D "SpringGuide" {
+        position: vec2 = (880.0, 620.0)
+        node_a: str = "Level/SpringBase"
+        node_b: str = "Level/SpringPad"
+        axis: vec2 = (0.0, 1.0)
+        limit_enabled: bool = true
+        lower_limit: float = -30.0
+        upper_limit: float = 35.0
+    }
+    node DampedSpringJoint2D "SpringJoint" {
+        position: vec2 = (880.0, 650.0)
+        node_a: str = "Level/SpringBase"
+        node_b: str = "Level/SpringPad"
+        rest_length: float = 60.0
+        stiffness: float = 5.0
+        damping: float = 0.15
+    }
+
+    // --- 4. Motorized Elevator (PrismaticJoint2D) ---
+    node StaticBody2D "ElevatorGuide" {
+        position: vec2 = (1120.0, 420.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (24.0, 260.0)
+            disabled: bool = true
+        }
+    }
+    node PrismaticJoint2D "ElevatorJoint" {
+        position: vec2 = (1120.0, 420.0)
+        node_a: str = "Level/ElevatorGuide"
+        node_b: str = "Level/ElevatorCar"
+        axis: vec2 = (0.0, 1.0)
+        limit_enabled: bool = true
+        lower_limit: float = -110.0
+        upper_limit: float = 110.0
+        motor_enabled: bool = true
+        motor_speed: float = -80.0
+        motor_max_force: float = 500000.0
+    }
+    node ElevatorCar "ElevatorCar" {
+        position: vec2 = (1120.0, 420.0)
+        mass: float = 12.0
+        lock_rotation: bool = true
+        can_sleep: bool = false
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (90.0, 18.0)
+        }
+    }
+
+    // --- 5. Welded Compound Cross (WeldJoint2D) ---
+    node WeldedCross "WeldH" {
+        position: vec2 = (340.0, 610.0)
+        mass: float = 2.0
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (60.0, 14.0)
+        }
+    }
+    node WeldedCross "WeldV" {
+        position: vec2 = (340.0, 610.0)
+        mass: float = 2.0
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (14.0, 60.0)
+        }
+    }
+    node WeldJoint2D "WeldJoint" {
+        position: vec2 = (340.0, 610.0)
+        node_a: str = "Level/WeldH"
+        node_b: str = "Level/WeldV"
+    }
+
+    // --- 6. Pogo Stick Hopper (PogoJoint2D) ---
+    node PogoBody "PogoHead" {
+        position: vec2 = (540.0, 560.0)
+        mass: float = 1.5
+        lock_rotation: bool = true
+        can_sleep: bool = false
+        node CollisionShape2D "Shape" {
+            shape_type: int = 2
+            radius: float = 18.0
+        }
+    }
+    node PogoLeg "PogoLeg" {
+        position: vec2 = (540.0, 615.0)
+        mass: float = 1.0
+        lock_rotation: bool = true
+        can_sleep: bool = false
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (10.0, 32.0)
+        }
+    }
+    node PogoJoint2D "PogoJoint" {
+        position: vec2 = (540.0, 585.0)
+        node_a: str = "Level/PogoHead"
+        node_b: str = "Level/PogoLeg"
+        normal: vec2 = (0.0, 1.0)
+        stiffness: float = 6.0
+        damping: float = 0.15
+        rest_length: float = 55.0
+        max_tension: float = 50000.0
+        max_compression: float = 50000.0
+    }
+
+    // --- 7. Soft Motor Target (MotorJoint2D) ---
+    node StaticBody2D "MotorMount" {
+        position: vec2 = (880.0, 260.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (20.0, 20.0)
+            disabled: bool = true
+        }
+    }
+    node MotorJoint2D "MotorJoint" {
+        position: vec2 = (880.0, 260.0)
+        node_a: str = "Level/MotorMount"
+        node_b: str = "Level/MotorRotor"
+        max_force: float = 50000.0
+        max_torque: float = 50000.0
+        max_spring_force: float = 50000.0
+        linear_hertz: float = 12.0
+        angular_hertz: float = 0.0
+    }
+    node MotorRotor "MotorRotor" {
+        position: vec2 = (880.0, 260.0)
+        mass: float = 1.0
+        gravity_scale: float = 0.0
+        can_sleep: bool = false
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (70.0, 16.0)
+        }
+    }
+
+    // --- 8. Collision Filter Pair (FilterJoint2D) ---
+    node FilterGhost "GhostA" {
+        position: vec2 = (690.0, 642.0)
+        mass: float = 1.5
+        lock_rotation: bool = true
+        can_sleep: bool = false
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (34.0, 34.0)
+        }
+    }
+    node FilterGhost "GhostB" {
+        position: vec2 = (730.0, 642.0)
+        mass: float = 1.5
+        lock_rotation: bool = true
+        can_sleep: bool = false
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (34.0, 34.0)
+        }
+    }
+    node FilterJoint2D "FilterJoint" {
+        position: vec2 = (710.0, 642.0)
+        node_a: str = "Level/GhostA"
+        node_b: str = "Level/GhostB"
+    }
+
+    // --- Bridge Test Crate ---
+    node Crate "BridgeCrate" {
+        position: vec2 = (240.0, 390.0)
+        mass: float = 2.0
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (30.0, 30.0)
+        }
+    }
+
+    // --- Player ---
+    node Player "Player" {
+        position: vec2 = (80.0, 370.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (32.0, 56.0)
+        }
+        node RayCast2D "Ray" {
+            target_position: vec2 = (0.0, 40.0)
+        }
+    }
+}

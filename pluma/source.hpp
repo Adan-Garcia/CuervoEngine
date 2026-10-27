@@ -44,6 +44,12 @@ public:
     struct Part {
         std::string path;
         std::string text;
+        // The package this file belongs to (LANGUAGE.md 9.26); empty for the
+        // game's own files, whose names are the root namespace.
+        std::string module = {};
+        // A prelude file (the engine API, the std library): its root names
+        // are visible to packages too.
+        bool prelude = false;
     };
     // Joins `parts` with a newline after each. `path` names the whole.
     static std::unique_ptr<SourceFile> combine(std::string path, const std::vector<Part>& parts);
@@ -64,6 +70,17 @@ public:
     // The text of the part named `path` (the whole text for a single file);
     // empty if there is none. Debuggers show sources that aren't on disk.
     std::string_view part_text(std::string_view path) const;
+    // The package of the part containing `offset` (empty: the root
+    // namespace), and whether that part is a prelude.
+    std::string_view module_at(std::uint32_t offset) const;
+    bool prelude_at(std::uint32_t offset) const;
+    // Index of the part containing `offset` (0 for a single file); imports
+    // are per part.
+    std::size_t part_index(std::uint32_t offset) const;
+    std::size_t part_count() const { return segments_.empty() ? 1 : segments_.size(); }
+    std::string_view part_module(std::size_t index) const {
+        return segments_.empty() ? std::string_view() : std::string_view(segments_[index].module);
+    }
     // The text of the line containing `offset`.
     std::string_view line_text_at(std::uint32_t offset) const { return line_text(line_col(offset).line); }
 
@@ -72,6 +89,8 @@ private:
         std::uint32_t offset = 0;
         std::uint32_t first_line = 1; // absolute line of the segment's first line
         std::string path;
+        std::string module;
+        bool prelude = false;
     };
     std::vector<Segment> segments_; // empty: a single file
     std::string path_;

@@ -5,14 +5,14 @@
 // exported build also finds `game.pak` next to its executable by itself.
 //
 //   cuervo --game <dir> | --pack <file.pak> [--backend vulkan|gl] [--quit-after <seconds>] [--vsync on|off]
-//                        [--screenshot <file.ppm>] [--font <file>] [--scale fit|integer|stretch]
+//                        [--screenshot <file.ppm> [--screenshot-tick <n>]] [--font <file>] [--scale fit|integer|stretch]
 //                        [--no-hot-reload] [--press <tick:action,...>] [--pointer <tick:x:y,...>]
 //                        [--type <tick:text,...>] [--gl-es] [--no-audio]
 //                        [--record <file.replay>] [--bench <seconds> [--bench-warmup <seconds>]]
 //                        [--profile]
 //
 // --screenshot simulates one tick per frame up to the capture tick (240, or
-// CUERVO_SCREENSHOT_TICK), writes that frame and exits, so captures are
+// --screenshot-tick / CUERVO_SCREENSHOT_TICK), writes that frame and exits, so captures are
 // reproducible and comparable across backends. --press (or CUERVO_PRESS)
 // holds project actions on given ticks, e.g. "60:ui_accept,300:pause", so
 // automated runs can reach menus ("10-20:ui_click" holds for a range of ticks).
@@ -25,7 +25,9 @@
 // --bench turns VSync off, runs the game for --bench-warmup seconds (default
 // 3), then logs frame-time stats (avg / p50 / p95 / p99 / max, sim and render
 // CPU time) over the given seconds and exits; examples/bench is the SDF stress
-// scene made for it.
+// scene made for it. A second line ("bench windows |") gives the mean frame
+// time of every second of the run and the worst one over the median, which
+// shows frame-time cliffs the run's percentiles average away (milestone 10.4).
 // --profile records engine zones (cuervo/core/profiler.hpp) and profiles the
 // scripts (pluma/profiler.hpp), then logs both tables at exit ("profile |"
 // lines); it observes only, so the state hash is unchanged (DESIGN.md 5.14).

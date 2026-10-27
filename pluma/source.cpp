@@ -18,7 +18,7 @@ std::unique_ptr<SourceFile> SourceFile::combine(std::string path, const std::vec
     std::vector<Segment> segments;
     std::uint32_t line = 1;
     for (const Part& p : parts) {
-        segments.push_back(Segment{static_cast<std::uint32_t>(text.size()), line, p.path});
+        segments.push_back(Segment{static_cast<std::uint32_t>(text.size()), line, p.path, p.module, p.prelude});
         text += p.text;
         text += '\n';
         for (char c : p.text) line += c == '\n' ? 1u : 0u;
@@ -36,6 +36,21 @@ Location SourceFile::location(std::uint32_t offset) const {
                                [](std::uint32_t o, const Segment& s) { return o < s.offset; });
     const Segment& seg = it == segments_.begin() ? segments_.front() : *(it - 1);
     return {seg.path, lc.line - seg.first_line + 1, lc.column};
+}
+
+std::size_t SourceFile::part_index(std::uint32_t offset) const {
+    if (segments_.empty()) return 0;
+    auto it = std::upper_bound(segments_.begin(), segments_.end(), offset,
+                               [](std::uint32_t o, const Segment& s) { return o < s.offset; });
+    return it == segments_.begin() ? 0 : static_cast<std::size_t>(it - segments_.begin()) - 1;
+}
+
+std::string_view SourceFile::module_at(std::uint32_t offset) const {
+    return segments_.empty() ? std::string_view() : std::string_view(segments_[part_index(offset)].module);
+}
+
+bool SourceFile::prelude_at(std::uint32_t offset) const {
+    return !segments_.empty() && segments_[part_index(offset)].prelude;
 }
 
 std::string_view SourceFile::part_text(std::string_view path) const {

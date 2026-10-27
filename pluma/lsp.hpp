@@ -10,6 +10,7 @@
 // the project's scripts.
 
 #include <cstdint>
+#include <functional>
 #include <iosfwd>
 #include <map>
 #include <optional>
@@ -168,6 +169,15 @@ struct ServerOptions {
     std::string root_path;
     // Include naming style warnings (LANGUAGE.md 6) in published diagnostics.
     bool check_style = false;
+    // The packages a workspace depends on (LANGUAGE.md 9.26), found by the
+    // host from its project file: files under a package's directory are
+    // checked in that package's namespace, and directories outside the
+    // workspace are scanned too. Unset: no packages.
+    struct PackageDir {
+        std::string name;
+        std::string dir;
+    };
+    std::function<std::vector<PackageDir>(const std::string& root_path)> packages;
 };
 
 // Converts between filesystem paths and `file://` URIs.

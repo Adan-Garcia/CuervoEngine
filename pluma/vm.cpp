@@ -10,6 +10,7 @@
 
 #include "pluma/builtins.hpp"
 #include "pluma/collections.hpp"
+#include "pluma/ffi.hpp"
 #include "pluma/numeric.hpp"
 #include "pluma/tir.hpp"
 
@@ -345,6 +346,18 @@ std::uint32_t VM::register_native(std::string name, NativeFn fn) {
 std::uint32_t VM::native_index(std::string_view name) const {
     auto it = native_ids_.find(name);
     return it != native_ids_.end() ? it->second : no_native;
+}
+
+std::uint32_t VM::resolve_native(std::string_view name, std::string* error) {
+    if (std::uint32_t id = native_index(name); id != no_native) return id;
+    if (!is_ffi_key(name)) return no_native;
+    std::string why;
+    auto fn = make_ffi_native(name, why);
+    if (!fn) {
+        if (error != nullptr) *error = std::move(why);
+        return no_native;
+    }
+    return register_native(std::string(name), std::move(*fn));
 }
 
 void VM::set_native_finalizer(std::string class_name, void (*finalizer)(void*)) {

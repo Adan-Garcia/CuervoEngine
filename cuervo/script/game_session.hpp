@@ -31,6 +31,10 @@
 //   - tick(): one fixed tick, recorded into a Replay when recording
 //   - reload(): hot reload / restart (DESIGN.md 5.13)
 // Rendering and the frame loop stay with the caller.
+namespace pluma {
+class AotModule;
+}
+
 namespace cuervo::script {
 
 struct SessionOptions {
@@ -140,6 +144,9 @@ private:
     std::vector<pluma::SourceFile::Part> sources_;
     std::vector<std::filesystem::path> files_;
     bool native_scripts_ = false;
+    // Native packs: the script module opened once for the plugins linked into
+    // it (their code must stay loaded while any host can call it).
+    std::unique_ptr<pluma::AotModule> aot_plugins_;
 #if CUERVO_FEATURE_AUDIO
     std::unique_ptr<audio::AudioSystem> audio_;
 #endif

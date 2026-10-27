@@ -121,6 +121,21 @@ bool EditorDocument::rename(NodeId id, std::string_view name) {
     return true;
 }
 
+bool EditorDocument::change_type(NodeId id, std::string_view new_type) {
+    const ModelNode* n = model_.get(id);
+    if (n == nullptr) return fail("no such node");
+    if (new_type.empty()) return fail("a node needs a class type");
+    if (registry_ != nullptr && registry_->find(new_type) == nullptr) {
+        return fail(std::format("'{}' is not a node class of this project", new_type));
+    }
+    if (registry_ != nullptr && !registry_->is_a(new_type, "Node")) {
+        return fail(std::format("'{}' is not a Node class", new_type));
+    }
+    if (n->type == new_type) return true;
+    apply(std::make_unique<ChangeTypeCommand>(id, n->type, std::string(new_type)));
+    return true;
+}
+
 bool EditorDocument::reparent(NodeId id, NodeId new_parent, std::optional<std::size_t> index) {
     const ModelNode* n = model_.get(id);
     const ModelNode* p = model_.get(new_parent);

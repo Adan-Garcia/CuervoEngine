@@ -73,3 +73,26 @@ TEST_CASE("editor style: metrics follow the kit's scales") {
     CHECK_FALSE(same(dark_bg, ImGui::GetStyle().Colors[ImGuiCol_WindowBg]));
     CHECK(cuervo::editor::theme::current() == Theme::Light);
 }
+
+TEST_CASE("editor style: dynamic UI and font scaling") {
+    Context c;
+    cuervo::editor::theme::apply(Theme::Dark);
+    const float base_pad = ImGui::GetStyle().FramePadding.x;
+    CHECK(cuervo::editor::theme::ui_scale() == doctest::Approx(1.0f));
+    CHECK(cuervo::editor::theme::font_scale() == doctest::Approx(1.0f));
+
+    cuervo::editor::theme::set_ui_scale(1.5f);
+    cuervo::editor::theme::set_font_scale(1.2f);
+    CHECK(cuervo::editor::theme::ui_scale() == doctest::Approx(1.5f));
+    CHECK(cuervo::editor::theme::font_scale() == doctest::Approx(1.2f));
+
+    const ImGuiStyle& s = ImGui::GetStyle();
+    CHECK(s.FramePadding.x == doctest::Approx(base_pad * 1.5f));
+    CHECK(s.FontScaleMain == doctest::Approx(1.5f * 1.2f));
+
+    // Reset back to 1.0f
+    cuervo::editor::theme::set_ui_scale(1.0f);
+    cuervo::editor::theme::set_font_scale(1.0f);
+    CHECK(ImGui::GetStyle().FramePadding.x == doctest::Approx(base_pad));
+    CHECK(ImGui::GetStyle().FontScaleMain == doctest::Approx(1.0f));
+}

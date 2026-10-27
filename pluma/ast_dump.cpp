@@ -108,8 +108,10 @@ SNode of(const TypeExpr* t) {
         case TypeKind::Error: return atom("<error>");
         case TypeKind::Named: {
             auto n = as<NamedType>(t);
-            if (n->args.empty()) return atom(n->name.name);
-            SNode out = tag(std::string(n->name.name));
+            std::string name = n->qualifier.empty() ? std::string(n->name.name)
+                                                    : std::format("{}.{}", n->qualifier.name, n->name.name);
+            if (n->args.empty()) return atom(name);
+            SNode out = tag(name);
             for (const TypeExpr* a : n->args) out.add(of(a));
             return out;
         }

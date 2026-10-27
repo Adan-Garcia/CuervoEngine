@@ -20,6 +20,7 @@ bool FeatureSet::enabled(std::string_view name) const {
     if (name == "ui") return ui;
     if (name == "particles") return particles;
     if (name == "collision") return collision;
+    if (name == "physics") return physics;
     if (name == "vulkan") return vulkan;
     if (name == "svg_import") return svg_import;
     if (name == "font_import") return font_import;
@@ -32,6 +33,7 @@ void FeatureSet::set(std::string_view name, bool value) {
     else if (name == "ui") ui = value;
     else if (name == "particles") particles = value;
     else if (name == "collision") collision = value;
+    else if (name == "physics") physics = value;
     else if (name == "vulkan") vulkan = value;
     else if (name == "svg_import") svg_import = value;
     else if (name == "font_import") font_import = value;
@@ -45,6 +47,7 @@ std::vector<std::string> FeatureSet::active_list() const {
     if (dev) list.push_back("dev");
     if (font_import) list.push_back("font_import");
     if (particles) list.push_back("particles");
+    if (physics) list.push_back("physics");
     if (svg_import) list.push_back("svg_import");
     if (ui) list.push_back("ui");
     if (vulkan) list.push_back("vulkan");
@@ -59,6 +62,7 @@ std::vector<std::string> FeatureSet::stripped_list() const {
     if (!dev) list.push_back("dev");
     if (!font_import) list.push_back("font_import");
     if (!particles) list.push_back("particles");
+    if (!physics) list.push_back("physics");
     if (!svg_import) list.push_back("svg_import");
     if (!ui) list.push_back("ui");
     if (!vulkan) list.push_back("vulkan");
@@ -67,7 +71,7 @@ std::vector<std::string> FeatureSet::stripped_list() const {
 }
 
 bool FeatureOverrides::empty() const {
-    return !audio && !ui && !particles && !collision && !vulkan && !svg_import && !font_import && !dev;
+    return !audio && !ui && !particles && !collision && !physics && !vulkan && !svg_import && !font_import && !dev;
 }
 
 namespace {
@@ -154,7 +158,7 @@ constexpr OptionalPrelude optional_preludes[] = {
 
 // The declarations of each optional prelude, by feature.
 struct FeatureNames {
-    std::vector<std::string> audio, ui, particles, collision;
+    std::vector<std::string> audio, ui, particles, collision, physics;
 };
 
 FeatureNames feature_names() {
@@ -168,13 +172,15 @@ FeatureNames feature_names() {
         std::vector<std::string> names = prelude_declarations(text);
         if (path == "cuervo/audio.plm") {
             f.audio = std::move(names);
-        } else if (path == "cuervo/ui.plm") {
-            f.ui = std::move(names);
+        } else if (path == "cuervo/ui.plm" || path.starts_with("cuervo/ui/")) {
+            f.ui.insert(f.ui.end(), names.begin(), names.end());
         } else if (path == "cuervo/collision.plm") {
             // Hitboxes and areas work without particles.
             f.collision = std::move(names);
         } else if (path == "cuervo/particles.plm") {
             f.particles = std::move(names);
+        } else if (path.starts_with("cuervo/physics/")) {
+            f.physics.insert(f.physics.end(), names.begin(), names.end());
         }
     }
     return f;
@@ -219,6 +225,7 @@ FeatureSet detect_features(const assets::Vfs& vfs, const Project& project, const
     bool detected_particles = uses_any(used, names.particles);
     bool detected_collision = uses_any(used, names.collision);
     bool detected_ui = uses_any(used, names.ui);
+    bool detected_physics = uses_any(used, names.physics);
 
     if (detected_particles) {
         detected_collision = true;
@@ -227,6 +234,7 @@ FeatureSet detect_features(const assets::Vfs& vfs, const Project& project, const
     result.audio = detected_audio;
     result.particles = detected_particles;
     result.collision = detected_collision;
+    result.physics = detected_physics;
     result.ui = detected_ui;
 
     // Vulkan backend: required if project uses full tier
@@ -237,6 +245,7 @@ FeatureSet detect_features(const assets::Vfs& vfs, const Project& project, const
     if (overrides.ui.has_value()) result.ui = *overrides.ui;
     if (overrides.particles.has_value()) result.particles = *overrides.particles;
     if (overrides.collision.has_value()) result.collision = *overrides.collision;
+    if (overrides.physics.has_value()) result.physics = *overrides.physics;
     if (overrides.vulkan.has_value()) result.vulkan = *overrides.vulkan;
     if (overrides.svg_import.has_value()) result.svg_import = *overrides.svg_import;
     if (overrides.font_import.has_value()) result.font_import = *overrides.font_import;

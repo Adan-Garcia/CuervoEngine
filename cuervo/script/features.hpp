@@ -20,6 +20,7 @@ struct FeatureSet {
     bool ui = true;
     bool particles = true;
     bool collision = true;
+    bool physics = true;
     bool vulkan = true;
     bool svg_import = false;
     bool font_import = false;
@@ -40,6 +41,7 @@ struct FeatureOverrides {
     std::optional<bool> ui;
     std::optional<bool> particles;
     std::optional<bool> collision;
+    std::optional<bool> physics;
     std::optional<bool> vulkan;
     std::optional<bool> svg_import;
     std::optional<bool> font_import;

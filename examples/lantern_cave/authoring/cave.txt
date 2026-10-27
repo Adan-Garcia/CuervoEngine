@@ -1,0 +1,317 @@
+node Node2D "Cave" {
+    node Shape "Backdrop" {
+        kind: ShapeKind = ShapeKind.Rect
+        position: vec2 = (1280.0, 352.0)
+        fill: Color = Color { r = 0.1647, g = 0.1333, b = 0.1882, a = 1.0 }
+        size: vec2 = (2560.0, 704.0)
+    }
+    node AmbientLight2D "Darkness" {
+        color: Color = Color { r = 0.03, g = 0.02, b = 0.06, a = 1.0 }
+        darkness: float = 0.86
+        glow: float = 0.3
+    }
+    node TileMapLayer "Rock" {
+        tile_size: vec2 = (32.0, 32.0)
+        tileset: TileSet = TileSet { tile_size = (32.0, 32.0), tiles = [TileDef { id = 0, asset = "", color = Color { r = 0.36, g = 0.3, b = 0.4, a = 1.0 }, walkable = false, nav_cost = 1.0, terrain = 0, peering_bits = 0 }] }
+        cells: List<TileCell> = [TileCell { x = 0, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 2, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 3, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 4, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 5, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 6, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 7, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 8, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 9, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 10, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 11, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 12, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 13, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 14, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 15, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 16, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 17, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 18, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 19, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 20, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 21, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 22, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 23, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 24, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 25, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 26, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 27, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 28, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 29, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 30, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 31, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 32, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 33, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 34, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 35, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 36, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 37, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 38, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 39, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 40, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 41, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 42, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 43, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 44, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 45, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 46, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 47, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 48, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 49, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 50, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 51, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 52, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 53, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 54, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 55, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 56, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 57, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 58, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 59, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 60, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 61, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 62, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 63, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 64, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 65, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 66, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 67, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 68, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 69, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 70, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 71, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 72, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 73, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 74, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 75, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 76, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 77, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 0, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 2, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 3, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 4, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 5, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 6, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 7, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 8, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 9, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 10, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 11, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 12, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 13, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 14, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 15, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 16, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 17, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 18, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 19, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 20, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 21, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 22, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 23, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 24, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 25, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 26, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 27, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 28, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 29, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 30, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 31, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 32, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 33, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 34, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 35, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 36, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 37, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 38, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 39, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 40, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 41, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 42, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 43, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 44, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 45, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 46, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 47, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 48, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 49, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 50, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 51, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 52, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 53, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 54, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 55, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 56, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 57, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 58, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 59, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 60, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 61, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 62, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 63, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 64, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 65, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 66, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 67, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 68, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 69, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 70, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 71, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 72, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 73, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 74, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 75, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 76, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 77, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 1, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 2, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 2, tile_id = 0, terrain = 0 }, TileCell { x = 42, y = 2, tile_id = 0, terrain = 0 }, TileCell { x = 43, y = 2, tile_id = 0, terrain = 0 }, TileCell { x = 48, y = 2, tile_id = 0, terrain = 0 }, TileCell { x = 49, y = 2, tile_id = 0, terrain = 0 }, TileCell { x = 50, y = 2, tile_id = 0, terrain = 0 }, TileCell { x = 51, y = 2, tile_id = 0, terrain = 0 }, TileCell { x = 52, y = 2, tile_id = 0, terrain = 0 }, TileCell { x = 53, y = 2, tile_id = 0, terrain = 0 }, TileCell { x = 54, y = 2, tile_id = 0, terrain = 0 }, TileCell { x = 55, y = 2, tile_id = 0, terrain = 0 }, TileCell { x = 56, y = 2, tile_id = 0, terrain = 0 }, TileCell { x = 57, y = 2, tile_id = 0, terrain = 0 }, TileCell { x = 58, y = 2, tile_id = 0, terrain = 0 }, TileCell { x = 70, y = 2, tile_id = 0, terrain = 0 }, TileCell { x = 71, y = 2, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 2, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 2, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 3, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 3, tile_id = 0, terrain = 0 }, TileCell { x = 42, y = 3, tile_id = 0, terrain = 0 }, TileCell { x = 43, y = 3, tile_id = 0, terrain = 0 }, TileCell { x = 48, y = 3, tile_id = 0, terrain = 0 }, TileCell { x = 49, y = 3, tile_id = 0, terrain = 0 }, TileCell { x = 50, y = 3, tile_id = 0, terrain = 0 }, TileCell { x = 51, y = 3, tile_id = 0, terrain = 0 }, TileCell { x = 52, y = 3, tile_id = 0, terrain = 0 }, TileCell { x = 53, y = 3, tile_id = 0, terrain = 0 }, TileCell { x = 54, y = 3, tile_id = 0, terrain = 0 }, TileCell { x = 55, y = 3, tile_id = 0, terrain = 0 }, TileCell { x = 56, y = 3, tile_id = 0, terrain = 0 }, TileCell { x = 57, y = 3, tile_id = 0, terrain = 0 }, TileCell { x = 58, y = 3, tile_id = 0, terrain = 0 }, TileCell { x = 70, y = 3, tile_id = 0, terrain = 0 }, TileCell { x = 71, y = 3, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 3, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 3, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 4, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 4, tile_id = 0, terrain = 0 }, TileCell { x = 42, y = 4, tile_id = 0, terrain = 0 }, TileCell { x = 43, y = 4, tile_id = 0, terrain = 0 }, TileCell { x = 48, y = 4, tile_id = 0, terrain = 0 }, TileCell { x = 49, y = 4, tile_id = 0, terrain = 0 }, TileCell { x = 50, y = 4, tile_id = 0, terrain = 0 }, TileCell { x = 51, y = 4, tile_id = 0, terrain = 0 }, TileCell { x = 52, y = 4, tile_id = 0, terrain = 0 }, TileCell { x = 53, y = 4, tile_id = 0, terrain = 0 }, TileCell { x = 54, y = 4, tile_id = 0, terrain = 0 }, TileCell { x = 55, y = 4, tile_id = 0, terrain = 0 }, TileCell { x = 56, y = 4, tile_id = 0, terrain = 0 }, TileCell { x = 57, y = 4, tile_id = 0, terrain = 0 }, TileCell { x = 58, y = 4, tile_id = 0, terrain = 0 }, TileCell { x = 70, y = 4, tile_id = 0, terrain = 0 }, TileCell { x = 71, y = 4, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 4, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 4, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 5, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 5, tile_id = 0, terrain = 0 }, TileCell { x = 42, y = 5, tile_id = 0, terrain = 0 }, TileCell { x = 43, y = 5, tile_id = 0, terrain = 0 }, TileCell { x = 48, y = 5, tile_id = 0, terrain = 0 }, TileCell { x = 49, y = 5, tile_id = 0, terrain = 0 }, TileCell { x = 50, y = 5, tile_id = 0, terrain = 0 }, TileCell { x = 51, y = 5, tile_id = 0, terrain = 0 }, TileCell { x = 52, y = 5, tile_id = 0, terrain = 0 }, TileCell { x = 53, y = 5, tile_id = 0, terrain = 0 }, TileCell { x = 54, y = 5, tile_id = 0, terrain = 0 }, TileCell { x = 55, y = 5, tile_id = 0, terrain = 0 }, TileCell { x = 56, y = 5, tile_id = 0, terrain = 0 }, TileCell { x = 57, y = 5, tile_id = 0, terrain = 0 }, TileCell { x = 58, y = 5, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 5, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 5, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 6, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 6, tile_id = 0, terrain = 0 }, TileCell { x = 42, y = 6, tile_id = 0, terrain = 0 }, TileCell { x = 43, y = 6, tile_id = 0, terrain = 0 }, TileCell { x = 48, y = 6, tile_id = 0, terrain = 0 }, TileCell { x = 49, y = 6, tile_id = 0, terrain = 0 }, TileCell { x = 50, y = 6, tile_id = 0, terrain = 0 }, TileCell { x = 51, y = 6, tile_id = 0, terrain = 0 }, TileCell { x = 52, y = 6, tile_id = 0, terrain = 0 }, TileCell { x = 53, y = 6, tile_id = 0, terrain = 0 }, TileCell { x = 54, y = 6, tile_id = 0, terrain = 0 }, TileCell { x = 55, y = 6, tile_id = 0, terrain = 0 }, TileCell { x = 56, y = 6, tile_id = 0, terrain = 0 }, TileCell { x = 57, y = 6, tile_id = 0, terrain = 0 }, TileCell { x = 58, y = 6, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 6, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 6, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 7, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 7, tile_id = 0, terrain = 0 }, TileCell { x = 42, y = 7, tile_id = 0, terrain = 0 }, TileCell { x = 43, y = 7, tile_id = 0, terrain = 0 }, TileCell { x = 48, y = 7, tile_id = 0, terrain = 0 }, TileCell { x = 49, y = 7, tile_id = 0, terrain = 0 }, TileCell { x = 50, y = 7, tile_id = 0, terrain = 0 }, TileCell { x = 51, y = 7, tile_id = 0, terrain = 0 }, TileCell { x = 52, y = 7, tile_id = 0, terrain = 0 }, TileCell { x = 53, y = 7, tile_id = 0, terrain = 0 }, TileCell { x = 54, y = 7, tile_id = 0, terrain = 0 }, TileCell { x = 55, y = 7, tile_id = 0, terrain = 0 }, TileCell { x = 56, y = 7, tile_id = 0, terrain = 0 }, TileCell { x = 57, y = 7, tile_id = 0, terrain = 0 }, TileCell { x = 58, y = 7, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 7, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 7, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 8, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 8, tile_id = 0, terrain = 0 }, TileCell { x = 42, y = 8, tile_id = 0, terrain = 0 }, TileCell { x = 43, y = 8, tile_id = 0, terrain = 0 }, TileCell { x = 48, y = 8, tile_id = 0, terrain = 0 }, TileCell { x = 49, y = 8, tile_id = 0, terrain = 0 }, TileCell { x = 50, y = 8, tile_id = 0, terrain = 0 }, TileCell { x = 51, y = 8, tile_id = 0, terrain = 0 }, TileCell { x = 52, y = 8, tile_id = 0, terrain = 0 }, TileCell { x = 53, y = 8, tile_id = 0, terrain = 0 }, TileCell { x = 54, y = 8, tile_id = 0, terrain = 0 }, TileCell { x = 55, y = 8, tile_id = 0, terrain = 0 }, TileCell { x = 56, y = 8, tile_id = 0, terrain = 0 }, TileCell { x = 57, y = 8, tile_id = 0, terrain = 0 }, TileCell { x = 58, y = 8, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 8, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 8, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 9, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 9, tile_id = 0, terrain = 0 }, TileCell { x = 42, y = 9, tile_id = 0, terrain = 0 }, TileCell { x = 43, y = 9, tile_id = 0, terrain = 0 }, TileCell { x = 48, y = 9, tile_id = 0, terrain = 0 }, TileCell { x = 49, y = 9, tile_id = 0, terrain = 0 }, TileCell { x = 50, y = 9, tile_id = 0, terrain = 0 }, TileCell { x = 51, y = 9, tile_id = 0, terrain = 0 }, TileCell { x = 52, y = 9, tile_id = 0, terrain = 0 }, TileCell { x = 53, y = 9, tile_id = 0, terrain = 0 }, TileCell { x = 54, y = 9, tile_id = 0, terrain = 0 }, TileCell { x = 55, y = 9, tile_id = 0, terrain = 0 }, TileCell { x = 56, y = 9, tile_id = 0, terrain = 0 }, TileCell { x = 57, y = 9, tile_id = 0, terrain = 0 }, TileCell { x = 58, y = 9, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 9, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 9, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 10, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 10, tile_id = 0, terrain = 0 }, TileCell { x = 42, y = 10, tile_id = 0, terrain = 0 }, TileCell { x = 43, y = 10, tile_id = 0, terrain = 0 }, TileCell { x = 48, y = 10, tile_id = 0, terrain = 0 }, TileCell { x = 49, y = 10, tile_id = 0, terrain = 0 }, TileCell { x = 50, y = 10, tile_id = 0, terrain = 0 }, TileCell { x = 51, y = 10, tile_id = 0, terrain = 0 }, TileCell { x = 52, y = 10, tile_id = 0, terrain = 0 }, TileCell { x = 53, y = 10, tile_id = 0, terrain = 0 }, TileCell { x = 54, y = 10, tile_id = 0, terrain = 0 }, TileCell { x = 55, y = 10, tile_id = 0, terrain = 0 }, TileCell { x = 56, y = 10, tile_id = 0, terrain = 0 }, TileCell { x = 57, y = 10, tile_id = 0, terrain = 0 }, TileCell { x = 58, y = 10, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 10, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 10, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 42, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 43, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 48, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 49, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 50, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 51, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 52, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 53, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 54, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 55, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 56, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 57, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 58, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 67, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 68, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 69, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 70, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 71, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 72, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 73, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 74, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 75, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 76, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 77, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 11, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 48, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 49, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 50, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 51, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 52, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 53, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 54, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 55, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 56, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 57, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 58, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 67, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 68, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 69, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 70, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 71, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 72, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 73, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 74, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 75, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 76, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 77, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 12, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 48, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 49, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 50, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 51, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 52, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 53, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 54, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 55, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 56, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 57, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 58, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 65, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 66, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 67, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 68, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 69, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 70, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 71, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 72, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 73, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 74, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 75, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 76, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 77, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 13, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 48, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 49, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 50, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 51, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 52, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 53, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 54, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 55, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 56, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 57, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 58, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 65, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 66, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 67, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 68, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 69, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 70, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 71, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 72, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 73, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 74, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 75, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 76, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 77, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 14, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 14, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 15, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 20, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 21, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 22, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 23, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 24, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 25, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 26, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 27, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 63, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 64, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 65, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 66, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 67, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 68, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 69, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 70, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 71, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 72, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 73, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 74, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 75, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 76, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 77, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 15, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 14, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 15, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 63, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 64, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 65, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 66, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 67, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 68, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 69, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 70, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 71, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 72, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 73, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 74, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 75, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 76, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 77, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 16, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 14, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 15, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 61, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 62, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 63, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 64, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 65, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 66, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 67, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 68, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 69, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 70, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 71, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 72, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 73, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 74, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 75, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 76, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 77, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 17, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 14, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 15, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 61, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 62, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 63, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 64, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 65, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 66, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 67, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 68, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 69, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 70, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 71, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 72, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 73, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 74, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 75, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 76, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 77, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 18, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 2, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 3, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 4, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 5, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 6, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 7, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 8, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 9, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 10, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 11, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 12, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 13, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 14, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 15, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 16, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 17, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 18, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 19, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 20, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 21, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 22, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 23, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 24, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 25, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 26, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 27, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 28, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 29, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 30, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 36, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 37, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 38, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 39, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 40, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 41, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 42, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 43, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 44, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 45, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 46, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 47, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 48, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 49, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 50, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 51, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 52, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 53, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 54, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 55, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 56, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 57, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 58, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 59, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 60, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 61, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 62, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 63, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 64, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 65, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 66, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 67, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 68, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 69, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 70, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 71, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 72, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 73, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 74, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 75, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 76, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 77, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 19, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 2, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 3, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 4, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 5, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 6, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 7, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 8, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 9, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 10, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 11, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 12, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 13, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 14, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 15, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 16, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 17, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 18, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 19, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 20, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 21, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 22, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 23, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 24, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 25, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 26, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 27, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 28, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 29, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 30, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 36, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 37, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 38, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 39, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 40, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 41, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 42, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 43, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 44, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 45, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 46, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 47, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 48, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 49, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 50, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 51, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 52, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 53, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 54, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 55, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 56, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 57, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 58, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 59, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 60, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 61, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 62, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 63, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 64, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 65, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 66, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 67, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 68, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 69, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 70, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 71, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 72, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 73, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 74, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 75, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 76, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 77, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 20, tile_id = 0, terrain = 0 }, TileCell { x = 0, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 1, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 2, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 3, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 4, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 5, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 6, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 7, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 8, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 9, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 10, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 11, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 12, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 13, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 14, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 15, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 16, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 17, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 18, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 19, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 20, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 21, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 22, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 23, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 24, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 25, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 26, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 27, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 28, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 29, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 30, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 31, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 32, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 33, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 34, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 35, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 36, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 37, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 38, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 39, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 40, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 41, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 42, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 43, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 44, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 45, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 46, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 47, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 48, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 49, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 50, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 51, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 52, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 53, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 54, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 55, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 56, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 57, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 58, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 59, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 60, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 61, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 62, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 63, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 64, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 65, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 66, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 67, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 68, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 69, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 70, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 71, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 72, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 73, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 74, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 75, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 76, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 77, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 78, y = 21, tile_id = 0, terrain = 0 }, TileCell { x = 79, y = 21, tile_id = 0, terrain = 0 }]
+        light_occluders: bool = true
+        node TileMapCollision2D "Collision" {
+        }
+    }
+    node Torch "Torch1" {
+        position: vec2 = (208.0, 496.0)
+        node Shape "Flame" {
+            kind: ShapeKind = ShapeKind.Circle
+            position: vec2 = (0.0, 0.0)
+            fill: Color = Color { r = 1.0, g = 0.702, b = 0.2784, a = 1.0 }
+            radius: float = 6.0
+        }
+        node PointLight2D "Light" {
+            position: vec2 = (0.0, 0.0)
+            radius: float = 340.0
+            color: Color = Color { r = 1.0, g = 0.62, b = 0.3, a = 1.0 }
+            energy: float = 1.0
+            shadow_softness: float = 14.0
+            shadow_enabled: bool = true
+            shadow_color: Color = Color { r = 0.0, g = 0.0, b = 0.0, a = 0.75 }
+        }
+        node AnimationPlayer "Flicker" {
+        }
+    }
+    node Torch "Torch2" {
+        position: vec2 = (784.0, 400.0)
+        node Shape "Flame" {
+            kind: ShapeKind = ShapeKind.Circle
+            position: vec2 = (0.0, 0.0)
+            fill: Color = Color { r = 1.0, g = 0.702, b = 0.2784, a = 1.0 }
+            radius: float = 6.0
+        }
+        node PointLight2D "Light" {
+            position: vec2 = (0.0, 0.0)
+            radius: float = 340.0
+            color: Color = Color { r = 1.0, g = 0.62, b = 0.3, a = 1.0 }
+            energy: float = 1.0
+            shadow_softness: float = 14.0
+            shadow_enabled: bool = true
+            shadow_color: Color = Color { r = 0.0, g = 0.0, b = 0.0, a = 0.75 }
+        }
+        node AnimationPlayer "Flicker" {
+        }
+    }
+    node Torch "Torch3" {
+        position: vec2 = (1712.0, 528.0)
+        node Shape "Flame" {
+            kind: ShapeKind = ShapeKind.Circle
+            position: vec2 = (0.0, 0.0)
+            fill: Color = Color { r = 1.0, g = 0.702, b = 0.2784, a = 1.0 }
+            radius: float = 6.0
+        }
+        node PointLight2D "Light" {
+            position: vec2 = (0.0, 0.0)
+            radius: float = 340.0
+            color: Color = Color { r = 1.0, g = 0.62, b = 0.3, a = 1.0 }
+            energy: float = 1.0
+            shadow_softness: float = 14.0
+            shadow_enabled: bool = true
+            shadow_color: Color = Color { r = 0.0, g = 0.0, b = 0.0, a = 0.75 }
+        }
+        node AnimationPlayer "Flicker" {
+        }
+    }
+    node Torch "Torch4" {
+        position: vec2 = (2352.0, 272.0)
+        node Shape "Flame" {
+            kind: ShapeKind = ShapeKind.Circle
+            position: vec2 = (0.0, 0.0)
+            fill: Color = Color { r = 1.0, g = 0.702, b = 0.2784, a = 1.0 }
+            radius: float = 6.0
+        }
+        node PointLight2D "Light" {
+            position: vec2 = (0.0, 0.0)
+            radius: float = 340.0
+            color: Color = Color { r = 1.0, g = 0.62, b = 0.3, a = 1.0 }
+            energy: float = 1.0
+            shadow_softness: float = 14.0
+            shadow_enabled: bool = true
+            shadow_color: Color = Color { r = 0.0, g = 0.0, b = 0.0, a = 0.75 }
+        }
+        node AnimationPlayer "Flicker" {
+        }
+    }
+    node PointLight2D "Crystal" {
+        position: vec2 = (1376.0, 394.0)
+        radius: float = 380.0
+        color: Color = Color { r = 0.45, g = 0.6, b = 1.0, a = 1.0 }
+        energy: float = 1.2
+        shadow_softness: float = 8.0
+        shadow_enabled: bool = true
+        shadow_color: Color = Color { r = 0.0, g = 0.0, b = 0.0, a = 0.65 }
+        rotation: float = 1.5708
+        spot_angle: float = 1.1
+    }
+    node Beacon "Beacon" {
+        position: vec2 = (2272.0, 170.0)
+        node PointLight2D "Beam" {
+            position: vec2 = (0.0, 0.0)
+            radius: float = 640.0
+            color: Color = Color { r = 0.85, g = 0.95, b = 1.0, a = 1.0 }
+            energy: float = 1.0
+            shadow_softness: float = 6.0
+            shadow_enabled: bool = true
+            shadow_color: Color = Color { r = 0.0, g = 0.0, b = 0.0, a = 0.65 }
+            spot_angle: float = 0.55
+        }
+    }
+    node Crate "Crate1" {
+        position: vec2 = (1232.0, 588.0)
+        mass: float = 3.0
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (40.0, 40.0)
+        }
+        node LightOccluder2D "Occluder" {
+            size: vec2 = (40.0, 40.0)
+        }
+    }
+    node Crate "Crate2" {
+        position: vec2 = (1296.0, 588.0)
+        mass: float = 3.0
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (40.0, 40.0)
+        }
+        node LightOccluder2D "Occluder" {
+            size: vec2 = (40.0, 40.0)
+        }
+    }
+    node Gem "Gem1" {
+        position: vec2 = (768.0, 440.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 2
+            radius: float = 14.0
+        }
+        node PointLight2D "Glow" {
+            position: vec2 = (0.0, 0.0)
+            radius: float = 80.0
+            color: Color = Color { r = 0.45, g = 0.9, b = 1.0, a = 1.0 }
+            energy: float = 0.7
+            shadow_softness: float = 16.0
+            shadow_enabled: bool = false
+            shadow_color: Color = Color { r = 0.0, g = 0.0, b = 0.0, a = 0.65 }
+        }
+    }
+    node Gem "Gem2" {
+        position: vec2 = (1072.0, 640.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 2
+            radius: float = 14.0
+        }
+        node PointLight2D "Glow" {
+            position: vec2 = (0.0, 0.0)
+            radius: float = 80.0
+            color: Color = Color { r = 0.45, g = 0.9, b = 1.0, a = 1.0 }
+            energy: float = 0.7
+            shadow_softness: float = 16.0
+            shadow_enabled: bool = false
+            shadow_color: Color = Color { r = 0.0, g = 0.0, b = 0.0, a = 0.65 }
+        }
+    }
+    node Gem "Gem3" {
+        position: vec2 = (1728.0, 552.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 2
+            radius: float = 14.0
+        }
+        node PointLight2D "Glow" {
+            position: vec2 = (0.0, 0.0)
+            radius: float = 80.0
+            color: Color = Color { r = 0.45, g = 0.9, b = 1.0, a = 1.0 }
+            energy: float = 0.7
+            shadow_softness: float = 16.0
+            shadow_enabled: bool = false
+            shadow_color: Color = Color { r = 0.0, g = 0.0, b = 0.0, a = 0.65 }
+        }
+    }
+    node Gem "Gem4" {
+        position: vec2 = (2208.0, 320.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 2
+            radius: float = 14.0
+        }
+        node PointLight2D "Glow" {
+            position: vec2 = (0.0, 0.0)
+            radius: float = 80.0
+            color: Color = Color { r = 0.45, g = 0.9, b = 1.0, a = 1.0 }
+            energy: float = 0.7
+            shadow_softness: float = 16.0
+            shadow_enabled: bool = false
+            shadow_color: Color = Color { r = 0.0, g = 0.0, b = 0.0, a = 0.65 }
+        }
+    }
+    node ExitDoor "Door" {
+        position: vec2 = (2432.0, 312.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (48.0, 80.0)
+        }
+        node PointLight2D "DoorLight" {
+            position: vec2 = (0.0, 0.0)
+            radius: float = 140.0
+            color: Color = Color { r = 0.5, g = 1.0, b = 0.7, a = 1.0 }
+            energy: float = 0.5
+            shadow_softness: float = 16.0
+            shadow_enabled: bool = false
+            shadow_color: Color = Color { r = 0.0, g = 0.0, b = 0.0, a = 0.65 }
+        }
+    }
+    node Explorer "Explorer" {
+        position: vec2 = (144.0, 582.0)
+        node CollisionShape2D "Shape" {
+            shape_type: int = 1
+            size: vec2 = (26.0, 52.0)
+        }
+        node Camera2D "Camera" {
+        }
+        node Node2D "Visual" {
+            node Node2D "HipL" {
+                position: vec2 = (-5.0, 8.0)
+                node Shape "Leg" {
+                    kind: ShapeKind = ShapeKind.Capsule
+                    position: vec2 = (0.0, 9.0)
+                    fill: Color = Color { r = 0.1686, g = 0.1412, b = 0.2, a = 1.0 }
+                    radius: float = 3.5
+                    size: vec2 = (14.0, 0.0)
+                    rotation: float = 1.5708
+                }
+            }
+            node Node2D "HipR" {
+                position: vec2 = (5.0, 8.0)
+                node Shape "Leg" {
+                    kind: ShapeKind = ShapeKind.Capsule
+                    position: vec2 = (0.0, 9.0)
+                    fill: Color = Color { r = 0.1686, g = 0.1412, b = 0.2, a = 1.0 }
+                    radius: float = 3.5
+                    size: vec2 = (14.0, 0.0)
+                    rotation: float = 1.5708
+                }
+            }
+            node Shape "Torso" {
+                kind: ShapeKind = ShapeKind.Rect
+                position: vec2 = (0.0, -6.0)
+                size: vec2 = (20.0, 28.0)
+                corner_radius: float = 6.0
+                fill: Color = Color { r = 0.3098, g = 0.4863, b = 1.0, a = 1.0 }
+                node Shape "Head" {
+                    kind: ShapeKind = ShapeKind.Circle
+                    position: vec2 = (0.0, -22.0)
+                    fill: Color = Color { r = 0.9451, g = 0.8235, b = 0.6902, a = 1.0 }
+                    radius: float = 10.0
+                }
+                node Shape "Eye" {
+                    kind: ShapeKind = ShapeKind.Circle
+                    position: vec2 = (4.0, -23.0)
+                    fill: Color = Color { r = 0.1686, g = 0.1412, b = 0.2, a = 1.0 }
+                    radius: float = 2.2
+                }
+                node Shape "Hat" {
+                    kind: ShapeKind = ShapeKind.Rect
+                    position: vec2 = (0.0, -31.0)
+                    fill: Color = Color { r = 0.5412, g = 0.2314, b = 0.1804, a = 1.0 }
+                    size: vec2 = (22.0, 6.0)
+                    corner_radius: float = 2.0
+                }
+            }
+            node Node2D "Arm" {
+                position: vec2 = (7.0, -12.0)
+                node Shape "Sleeve" {
+                    kind: ShapeKind = ShapeKind.Capsule
+                    position: vec2 = (0.0, 8.0)
+                    fill: Color = Color { r = 0.2392, g = 0.3843, b = 0.8392, a = 1.0 }
+                    radius: float = 3.0
+                    size: vec2 = (14.0, 0.0)
+                    rotation: float = 1.5708
+                }
+                node Node2D "Lantern" {
+                    position: vec2 = (0.0, 19.0)
+                    node Shape "Glass" {
+                        kind: ShapeKind = ShapeKind.Circle
+                        position: vec2 = (0.0, 0.0)
+                        fill: Color = Color { r = 1.0, g = 0.8235, b = 0.4784, a = 1.0 }
+                        radius: float = 5.0
+                    }
+                    node PointLight2D "Light" {
+                        position: vec2 = (0.0, 0.0)
+                        radius: float = 300.0
+                        color: Color = Color { r = 1.0, g = 0.86, b = 0.6, a = 1.0 }
+                        energy: float = 1.1
+                        shadow_softness: float = 10.0
+                        shadow_enabled: bool = true
+                        shadow_color: Color = Color { r = 0.0, g = 0.0, b = 0.0, a = 0.65 }
+                    }
+                }
+            }
+        }
+        node AnimationPlayer "Anim" {
+        }
+    }
+}
