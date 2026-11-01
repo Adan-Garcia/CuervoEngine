@@ -40,6 +40,40 @@ jobs:
           GALLIUM_DRIVER: "llvmpipe"
         run: xvfb-run -a ctest --preset debug --output-on-failure --timeout 180
 
+  # Web (Emscripten) compile errors only show up in a web build; the pinned
+  # toolchain is docs/WEB.md's. Builds the game-independent runtime (an export needs the WebGPU
+  # host tools as well, so it isn't built here).
+  build-web:
+    name: Web (Emscripten / web-pack)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build glslang-tools libvulkan-dev libasound2-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev \
+            libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev
+
+      - name: Install Emscripten 6.0.12
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git ~/emsdk
+          ~/emsdk/emsdk install 6.0.12
+          ~/emsdk/emsdk activate 6.0.12
+
+      - name: Build host tools
+        run: |
+          cmake --preset host-tools
+          cmake --build --preset host-tools --target shader_tool runtime cuervo_tools
+
+      - name: Build web-pack
+        run: |
+          source ~/emsdk/emsdk_env.sh
+          cmake --preset web-pack
+          cmake --build --preset web-pack
+
   # Milestone 10.5a (docs/WINDOWS.md): MSVC in Release (the configuration the
   # prebuilt players use; MSVC's Debug STL makes the suite about three times slower) and
   # MinGW-w64 GCC in Debug, each with zero warnings and the whole ctest suite.

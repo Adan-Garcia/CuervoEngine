@@ -14,6 +14,7 @@
 #include <thread>
 
 #if defined(_WIN32)
+#include <fcntl.h>
 #include <io.h>
 #else
 #include <unistd.h>
@@ -168,6 +169,11 @@ void forward_log(void* user, log::Level level, std::string_view, int, std::strin
 
 int run_dap(int /*argc*/, char** /*argv*/) {
     log::set_stdout_free(true); // stdout carries DAP only
+#if defined(_WIN32)
+    // Text mode would turn each "\r\n" of the Content-Length header into "\r\r\n".
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
     StdioTransport transport;
     pluma::dap::Debugger debugger(transport);
     transport.start(debugger);

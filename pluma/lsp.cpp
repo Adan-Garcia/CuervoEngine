@@ -9,6 +9,11 @@
 #include <iostream>
 #include <sstream>
 
+#if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 #include "pluma/ast.hpp"
 #include "pluma/builtins.hpp"
 #include "pluma/checker.hpp"
@@ -3652,7 +3657,7 @@ std::vector<std::string> Server::handle_message(std::string_view json_payload) {
             {"capabilities", std::move(caps)},
             {"serverInfo", json::Value::object({
                                {"name", json::Value::string("pluma-lsp")},
-                               {"version", json::Value::string("0.2.1")},
+                               {"version", json::Value::string("0.2.2")},
                            })},
         });
         return {json::make_response(id, std::move(result))};
@@ -3880,6 +3885,14 @@ std::vector<std::string> Server::handle_message(std::string_view json_payload) {
 }
 
 int Server::run_stdio(std::istream& in, std::ostream& out) {
+#if defined(_WIN32)
+    // Text mode would turn the "\r\n" of each Content-Length header into
+    // "\r\r\n" and strip the client's CRs; clients then never find the header end.
+    if (&in == &std::cin && &out == &std::cout) {
+        _setmode(_fileno(stdin), _O_BINARY);
+        _setmode(_fileno(stdout), _O_BINARY);
+    }
+#endif
     std::string line;
     while (!exit_requested_ && std::getline(in, line)) {
         std::size_t content_length = 0;

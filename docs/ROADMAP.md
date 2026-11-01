@@ -7,13 +7,13 @@ when; the design behind each one is in [DESIGN.md](DESIGN.md) (the section after
 title), and what works today is in [STATUS.md](STATUS.md). Changing the roadmap is a
 design change, described in CONTRIBUTING.md ("Design Changes").
 
-37 of 55 milestones are done.
+40 of 62 milestones are done.
 
 ## Phase 0: Skeleton
 
 CMake, SDL3 window, fixed-timestep loop, input actions, logging, `Vec<T,N>`, RHI interface + GL and Vulkan backends (Vulkan pulled forward from Phase 5)
 
-**Partly done.** Done when: A window clears to a color and responds to actions, on Linux and Windows
+**Done.** Done when: A window clears to a color and responds to actions, on Linux and Windows
 
 ## Phase 1: Language core
 
@@ -43,7 +43,7 @@ particle system (gameplay + visual), collision, audio, UI nodes, binary scenes +
 
 WebGL2 export, Vulkan feature parity, tiers + migration report
 
-**Planned.** Done when: The same project runs on Linux, Windows and the web (Linux + web done and verified, docs/WEB.md; Windows validation is in progress on Intel Arc integrated graphics and an RTX 4070 on the Core Ultra 9 185H laptop: the Clang debug build passes `ctest` and reaches the Linux hashes, docs/WINDOWS.md)
+**Done.** Done when: The same project runs on Linux, Windows and the web
 
 - **5.5 Performance core (§4.15)** (done). activate the job system, explicit SIMD (AVX2 / WASM SIMD128), sub-seeded RNG streams, secondary spatial hash for large shapes
   Done when: The particle demo's sim time scales with worker count, SIMD and scalar paths are bit-identical, and the replay hash is unchanged at 1 and N threads
@@ -67,7 +67,7 @@ AOT-to-C, cycle collector, manual memory, packing, export
 
 formatter, LSP, debugger, animation (cutout, skeletal, morph), docs (expanded as 8.4)
 
-**Planned.** Done when: Someone else makes a game with it (tooling done, animation deferred to 9.4: formatter and LSP, debugger over DAP, and profiler, §5.14 "Clarified (Phase 8 — ...)"; the VS Code extension `tools/vscode-pluma`; docs/GUIDE.md with the `examples/tutorial` game and the generated docs/API.md, expanded further by 8.4. All of 8.1-8.9 are done; the done-when needs an outside user to confirm)
+**Planned.** Done when: Someone else makes a game with it (tooling done, animation deferred to 9.4: formatter and LSP, debugger over DAP, and profiler, §5.14 "Clarified (Phase 8 — ...)"; the VS Code extension `tools/vscode-pluma`; docs/GUIDE.md with the `examples/tutorial` game and the generated docs/API.md, expanded further by 8.4. All of 8.1-8.9 are done; the original done-when asked for an outside user. A game built from the docs and the v0.2.1 release found them sufficient, and the outside-user confirmation is no longer a gate)
 
 - **8.1 Brand integration (§4.16)** (done). Cuervo Mark, wordmark, palette and type from the design kit, synced into `assets/brand/`, plus generated color tokens
   Done when: The editor and runtime show the mark as window icon and splash in light and dark themes, and a sync script regenerates the brand assets from the kit
@@ -169,13 +169,16 @@ rollback/lockstep networking, raster processes and sprite pipeline, custom shade
 **Planned.** Done when: A networked two-player game with a localized UI, a custom post-process shader and an atlas-based sprite scene is shipped and profiled
 
 - **11.1 Networking (§4.19)** (planned). transport, lockstep and rollback on the deterministic sim, HTTP and WebSocket
-  Done when: Two clients on different machines (native and web) stay in sync, with the same state hash every tick
+  Done when: Two clients on different machines (native and web) stay in sync, with the same state hash every tick; starts after 11.1a
+
+- **11.1a Cross-hardware determinism matrix (§4.1)** (done). the replay and state-hash suite on varied CPUs and GPUs (AMD, Intel and NVIDIA; AVX2 and SSE2-only CPUs; Linux, Windows and browsers), as the gate for 11.1
+  Done when: Every reference example's recorded replay verifies with the same per-tick hashes on at least six distinct hardware configurations, wherever platforms claim to share a hash, and the matrix is recorded in docs/PERFORMANCE.md
 
 - **11.2a Raster processes (§4.19)** (planned). image import, texture atlasing, sprite sheet slicing, SVG rasterized fallback, textured quad batcher, `Sprite2D`/`AnimatedSprite2D`, 9-slice, filtering modes
   Done when: An atlas-batched sprite scene with 9-slice panels and rasterized SVG fallbacks renders identically on Vulkan, GL and WebGL2
 
-- **11.2b Shaders, post-processing and linear color (§4.19)** (planned). user shaders (GLSL 450), parameter binding in inspector, off-screen render targets, multi-pass post-processing (bloom, blur, blits), optional linear color space
-  Done when: A custom user shader and a multi-pass post-process effect render identically on Vulkan and GL; `project.toml` supports `color_space = "srgb"` or `"linear"`
+- **11.2b Shaders, post-processing and linear color (§4.19)** (planned). user shaders (GLSL 450), parameter binding in inspector, off-screen render targets, multi-pass post-processing (bloom, blur, blits), additive and screen blend modes for shapes and particles, optional linear color space
+  Done when: A custom user shader and a multi-pass post-process effect render identically on Vulkan and GL; an emitter's particles draw with an additive glow without stacked shapes; `project.toml` supports `color_space = "srgb"` or `"linear"`
 
 - **11.2c Text scenes on save (§4.19)** (planned). human-readable text format becomes the default save format in `scenes/`; automatic compile to binary `.pak` on export
   Done when: Saving in the editor writes human-readable scene text that Git can 3-way auto-merge without binary merge conflicts; release exports pack them into binary `.scene` files with zero runtime overhead
@@ -186,37 +189,52 @@ rollback/lockstep networking, raster processes and sprite pipeline, custom shade
 - **11.4 Profiling and save API (§4.19)** (planned). frame/job/GPU profiler, memory profiler, general save/load and settings API
   Done when: A profile of the shmup shows per-system tick cost, and a game saves and restores progress and settings
 
+- **11.5 Documentation consistency and onboarding (§4.16)** (planned). fix the contradictions found in review (`int` width, "no imports" although `import` ships, the version in this file's header, Windows called experimental in GUIDE), check them, add a README quickstart and GIF, a CLI reference, a "Frame composition" section (world, `apply_lights`, canvas layers, overlays, and how the view carries over), a light-budget pattern for lit games, and plainer user-facing pages without the milestone narrative
+  Done when: `docs_site` fails when a document states a version, platform support level, phase number or `int` width that disagrees with its source of truth (the CMake version, `docs/support.json`, this table, the language reference); the README and the site's landing page open with a quickstart and a gameplay GIF; the README and landing page show a gameplay GIF and the benchmark table
+
+- **11.6 Automation and CLI (§4.11)** (planned). `--help` for `cuervo` and `cuervo-tools` listing every flag, `--press` driving axes (`60-300:move=1,0`), the screenshot tick default documented, and a non-zero exit when scripts fail to compile or panic in a headless run
+  Done when: Every runtime flag appears in `--help` and in the generated CLI reference (checked by a test); a CI smoke test moves a player through an axis with `--press`; a headless run with a script error exits non-zero
+
+- **11.7a Editor QoL: preview and replays (§4.13)** (planned). an editor-visible scene preview that runs `ready()`, stable input-action IDs, replay snapshots for backward seeking
+  Done when: Scripted nodes show their `ready()` state in the scene view without pressing Play; adding, removing or reordering input actions keeps older replays playable; seeking backward in a replay resumes from a snapshot instead of re-simulating from the start
+
+- **11.7b Editor QoL: workspace (§4.13)** (planned). panels on multiple monitors, OS file drag-and-drop into the asset browser and the viewport (moved from 12.3), editor UI scale
+  Done when: A panel undocked onto a second monitor is restored with the saved layout; an image, SVG, sound or font dropped from the OS is imported; the editor is usable at 200% UI scale
+
+- **11.7c Editor QoL: raster and particle tooling (§4.13)** (planned). image preview, atlas and slice tools, `Sprite2D`, `AnimatedSprite2D` and 9-slice inspectors (after 11.2a), and a particle editor panel (moved from 12.1)
+  Done when: The 11.2a sprite scene is assembled in the editor from imported images without code, and an `Emitter2D` effect is tuned live in the particle panel and saved in its scene
+
+- **11.8 Colliding-bullet capacity (§4.15)** (planned). measure and publish colliding-particle throughput separately from draw-only particle counts
+  Done when: docs/PERFORMANCE.md and the README state draw-only and colliding counts separately (today about 1M+ draw-only at 60 fps and about 52k colliding at about 0.5 ms per tick on 8 threads); `tools/bench.py` records the colliding workload with regression thresholds; a colliding-bullet demo holds 60 fps at the published count on the reference machine, with 1M colliding as the stretch target
+
+- **11.9 Web hardening (§4.11)** (planned). saves that survive a reload (IndexedDB behind the 11.4 save API), audio moved off the deprecated Web Audio backend, Firefox in the web smoke tests, WebGPU promoted from Experimental
+  Done when: A web game's saves survive a page reload; `examples/shmup` reaches its dev state hash in Chrome and Firefox in CI; STATUS lists WebGPU as Stable
+
 ## Phase 12: Content tools, AI and accessibility (§4.20)
 
 dialogue and cutscene tools, particle and shader editors, behavior trees and steering, accessibility, the ECS resolution
 
 **Planned.** Done when: A narrative game with AI enemies and a screen-reader-usable menu is built mostly in the editor
 
-- **12.1 Content tools (§4.20)** (planned). visual node-graph canvas (`imgui-node-editor`), dialogue and cutscene/timeline editor, particle editor UI, visual shader editor
-  Done when: A cutscene with dialogue and a particle effect is authored without code using visual graph panels
+- **12.1 Content tools (§4.20)** (planned). visual node-graph canvas (`imgui-node-editor`), dialogue and cutscene/timeline editor, visual shader editor (the particle editor panel moved to 11.7c)
+  Done when: A cutscene with dialogue and a particle effect is authored without code using visual graph panels and the 11.7c particle panel
 
 - **12.2 AI (§4.20)** (planned). behavior trees, state-machine tool, steering behaviors
   Done when: An enemy with a behavior tree is built and debugged in the editor
 
-- **12.3 Accessibility and editor polish (§4.20)** (planned). AccessKit integration (screen-reader support), UI scaling, remapping, desktop file drag-and-drop, crisp DPI font oversampling
-  Done when: The shmup menus can be used with a screen reader and at 200% UI scale; platform screen readers read UI elements via AccessKit; desktop file drag-and-drop into viewport functions
+- **12.3 Accessibility and editor polish (§4.20)** (planned). AccessKit integration (screen-reader support), UI scaling, remapping, crisp DPI font oversampling (desktop file drag-and-drop moved to 11.7b)
+  Done when: The shmup menus can be used with a screen reader and at 200% UI scale; platform screen readers read UI elements via AccessKit
 
 - **12.4 The ECS resolution (§4.20)** (planned). finalize the Hybrid Architecture (Godot-style `Node2D` hierarchy for scene logic + contiguous internal SoA pools exposed via Pluma query loops)
   Done when: The decision is documented: scripts iterate bulk entities via deterministic queries (`for e in query(Enemy)`) in the job system without exposing raw low-level ECS internals
 
-## Phase 13: Extended Platforms & drop-in console SDKs (§4.21)
+## Phase 13: Extended Platforms & drop-in console SDKs (long term) (§4.21)
 
 macOS (MoltenVK), iOS, Android (SDL3 + GLES 3.0), mobile lifecycle/thermal mitigation, drop-in Console C ABI
 
 **Planned.** Done when: The shmup runs natively on a Mac, iPhone, and Android device; developers with private console DevKits drop closed-source C ABI shims in without engine forks
 
-## Phase 14: Zero-bloat 3D Expansion (§4.22)
-
-3D rendering pipeline, 3D math (`Vec<T,N>`), 3D scene/camera transforms, glTF import, PBR materials
-
-**Planned.** Done when: A full 3D scene runs with PBR materials and 3D transforms; 2D exports strip all 3D pipelines via Milestone 7.5 dead-code elimination with 0 bytes overhead
-
-## Phase 15: First-party jumpstart ecosystem (§4.23)
+## Phase 14: First-party jumpstart ecosystem (long term) (§4.22)
 
 official C ABI plugin wrappers (`cuervo-steamworks`, `cuervo-spine`, `cuervo-fmod`, `cuervo-console-template`) and genre showcase demos
 

@@ -34,7 +34,7 @@ The engine is licensed under the [MIT License](../LICENSE.md).
 | Web, WASM threads | Experimental | Web | `compatible` | Opt-in (`CUERVO_WEB_THREADS`, presets `web-threads` and `web-pack-threads`); the page must be cross-origin isolated. |
 | Web, Firefox and Safari | Experimental | Web | `compatible` | Untested; any WebGL2 browser should work. |
 | Windows 10/11 x86-64 | Stable | Windows (desktop only) | - | Milestone 10.5a. MSVC, MinGW-w64 GCC and Clang builds have zero warnings and pass the test suite (CI: MSVC Release, MinGW-w64 Debug), and the shmup reaches the Linux state hash on GL and Vulkan. UTF-8 code page and console, per-monitor DPI awareness, a GUI-subsystem player. See [WINDOWS.md](WINDOWS.md). |
-| macOS, iOS, Android, consoles | Unsupported | - | - | Only the long-term Phase 14 mentions them. |
+| macOS, iOS, Android, consoles | Unsupported | - | - | Only the long-term Phase 13 mentions them. |
 <!-- support-matrix:end platforms -->
 
 ## Rendering
@@ -136,7 +136,6 @@ Generated from `docs/support.json`; the `support_tiers` test checks it against t
 | General ECS exposed to scripts | Planned | - | - | Milestone 12.4 decides whether to expose it or drop it. |
 | Networking (lockstep, rollback), HTTP and WebSocket | Planned | - | - | Milestone 11.1. |
 | Localization, save and settings API, accessibility features | Planned | - | - | Milestones 11.3, 11.4 and 12.3. Today games save through `Scene.save`. |
-| 3D | Unsupported | - | - | Phase 13, long term. |
 <!-- support-matrix:end simulation -->
 
 ## The Pluma language and its tools
@@ -148,8 +147,8 @@ Generated from `docs/support.json`; the `support_tiers` test checks it against t
 | Collections, strings, `Result` and `?`, math, geometry, noise, seeded `Rng` | Stable | Linux, Windows, Web | - | The same results in the VM and in AOT. |
 | Memory model (refcounting, cycle collector, opt-in manual memory) | Stable | Linux, Windows, Web | - |  |
 | AOT-to-C compilation | Stable | Linux, Windows (desktop only) | - | Host platform only: the export host must be the target (Linux or Windows). Needs a C compiler. On Windows the C compiler is LLVM clang with every toolchain (docs/WINDOWS.md). Not used for web exports (web games ship scripts as source); an AOT export for another platform is refused. |
-| Formatter, language server, VS Code extension | Stable | Linux, Windows (desktop only) | - | `cuervo-tools fmt`, `cuervo-tools lsp`, [the extension](../tools/vscode-pluma/README.md). Host tools. |
-| Debugger (DAP) and profiler | Stable | Linux, Windows (desktop only) | - | On the VM only; not available for AOT-native exports or the web. |
+| Formatter, language server, VS Code extension | Stable | Linux, Windows (desktop only) | - | `cuervo-tools fmt`, `cuervo-tools lsp`, [the extension](../tools/vscode-pluma/README.md). Host tools. On Windows the server puts stdio in binary mode so the `Content-Length` header is exact (`stdio_framing` test). |
+| Debugger (DAP) and profiler | Stable | Linux, Windows (desktop only) | - | On the VM only; not available for AOT-native exports or the web. On Windows stdio is in binary mode so the `Content-Length` header is exact (`stdio_framing` test). |
 | Modules, `import` and packages | Stable | Linux, Windows, Web | - | Milestone 10.5b: `import`, `pub` across packages, `[dependencies]` with pinned versions (vendored or by path), packed into exports; see [PACKAGES.md](PACKAGES.md). `examples/garden` reaches its dev state hash from source and AOT packs on Linux, on Windows and in headless Chrome. Packages are shared through registries (10.5d). |
 | Unit tests (`@test`) | Stable | Linux, Windows (desktop only) | - | Milestone 10.5b: `plm test` and `cuervo-tools test` run a game's or a package's `@test` functions, each in a fresh session; left out of builds. See [LANGUAGE.md](LANGUAGE.md) 9.27. Host tools. |
 | Plugin API, FFI, embedding | Stable | Linux, Windows (desktop only) | - | Milestone 10.5c: native plugins over one C ABI (version 1) in C++, Rust and C# (.NET, desktop only), with nodes, natives and importers; C++ and Rust plugins link statically into AOT exports. `@extern` calls C functions ([LANGUAGE.md](LANGUAGE.md) 9.28); `pluma/embed/pluma_embed.h` hosts the VM from C. See [PLUGINS.md](PLUGINS.md). Not on the web yet. |

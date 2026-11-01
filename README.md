@@ -38,7 +38,7 @@ Linux, Windows (MSVC, MinGW-w64 and Clang builds) and the web are supported
 | Windows 10/11 x86-64 | Stable |
 | macOS, iOS, Android, consoles | Unsupported |
 
-57 features are classified (41 stable, 5 experimental, 9 planned, 2 unsupported). The `compatible` render tier runs everywhere; the `full` tier is desktop Vulkan only, and the tier check and the exporter refuse a project that claims more than its target provides. Details, per-feature platforms and the tier guarantees: [docs/STATUS.md](docs/STATUS.md).
+56 features are classified (41 stable, 5 experimental, 9 planned, 1 unsupported). The `compatible` render tier runs everywhere; the `full` tier is desktop Vulkan only, and the tier check and the exporter refuse a project that claims more than its target provides. Details, per-feature platforms and the tier guarantees: [docs/STATUS.md](docs/STATUS.md).
 <!-- support-matrix:end summary -->
 
 

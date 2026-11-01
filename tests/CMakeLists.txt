@@ -142,6 +142,16 @@ if(TARGET rhi_parity AND CUERVO_FEATURE_AUDIO AND CUERVO_FEATURE_UI AND CUERVO_F
     set_tests_properties(rhi_parity PROPERTIES TIMEOUT 300)
 endif()
 
+# The LSP and DAP programs' real stdout bytes (header framing; tests/stdio_framing.cmake).
+if(TARGET cuervo_tools AND TARGET runtime)
+    add_test(NAME stdio_framing COMMAND ${CMAKE_COMMAND}
+        -DTOOLS=$<TARGET_FILE:cuervo_tools>
+        -DRUNTIME=$<TARGET_FILE:runtime>
+        -DOUT=${CMAKE_CURRENT_BINARY_DIR}/stdio_framing
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/stdio_framing.cmake)
+    set_tests_properties(stdio_framing PROPERTIES TIMEOUT 120)
+endif()
+
 # docs/API.md is generated from the engine prelude (`cuervo-tools docs`), so
 # it can't drift from what scripts can call. Only a build with every optional
 # prelude compiled in generates the whole reference.

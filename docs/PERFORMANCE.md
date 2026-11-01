@@ -461,6 +461,57 @@ Still true from the first baseline: Vulkan was slower than GL at small loads (1k
 0.22 ms p95 in debug, 0.12 against 0.07 ms in release) and faster from 50k in release; at the
 capacity limit Vulkan is now the faster backend.
 
+## Cross-hardware determinism matrix
+
+The simulation promises the same state hash on every machine, backend, job count and SIMD
+setting (DESIGN.md 4.1). `tools/determinism_matrix.py` checks that: it plays the ten
+reference examples to tick 240 with the scripted input of the examples sweep and compares each
+state hash with `tests/determinism/golden.json`. Every example runs on `--jobs 1`, `--jobs 4`
+and with `--simd off`, on every backend the machine has. The raw results of the runs below are in
+`docs/perf/determinism/`, and the generated table is `docs/perf/determinism/matrix.md`.
+
+| Configuration | OS | CPU (ISA) | GPU | Backends | Runs |
+|---|---|---|---|---|---|
+| Desktop | Arch Linux | Ryzen 7 5800X3D (AVX2, FMA) | NVIDIA RTX 3060 Ti | GL, Vulkan | 60/60 |
+| Old laptop | Ubuntu 26.04 | AMD A6-5200 (AVX, no AVX2, no FMA) | AMD Radeon HD 8400 (radeonsi, RADV) | GL, Vulkan | 60/60 |
+| New laptop | Windows 11 (MSVC) | Core Ultra 9 185H (AVX2) | NVIDIA RTX 4070 Laptop | GL, Vulkan | 60/60 |
+| New laptop | Windows 11 (MSVC) | Core Ultra 9 185H (AVX2) | Intel Arc iGPU | GL, Vulkan | 60/60 |
+| Desktop, Chrome | Arch Linux | Ryzen 7 5800X3D | NVIDIA RTX 3060 Ti | WebGPU, WebGL2 | 20/20 |
+| Desktop, Firefox | Arch Linux | Ryzen 7 5800X3D | NVIDIA RTX 3060 Ti | WebGL2 | 10/10 |
+
+Every row matches the golden hashes, 240 native and 30 browser runs. The hashes do not depend on the
+backend, the GPU vendor, the job count, the operating system, the compiler (GCC, MSVC) or the
+SIMD path, including a real CPU without AVX2 or FMA. The browser runs use the web export of each
+example (WASM SIMD, one thread).
+
+What a matching hash means: the state hash fingerprints the particle pools and RNG streams, physics body
+state, the tick, the animation digest and the numeric script globals (`ScriptHost::state_hash`). It does not
+cover scene node properties that no hashed value carries, collision world state, strings, lists, class fields,
+UI or audio, so the matrix proves agreement on that state only. Each run is 240 ticks (4 seconds at 60 Hz) of
+scripted input with a fixed seed, which shows little accumulated rounding drift.
+
+What the matrix does not cover: Apple and ARM machines; CPUs without AVX at all (SSE2 is
+exercised through `--simd off` and by the AVX-only CPU, not by SSE2-only silicon); Safari; WebGPU in
+Firefox (Firefox on Linux has none, so it runs the WebGL2 fallback); Linux on the Intel laptop; and Vulkan with threads in the browser. Windows reports its instruction sets through
+`IsProcessorFeaturePresent`, which has no entry for FMA or BMI2.
+
+### Running it
+
+```sh
+# On each machine, with a Release build of the runtime (and the example sources):
+python3 -I tools/determinism_matrix.py run --runtime build/release/runtime/cuervo --out results/ --backends gl vulkan
+# Browsers: export every example for the web and run it in headless Chrome (WebGPU, WebGL2) or Firefox
+python3 -I tools/determinism_matrix.py web --tools build/release/tools/cuervo_tools/cuervo-tools --out results/
+python3 -I tools/determinism_matrix.py web --firefox --tools build/release/tools/cuervo_tools/cuervo-tools --out results/
+# Compare everything (exit 1 on a mismatch):
+python3 -I tools/determinism_matrix.py report --golden tests/determinism/golden.json results/*.jsonl
+```
+
+Headless runs work over SSH: GL and Vulkan use SDL's offscreen driver when there is no display
+(Mesa and the Windows drivers provide a headless surface). `golden` writes new reference hashes
+from a set of results that agree with each other, which is needed when a deliberate change alters
+the simulation. The matrix needs the machines, so it is not part of CI.
+
 ## Ceiling and caps
 
 The engine holds two million particles at once without hitting a cap (the particle pool's default

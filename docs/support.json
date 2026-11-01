@@ -136,7 +136,7 @@
      "desktop_only": false,
      "web": false,
      "tier": "none",
-     "note": "Only the long-term Phase 14 mentions them."
+     "note": "Only the long-term Phase 13 mentions them."
     }
    ]
   },
@@ -519,16 +519,6 @@
      "web": false,
      "tier": "none",
      "note": "Milestones 11.3, 11.4 and 12.3. Today games save through `Scene.save`."
-    },
-    {
-     "id": "3d",
-     "name": "3D",
-     "status": "unsupported",
-     "platforms": [],
-     "desktop_only": false,
-     "web": false,
-     "tier": "none",
-     "note": "Phase 13, long term."
     }
    ]
   },
@@ -602,7 +592,7 @@
      "desktop_only": true,
      "web": false,
      "tier": "none",
-     "note": "`cuervo-tools fmt`, `cuervo-tools lsp`, [the extension](../tools/vscode-pluma/README.md). Host tools."
+     "note": "`cuervo-tools fmt`, `cuervo-tools lsp`, [the extension](../tools/vscode-pluma/README.md). Host tools. On Windows the server puts stdio in binary mode so the `Content-Length` header is exact (`stdio_framing` test)."
     },
     {
      "id": "debugger",
@@ -615,7 +605,7 @@
      "desktop_only": true,
      "web": false,
      "tier": "none",
-     "note": "On the VM only; not available for AOT-native exports or the web."
+     "note": "On the VM only; not available for AOT-native exports or the web. On Windows stdio is in binary mode so the `Content-Length` header is exact (`stdio_framing` test)."
     },
     {
      "id": "modules",

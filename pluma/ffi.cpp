@@ -84,6 +84,8 @@ void* open_library(const std::string& name, std::string& error) {
         error = std::format("can't load library '{}' (error {})", name, ::GetLastError());
         return nullptr;
     }
+    g_libraries.emplace(name, Library{h});
+    return h;
 #else
     void* h = ::dlopen(name.empty() ? nullptr : name.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (h == nullptr) {
@@ -91,9 +93,9 @@ void* open_library(const std::string& name, std::string& error) {
         error = std::format("can't load library '{}': {}", name, why != nullptr ? why : "");
         return nullptr;
     }
-#endif
     g_libraries.emplace(name, Library{h});
     return h;
+#endif
 }
 
 void* find_symbol(void* lib, const std::string& symbol) {
