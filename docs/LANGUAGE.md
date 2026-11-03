@@ -1,6 +1,6 @@
 # Pluma Grammar Specification
 
-> Status: Beta (v0.1). Companion to [DESIGN.md](DESIGN.md) §5, which covers
+> Status: Beta (v0.3). Companion to [DESIGN.md](DESIGN.md) §5, which covers
 > semantics (memory, types, execution). This document covers **syntax**.
 > Pluma is the scripting language of Cuervo Engine; script files use the extension `.plm`.
 >
@@ -912,6 +912,28 @@ DESIGN.md 5.10 has the runtime model; these are the language rules.
   context-aware completion (`expr.`, `expr?.`, `Type.`, `self.`, `#name`, `@attribute`,
   scope locals/fields/globals/keywords), signature help, document and workspace symbols,
   formatting, and quickfix code actions from diagnostic `FixIt`s.
+
+- **Lint warnings (`pluma/lint.hpp`, `ServerOptions::lint_warnings`, default on):** every
+  warning carries a stable code in `Diagnostic::code` / `DiagnosticItem::code` (and the
+  LSP `code` field). Decision: warnings never change what compiles. Codes: `unused-variable`
+  (a local `var`/`const` never mentioned again in its function; `_`-prefixed names are
+  exempt; not reported in a file that has errors), `unused-import` (an `import`ed name,
+  alias or listed item spelled nowhere else in the file, string interpolations included),
+  `unreachable-code` (the first statement after `return`/`break`/`continue` in the same
+  block), and `style` (the style checker above).
+- **Incremental lexing (`Lexer::tokenize_line`):** lexes one line given the `LineState` the
+  previous line ended in (nested block comments and `"""` strings are the only constructs
+  that span lines) and returns the tokens, comments included, plus the end state. An editor
+  re-lexes from the first changed line and stops at the first line whose end state equals
+  its cache. Results equal the whole-file `tokenize` except that an unterminated one-line
+  string is one error token to the end of the line.
+- **Semantic tokens (`Server::semantic_tokens`, `textDocument/semanticTokens/full`):**
+  name-resolved tokens (type, function, variable, parameter, property, enumMember, constant)
+  plus lexer keywords, sorted by position. Uses of a folded `const` are not reported.
+- **In-process debugging (`pluma::dap::LocalTransport`):** a thread-safe queue pair so an
+  editor drives the `Debugger` without a socket. Decision: breakpoint changes may be sent at
+  any time; while stopped they apply at once, while running at the host's next `poll()`
+  (once per frame), never mid-frame.
 
 ### 9.16 Collections
 DESIGN.md 4.17 (9.2a) lists them; these are the rules. Iteration order is always defined

@@ -15,6 +15,12 @@
 
 namespace pluma {
 class VM;
+class SnapshotReader;
+class SnapshotWriter;
+} // namespace pluma
+
+namespace cuervo {
+class StateHasher;
 }
 
 namespace cuervo::physics {
@@ -283,6 +289,25 @@ public:
 
     // Deterministic state digest across worker counts.
     std::uint64_t state_hash() const;
+
+    // ---- simulation snapshots (DESIGN.md 4.8, milestone 11.7a)
+    // The Box2D world image (b2World_GetSnapshot: contacts, warm starting, islands) plus the
+    // handle records. Owner references are not copied: save_state writes them to the pluma
+    // snapshot stream in a fixed order and restore_state reads them back.
+    struct State;
+    struct StateDeleter {
+        void operator()(State* s) const;
+    };
+    using StatePtr = std::unique_ptr<State, StateDeleter>;
+    // Null with `w.fail` set when the world cannot be saved (mid-step).
+    StatePtr save_state(pluma::SnapshotWriter& w) const;
+    // Releases every owner reference (before restore_state).
+    void drop_owners();
+    // Restores in place: handles and ids stay valid for what existed at save time. False: the
+    // world is unusable (corrupt image) and must be cleared.
+    bool restore_state(const State& state, pluma::SnapshotReader& r);
+    // Everything state_hash() leaves out that the simulation depends on (the whole Box2D image).
+    void hash_deep(StateHasher& h) const;
 
 private:
     struct BodyRecord {

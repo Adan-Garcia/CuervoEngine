@@ -2,8 +2,9 @@
 // play session, save and load replay files (cuervo/input/replay.hpp), and
 // play one back in the scene view with a timeline. Every replayed tick's
 // state hash is compared with the recorded one; the first mismatching tick
-// is flagged on the timeline. Seeking backwards re-simulates from the start
-// (the VM has no snapshots), forward seeks simulate ahead.
+// is flagged on the timeline. Seeking backwards resumes from the nearest
+// simulation snapshot (PlayController keeps one every second of play), forward
+// seeks simulate ahead.
 
 #include <imgui.h>
 #include <imgui_stdlib.h>
@@ -13,7 +14,7 @@
 
 #include "cuervo/core/log.hpp"
 #include "editor/app.hpp"
-#include "editor/theme.hpp"
+#include "editor/imgui_theme.hpp"
 #include "editor/panels.hpp"
 
 namespace cuervo::editor {

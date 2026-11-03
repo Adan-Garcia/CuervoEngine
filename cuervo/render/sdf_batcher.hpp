@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -53,6 +54,12 @@ enum class SdfShape : std::uint32_t {
     Sector = 4,      // circular sector centered on local x with half-angle param
     Arc = 5,         // annular arc band with round caps, centered on local x
 };
+
+// How a run of instances composites (DESIGN.md 4.4, 11.2b). The shader outputs
+// premultiplied color, so Additive is src + dst (a glow that sums where shapes
+// overlap) and Screen is src + dst*(1 - src) (a glow that never exceeds white).
+enum class SdfBlend : std::uint8_t { Normal, Additive, Screen };
+inline constexpr std::size_t sdf_blend_count = 3;
 
 // GPU instance layout; must match cuervo/render/shaders/sdf.vert (stream 1).
 // `half_size` is always the shape's local bounding half-extent:
@@ -119,8 +126,16 @@ public:
 
     void clear() {
         instances_.clear();
+        blend_runs_.clear();
         flushed_ = 0;
     }
+    // Instances added from now on composite with `blend` (until the next call).
+    // A flush draws each run with its own pipeline, in submission order.
+    void set_blend(SdfBlend mode) { set_blend_from(instances_.size(), mode); }
+    // Same, for the instances from `index` on: for callers that append a span
+    // and fill it later (index <= size(), never before an earlier run's start).
+    void set_blend_from(std::size_t index, SdfBlend mode);
+    SdfBlend blend() const { return blend_runs_.empty() ? SdfBlend::Normal : blend_runs_.back().blend; }
     void reserve(std::size_t count) { instances_.reserve(count); }
     void add(const SdfInstance& instance) { instances_.push_back(instance); }
     // Appends `count` instances for the caller to fill (several jobs may fill
@@ -173,7 +188,14 @@ private:
     bool ensure_capacity(std::size_t count);
 
     rhi::Device* device_ = nullptr;
-    rhi::PipelineHandle pipeline_;
+    rhi::PipelineHandle pipeline(SdfBlend mode);
+
+    struct BlendRun {
+        std::size_t first;
+        SdfBlend blend;
+    };
+    std::array<rhi::PipelineHandle, sdf_blend_count> pipelines_{};
+    std::vector<BlendRun> blend_runs_; // empty = every instance Normal
     rhi::BufferHandle quad_vertices_;
     rhi::BufferHandle quad_indices_;
     rhi::BufferHandle instance_buffer_;

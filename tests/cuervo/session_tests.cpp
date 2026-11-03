@@ -6,6 +6,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <algorithm>
 #include <iterator>
 
 #include "cuervo/input/replay.hpp"
@@ -167,12 +168,175 @@ TEST_CASE("game session: a recorded run replays bit for bit on 1 and 8 threads")
     changed.frames[100].held ^= 1; // `shoot` at tick 101
     c = script::verify_replay(shmup_dir, changed, shmup_options(1));
     CHECK_FALSE(c.ok);
-    // A project whose actions moved is refused.
-    Replay moved = *loaded;
-    std::swap(moved.actions[0], moved.actions[1]);
-    c = script::verify_replay(shmup_dir, moved, shmup_options(1));
+    // A replay that presses an action the project does not have is refused, one that never presses it is not.
+    Replay gone = *loaded;
+    gone.actions[0] = "no_such_action";
+    gone.action_ids[0] = 0xdeadbeefu;
+    c = script::verify_replay(shmup_dir, gone, shmup_options(1));
     CHECK_FALSE(c.ok);
-    CHECK(c.error.find("input actions") != std::string::npos);
+    CHECK(c.error.find("no_such_action") != std::string::npos);
+}
+
+namespace {
+
+// A copy of the shmup project whose [input.actions] lines are in another order, one action removed and
+// one renamed (with its ID kept in [input.action_ids]).
+fs::path reordered_shmup() {
+    const fs::path dir = temp_dir("reordered_shmup");
+    fs::copy(shmup_dir, dir, fs::copy_options::recursive);
+    std::string toml = read_text(dir / "project.toml");
+    const std::size_t a = toml.find("[input.actions]");
+    const std::size_t b = toml.find("[input.axes]");
+    REQUIRE(a != std::string::npos);
+    REQUIRE(b != std::string::npos);
+    std::vector<std::string> lines;
+    std::string block = toml.substr(a, b - a);
+    std::size_t pos = block.find('\n') + 1;
+    while (pos < block.size()) {
+        const std::size_t nl = block.find('\n', pos);
+        std::string line = block.substr(pos, nl - pos);
+        if (!line.empty() && line[0] != '#') lines.push_back(line);
+        pos = nl + 1;
+    }
+    std::reverse(lines.begin(), lines.end());
+    std::string out = "[input.actions]\nextra_action = [\"Key.F9\"]\n";
+    for (const std::string& l : lines) out += l + "\n";
+    out += "\n[input.action_ids]\nextra_action = 777\n\n";
+    toml.replace(a, b - a, out);
+    write_text(dir / "project.toml", toml);
+    return dir;
+}
+
+}
+
+TEST_CASE("replay: reordering, adding and removing input actions keeps older replays playable") {
+    std::string error;
+    Replay recorded;
+    {
+        script::GameSession s;
+        REQUIRE_MESSAGE(s.init(shmup_options(1), error), error);
+        s.set_presses("30:ui_accept,90:shoot,91:shoot,92:shoot,120:bomb,200:focus");
+        s.start_recording();
+        DeviceState devices;
+        for (int i = 0; i < 300; ++i) s.tick(s.sample(devices, {0.0f, 0.0f}));
+        recorded = s.recorded();
+    }
+    REQUIRE(recorded.action_ids.size() == recorded.actions.size());
+    const fs::path moved = reordered_shmup();
+
+    // The project's actions are in the opposite order now, and `extra_action` is new.
+    {
+        script::GameSession s;
+        script::SessionOptions o = shmup_options(1);
+        o.dir = moved;
+        REQUIRE_MESSAGE(s.init(o, error), error);
+        CHECK(s.input_map().action_names().front() == "extra_action");
+        CHECK(s.input_map().action_ids().front() == 777);
+        CHECK(s.input_map().action_names() != recorded.actions);
+    }
+    // Version 3 (IDs) and version 2 (names only) both verify in the changed project.
+    for (std::uint32_t version : {3u, 2u}) {
+        INFO("file version " << version);
+        const std::vector<std::byte> bytes = write_replay(recorded, version);
+        auto loaded = read_replay(bytes, error);
+        REQUIRE_MESSAGE(loaded, error);
+        CHECK(loaded->action_ids.empty() == (version < 3));
+        script::ReplayCheck c = script::verify_replay(moved, *loaded, shmup_options(1));
+        CHECK_MESSAGE(c.error.empty(), c.error);
+        CHECK(c.ok);
+        CHECK(c.compared == 300);
+        CHECK(c.final_hash == recorded.hashes.back());
+    }
+    // A replay recorded in the changed project plays in the original one.
+    {
+        script::GameSession s;
+        script::SessionOptions o = shmup_options(1);
+        o.dir = moved;
+        REQUIRE_MESSAGE(s.init(o, error), error);
+        s.set_presses("30:ui_accept,90:shoot,91:shoot,92:shoot,120:bomb,200:focus,250:extra_action");
+        s.start_recording();
+        DeviceState devices;
+        for (int i = 0; i < 300; ++i) s.tick(s.sample(devices, {0.0f, 0.0f}));
+        Replay from_moved = s.recorded();
+        script::ReplayCheck c = script::verify_replay(moved, from_moved, shmup_options(1));
+        CHECK(c.ok);
+        CHECK(c.final_hash == recorded.hashes.back()); // the extra action does nothing in this game
+        c = script::verify_replay(shmup_dir, from_moved, shmup_options(1));
+        CHECK_MESSAGE(c.error.find("extra_action") != std::string::npos, c.error); // pressed, and gone there
+    }
+}
+
+TEST_CASE("replay: version 3 round trip, stable ids and renames") {
+    Replay r;
+    r.actions = {"shoot", "bomb"};
+    r.action_ids = {7, 9};
+    r.axes = {"move.x"};
+    InputFrame f;
+    f.held = 0b10;
+    r.frames = {f};
+    std::string error;
+    auto back = read_replay(write_replay(r), error);
+    REQUIRE(back);
+    CHECK(back->action_ids == r.action_ids);
+    CHECK(back->actions == r.actions);
+
+    InputMap map;
+    map.set_action(Name("fire"), std::span<const Binding>{}, 7);   // `shoot` renamed, same ID
+    map.set_action(Name("bomb"), std::span<const Binding>{}, 9);
+    map.set_axis(Name("move.x"), std::span<const AxisSource>{});
+    Replay adapted = *back;
+    REQUIRE_MESSAGE(adapt_replay_input(adapted, map, error), error);
+    CHECK(adapted.actions == map.action_names());
+    CHECK(adapted.frames[0].held == 0b10);
+    // Reordering moves the bit.
+    InputMap flipped;
+    flipped.set_action(Name("bomb"), std::span<const Binding>{}, 9);
+    flipped.set_action(Name("fire"), std::span<const Binding>{}, 7);
+    flipped.set_axis(Name("move.x"), std::span<const AxisSource>{});
+    adapted = *back;
+    REQUIRE(adapt_replay_input(adapted, flipped, error));
+    CHECK(adapted.frames[0].held == 0b01);
+    // Without IDs (a version 2 file) the names match.
+    Replay v2 = *read_replay(write_replay(r, 2), error);
+    REQUIRE(adapt_replay_input(v2, flipped, error));
+    CHECK(v2.frames[0].held == 0b01);
+    // A removed action that was pressed is an error; one that was not is dropped.
+    InputMap fewer;
+    fewer.set_action(Name("fire"), std::span<const Binding>{}, 7);
+    fewer.set_axis(Name("move.x"), std::span<const AxisSource>{});
+    adapted = *back;
+    CHECK_FALSE(adapt_replay_input(adapted, fewer, error));
+    CHECK(error.find("bomb") != std::string::npos);
+    r.frames[0].held = 0b01;
+    adapted = *read_replay(write_replay(r), error);
+    CHECK(adapt_replay_input(adapted, fewer, error));
+
+    // The ID an action gets without one survives a reorder; project.toml IDs win and must be unique.
+    InputMap derived;
+    derived.set_action(Name("a"), std::span<const Binding>{});
+    derived.set_action(Name("b"), std::span<const Binding>{});
+    CHECK(derived.action_ids()[0] == InputMap::derive_action_id("a"));
+    CHECK_FALSE(derived.set_action(Name("c"), std::span<const Binding>{}, InputMap::derive_action_id("a")));
+}
+
+TEST_CASE("project.toml: [input.action_ids] follows renames and removals") {
+    const std::string toml =
+        "name = \"t\"\n[input.actions]\nshoot = [\"Key.Z\"]\nbomb = [\"Key.C\"]\n[input.action_ids]\nbomb = 5\n";
+    script::InputSections s = script::read_input_sections(toml);
+    REQUIRE(s.actions.size() == 2);
+    // Unchanged: byte for byte.
+    CHECK(script::rewrite_input_sections(toml, s) == toml);
+    // Rename `bomb` (has an ID line) and `shoot` (has none).
+    s.actions[0].name = "fire";
+    s.actions[1].name = "blast";
+    const std::string renamed = script::rewrite_input_sections(toml, s);
+    CHECK(renamed.find("blast = 5") != std::string::npos);
+    CHECK(renamed.find("bomb = 5") == std::string::npos);
+    CHECK(renamed.find("fire = " + std::to_string(InputMap::derive_action_id("shoot"))) != std::string::npos);
+    // Removal drops the line.
+    script::InputSections gone = script::read_input_sections(toml);
+    gone.actions.pop_back();
+    CHECK(script::rewrite_input_sections(toml, gone).find("bomb = 5") == std::string::npos);
 }
 #endif
 
@@ -244,7 +408,9 @@ TEST_CASE("project.toml: rewriting the input map keeps everything else") {
           "aim = [\"Pad.RightStick\"]\n"
           "\n"
           "[later.tool]\n"
-          "x = 1\n");
+          "x = 1\n"
+          // The rename keeps the old name's derived ID, so replays recorded before it still map.
+          "\n[input.action_ids]\nsmart_bomb = " + std::to_string(InputMap::derive_action_id("bomb")) + "\n");
 
     // No input sections yet: they are appended.
     script::InputSections fresh;

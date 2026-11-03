@@ -21,6 +21,12 @@ struct ConsoleLine {
     std::string text;
 };
 
+// Console filter chips: bit 1 = info and below, 2 = warn, 4 = error.
+constexpr int console_filter_bit(log::Level level) {
+    return level == log::Level::Error ? 4 : level == log::Level::Warn ? 2 : 1;
+}
+constexpr bool console_filter_shows(int mask, log::Level level) { return (mask & console_filter_bit(level)) != 0; }
+
 class ConsoleLog {
 public:
     explicit ConsoleLog(std::size_t capacity = 2000) : capacity_(capacity) {}

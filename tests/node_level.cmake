@@ -58,9 +58,11 @@ if(NOT code EQUAL 0)
 endif()
 file(RENAME "${OUT}/scenes/level.scene" "${OUT}/editor_level.scene")
 execute_process(COMMAND "${TOOLS}" scene build "${OUT}/level.txt" "${OUT}/scenes/level.scene" RESULT_VARIABLE code)
-execute_process(COMMAND ${CMAKE_COMMAND} -E compare_files "${OUT}/scenes/level.scene" "${OUT}/editor_level.scene"
+# The editor saves text scenes (11.2c); compare the text views, not the bytes.
+execute_process(COMMAND "${TOOLS}" scene dump "${OUT}/scenes/level.scene" OUTPUT_FILE "${OUT}/level2.txt" RESULT_VARIABLE code2)
+execute_process(COMMAND ${CMAKE_COMMAND} -E compare_files "${OUT}/level2.txt" "${OUT}/level.txt"
                 RESULT_VARIABLE differs)
-if(NOT code EQUAL 0 OR NOT differs EQUAL 0)
+if(NOT code EQUAL 0 OR NOT code2 EQUAL 0 OR NOT differs EQUAL 0)
     message(FATAL_ERROR "dump + build of the level did not give back the same scene file (${code})")
 endif()
 run_game(rebuilt rebuilt_hash)

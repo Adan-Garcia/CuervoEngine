@@ -7,6 +7,7 @@
 #include <optional>
 #include <sstream>
 
+#include "cuervo/input/input_map.hpp"
 #include "cuervo/platform/platform.hpp"
 
 namespace cuervo::script {
@@ -99,6 +100,92 @@ std::string format_entry(const InputEntry& e) {
         s += "\"" + e.bindings[i] + "\"";
     }
     return s + "]";
+}
+
+// [input.action_ids] (stable action IDs, DESIGN.md 4.8) follows the actions: a renamed action keeps its
+// ID (an action that had none gets the ID its old name derives, so replays recorded before the
+// rename still map), and a removed action loses its line. Lines of names the file never listed as
+// actions are left alone, and an unchanged map changes nothing.
+std::string follow_action_ids(const std::string& text, std::string_view old_toml, const InputSections& input,
+                              const std::string& eol) {
+    const InputSections old_sections = read_input_sections(old_toml);
+    const auto in_old = [&](const std::string& n) {
+        return std::any_of(old_sections.actions.begin(), old_sections.actions.end(),
+                           [&](const InputEntry& e) { return e.name == n; });
+    };
+    const auto find_original = [&](const std::string& n) -> const InputEntry* {
+        for (const InputEntry& e : input.actions) {
+            if (e.original == n) return &e;
+        }
+        return nullptr;
+    };
+    std::vector<std::string> out;
+    std::string section;
+    std::vector<std::string> has_id_line; // old keys seen in the section
+    std::optional<std::size_t> insert_at;
+    for (const Line& l : split_lines(text)) {
+        if (auto h = header(l.text)) {
+            section = *h;
+            out.push_back(std::string(l.text) + std::string(l.eol));
+            if (section == "input.action_ids") insert_at = out.size();
+            continue;
+        }
+        auto k = section == "input.action_ids" ? key_line(l.text) : std::nullopt;
+        if (!k) {
+            out.push_back(std::string(l.text) + std::string(l.eol));
+            continue;
+        }
+        has_id_line.push_back(k->key);
+        const InputEntry* e = find_original(k->key);
+        if (e == nullptr) {
+            if (in_old(k->key)) continue; // its action was removed
+        } else if (e->name != k->key) {
+            std::string_view body = l.text;
+            if (std::size_t c = comment_start(body); c != std::string_view::npos) body = body.substr(0, c);
+            const std::size_t eq = body.find('=');
+            std::string value(trim(body.substr(eq + 1)));
+            // Renamed back to a name that derives this very ID: the line says nothing the name doesn't.
+            if (value == std::to_string(InputMap::derive_action_id(e->name))) continue;
+            out.push_back(e->name + " = " + value + std::string(k->comment) + (l.eol.empty() ? eol : std::string(l.eol)));
+            insert_at = out.size();
+            continue;
+        }
+        out.push_back(std::string(l.text) + std::string(l.eol));
+        insert_at = out.size();
+    }
+    std::vector<std::string> added;
+    for (const InputEntry& e : input.actions) {
+        if (e.original.empty() || e.original == e.name) continue;
+        if (std::find(has_id_line.begin(), has_id_line.end(), e.original) != has_id_line.end()) continue;
+        added.push_back(e.name + " = " + std::to_string(InputMap::derive_action_id(e.original)) + eol);
+    }
+    if (!added.empty()) {
+        if (insert_at) {
+            if (*insert_at > 0 && !out[*insert_at - 1].ends_with('\n')) out[*insert_at - 1] += eol;
+            out.insert(out.begin() + static_cast<std::ptrdiff_t>(*insert_at), added.begin(), added.end());
+        } else {
+            if (!out.empty() && !out.back().ends_with('\n')) out.back() += eol;
+            if (!out.empty() && out.back().find_first_not_of(" \t\r\n") != std::string::npos) out.push_back(eol);
+            out.push_back("[input.action_ids]" + eol);
+            out.insert(out.end(), added.begin(), added.end());
+        }
+    }
+    // A section left without lines goes (with the blank line that set it apart).
+    const auto blank = [](const std::string& l) { return l.find_first_not_of(" \t\r\n") == std::string::npos; };
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        auto h = header(std::string_view(out[i]).substr(0, out[i].find_first_of("\r\n")));
+        if (!h || *h != "input.action_ids") continue;
+        std::size_t end = i + 1;
+        while (end < out.size() && blank(out[end])) ++end;
+        if (end < out.size() && !header(std::string_view(out[end]).substr(0, out[end].find_first_of("\r\n")))) break;
+        std::size_t first = i;
+        if (first > 0 && blank(out[first - 1])) --first;
+        out.erase(out.begin() + static_cast<std::ptrdiff_t>(first), out.begin() + static_cast<std::ptrdiff_t>(i + 1));
+        break;
+    }
+    std::string result;
+    for (const std::string& l : out) result += l;
+    return result;
 }
 
 } // namespace
@@ -201,7 +288,7 @@ std::string rewrite_input_sections(std::string_view toml, const InputSections& i
     }
     std::string result;
     for (const std::string& l : out) result += l;
-    return result;
+    return follow_action_ids(result, toml, input, eol);
 }
 
 bool write_project_input(const fs::path& dir, const InputSections& input, std::string& error) {

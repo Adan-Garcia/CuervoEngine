@@ -31,6 +31,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -42,6 +43,7 @@
 #include <vector>
 
 #include "cuervo/core/log.hpp"
+#include "runtime/cli_flags.hpp"
 #include "cuervo/jobs/job_system.hpp"
 #include "cuervo/math/simd.hpp"
 #include "cuervo/platform/platform.hpp"
@@ -62,24 +64,11 @@ using namespace cuervo;
 
 namespace {
 
-constexpr std::uint64_t default_screenshot_tick = 240;
-
-bool has_flag(int argc, char** argv, std::string_view flag) {
-    for (int i = 1; i < argc; ++i) {
-        if (std::string_view(argv[i]) == flag) {
-            return true;
-        }
-    }
-    return false;
-}
+// Flags are read through the table (runtime/cli_flags.hpp), so one that isn't listed can't be handled.
+bool has_flag(int argc, char** argv, std::string_view flag) { return cuervo::cli::Args(argc, argv).has(flag); }
 
 std::string_view arg_value(int argc, char** argv, std::string_view flag) {
-    for (int i = 1; i + 1 < argc; ++i) {
-        if (std::string_view(argv[i]) == flag) {
-            return argv[i + 1];
-        }
-    }
-    return {};
+    return cuervo::cli::Args(argc, argv).value(flag);
 }
 
 GraphicsApi graphics_api_for(rhi::Backend backend) { return rhi::graphics_api(backend); }
@@ -109,6 +98,13 @@ render::ScaleMode parse_scale(std::string_view arg) {
 } // namespace
 
 int main(int argc, char** argv) {
+    if (has_flag(argc, argv, "--help") || has_flag(argc, argv, "-h")) {
+        std::fputs(cli::runtime_help().c_str(), stdout);
+        return EXIT_SUCCESS;
+    }
+    if (const std::string_view unknown = cli::Args(argc, argv).unknown(); !unknown.empty()) {
+        LOG_WARN("Unknown flag '{}' (see cuervo --help)", unknown);
+    }
     static std::vector<std::string> game_args;
     static std::vector<char*> game_argv;
     auto prepend = [&](std::initializer_list<std::string> first) {
@@ -170,9 +166,12 @@ int main(int argc, char** argv) {
     if (auto env = platform::env("CUERVO_SCREENSHOT"); screenshot_path.empty() && env) {
         screenshot_path = *env;
     }
-    std::uint64_t screenshot_tick = default_screenshot_tick;
+    std::uint64_t screenshot_tick = cli::default_screenshot_tick;
     if (auto env = platform::env("CUERVO_SCREENSHOT_TICK"); env && !env->empty()) {
         screenshot_tick = std::strtoull(env->c_str(), nullptr, 10);
+    }
+    if (const std::string_view t = arg_value(argc, argv, "--screenshot-tick"); !t.empty()) {
+        screenshot_tick = std::strtoull(std::string(t).c_str(), nullptr, 10);
     }
     const render::ScaleMode scale_mode = parse_scale(arg_value(argc, argv, "--scale"));
     rhi::DeviceOptions options;

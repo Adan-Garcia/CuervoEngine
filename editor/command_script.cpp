@@ -11,12 +11,16 @@
 
 #include "cuervo/core/log.hpp"
 #include "cuervo/input/replay.hpp"
+#include "cuervo/platform/platform.hpp"
 #include "editor/actions.hpp"
 #include "editor/asset_library.hpp"
 #include "editor/editor_document.hpp"
+#include "editor/file_import.hpp"
 #include "editor/input_map_doc.hpp"
 #include "editor/play_controller.hpp"
 #include "editor/project_env.hpp"
+#include "editor/scene_preview.hpp"
+#include "editor/sprite_tools.hpp"
 
 namespace cuervo::editor {
 
@@ -119,6 +123,7 @@ ScriptResult run_command_script(std::string_view text, CommandContext& ctx) {
     ActionRegistry actions;  // the command palette's actions (`palette`)
     add_document_actions(actions, doc);
     ScriptResult result;
+    std::optional<AtlasEditor> atlas; // `atlas ...`: the atlas source being edited
     int line_no = 0;
     std::size_t pos = 0;
     auto fail = [&](std::string message) {
@@ -332,6 +337,30 @@ ScriptResult run_command_script(std::string_view text, CommandContext& ctx) {
                 return fail(std::format("expected {} selected node(s), got {}", want, doc.selected().size()));
             }
             continue;
+        } else if (*cmd == "undock" || *cmd == "save-layout" || *cmd == "expect-viewports" ||
+                   *cmd == "expect-viewport") {
+            if (ctx.ui_steps == nullptr) return fail(std::format("{} is not available here", *cmd));
+            UiStep step;
+            if (*cmd == "undock" || *cmd == "expect-viewport") {
+                auto panel = in.word();
+                auto xs = in.word();
+                auto ys = in.word();
+                if (!ys || !parse_float(*xs, step.x) || !parse_float(*ys, step.y)) return fail(std::format("{} <panel> <x> <y>", *cmd));
+                step.kind = *cmd == "undock" ? UiStep::Kind::Undock : UiStep::Kind::ExpectViewport;
+                step.name = *panel;
+            } else if (*cmd == "save-layout") {
+                auto name = in.word();
+                if (!name) return fail("save-layout <name>");
+                step.kind = UiStep::Kind::SaveLayout;
+                step.name = *name;
+            } else {
+                auto n = in.word();
+                std::uint64_t want = 0;
+                if (!n || !parse_u64(*n, want)) return fail("expect-viewports <count>");
+                step.kind = UiStep::Kind::ExpectViewports;
+                step.count = static_cast<int>(want);
+            }
+            ctx.ui_steps->push_back(std::move(step));
         } else if (*cmd == "expect-history") {
             auto n = in.word();
             std::uint64_t want = 0;
@@ -442,6 +471,39 @@ ScriptResult run_command_script(std::string_view text, CommandContext& ctx) {
             if (!panic) return fail("expected a panic, the game has none");
             if (panic->render_with_locals().find(want) == std::string::npos) {
                 return fail(std::format("the panic doesn't mention '{}':\n{}", want, panic->render_with_locals()));
+            }
+            continue;
+        } else if (*cmd == "preview" || *cmd == "preview-clear") {
+            // The scene view's ready() preview (editor/scene_preview.hpp): a fresh isolated session, never ticked.
+            if (ctx.preview == nullptr) return fail(std::format("{} is not available here", *cmd));
+            if (*cmd == "preview-clear") {
+                ctx.preview->clear();
+            } else {
+                std::string error;
+                if (!ctx.preview->refresh(play_options(ctx, true), error)) return fail("preview: " + error);
+            }
+        } else if (*cmd == "expect-preview" || *cmd == "expect-preview-tick" || *cmd == "expect-preview-nodes") {
+            if (ctx.preview == nullptr) return fail(std::format("{} is not available here", *cmd));
+            if (!ctx.preview->active()) return fail(std::format("{}: no preview (run `preview`)", *cmd));
+            if (*cmd == "expect-preview") {
+                auto path = in.word();
+                auto field = in.word();
+                const std::string_view want = in.rest();
+                if (!path || !field || want.empty()) {
+                    return fail("expect-preview <node path> <field> <value as the debugger shows it>");
+                }
+                std::string got;
+                if (!ctx.preview->field_text(*path, *field, got)) {
+                    return fail(std::format("no node or field '{}' {} in the preview", *path, *field));
+                }
+                if (got != want) return fail(std::format("preview: expected {} = {}, got {}", *field, want, got));
+            } else {
+                auto w = in.word();
+                std::uint64_t want = 0;
+                if (!w || !parse_u64(*w, want)) return fail(std::format("{} <n>", *cmd));
+                const bool tick = *cmd == "expect-preview-tick";
+                const std::uint64_t got = tick ? ctx.preview->tick() : ctx.preview->node_count();
+                if (got != want) return fail(std::format("preview: expected {} {}, got {}", tick ? "tick" : "nodes", want, got));
             }
             continue;
         } else if (*cmd == "expect-clean") {
@@ -583,6 +645,93 @@ ScriptResult run_command_script(std::string_view text, CommandContext& ctx) {
             } else {
                 return fail("asset mkdir|rename|delete|expect|expect-missing <path> ...");
             }
+        } else if (*cmd == "atlas") {
+            // atlas new|open <path> | sprite <image> [name] [scale] | sheet <image> <w> <h> [prefix] [margin] [spacing]
+            //       | save | expect-frames [names...]: what the Sprites panel's atlas tools do.
+            auto what = in.word();
+            if (!what) return fail("atlas new|open|sprite|sheet|save|expect-frames ...");
+            std::string error;
+            const std::filesystem::path dir = env.project_dir();
+            auto num = [](std::optional<std::string> w, int& out) {
+                return w && std::from_chars(w->data(), w->data() + w->size(), out).ec == std::errc();
+            };
+            if (*what == "new" || *what == "open") {
+                auto path = in.word();
+                if (!path) return fail(std::format("atlas {} <path>", *what));
+                if (*what == "new") {
+                    atlas = AtlasEditor::create(dir, *path);
+                } else {
+                    atlas = AtlasEditor::open(dir, *path, error);
+                    if (!atlas) return fail(error);
+                }
+            } else if (!atlas) {
+                return fail("no atlas open: atlas new <path> or atlas open <path> first");
+            } else if (*what == "sprite") {
+                auto image = in.word();
+                if (!image) return fail("atlas sprite <image> [name] [scale]");
+                auto name = in.word();
+                float scale = 1.0f;
+                if (auto sc = in.word(); sc && !parse_float(*sc, scale)) return fail("atlas sprite: scale must be a number");
+                if (!atlas->add_sprite(*image, name.value_or(""), scale, error)) return fail(error);
+            } else if (*what == "sheet") {
+                auto image = in.word();
+                assets::GridOptions g;
+                if (!image || !num(in.word(), g.frame_w) || !num(in.word(), g.frame_h)) {
+                    return fail("atlas sheet <image> <frame w> <frame h> [prefix] [margin] [spacing]");
+                }
+                if (auto prefix = in.word()) {
+                    g.prefix = *prefix;
+                } else {
+                    g.prefix.clear();
+                }
+                if (auto m = in.word(); m && !num(m, g.margin)) return fail("atlas sheet: margin must be a number");
+                if (auto sp = in.word(); sp && !num(sp, g.spacing)) return fail("atlas sheet: spacing must be a number");
+                if (!atlas->add_sheet(*image, g, error)) return fail(error);
+            } else if (*what == "save") {
+                if (!atlas->save(error)) return fail(error);
+            } else if (*what == "expect-frames") {
+                std::vector<std::string> want;
+                while (auto w = in.word()) want.push_back(*w);
+                const std::vector<std::string> got = atlas->frame_names(&error);
+                if (!error.empty()) return fail(error);
+                if (got != want) {
+                    std::string list;
+                    for (const std::string& g : got) list += " " + g;
+                    return fail(std::format("the atlas has frames:{}", list.empty() ? " none" : list));
+                }
+                continue;
+            } else {
+                return fail("atlas new|open|sprite|sheet|save|expect-frames ...");
+            }
+        } else if (*cmd == "drop") {
+            // drop <file on disk> [folder]: what dropping a file from the OS onto the editor does
+            // (file_import.hpp). The copy lands in the project folder of its kind unless `folder` is given.
+            auto file = in.word();
+            if (!file) return fail("drop <file> [folder]");
+            const std::string folder(in.word().value_or(""));
+            const std::vector<ImportResult> done = import_files(env.project_dir(), {platform::path_from_utf8(*file)}, folder);
+            if (!done.front().ok) return fail(done.front().error);
+            LOG_INFO("Imported '{}' as '{}'", *file, done.front().dest);
+            if (ctx.assets != nullptr) ctx.assets->poll();
+        } else if (*cmd == "frames") {
+            // frames <AnimatedSprite2D> <atlas> [prefix]: the node plays the atlas's frames (those
+            // starting with `prefix`), in the atlas's order: the list the inspector builds from its picker.
+            NodeId id = 0;
+            if (auto r = need_node(id)) return *r;
+            auto path = in.word();
+            if (!path) return fail("frames <node> <atlas> [prefix]");
+            const std::string prefix(in.word().value_or(""));
+            std::string error;
+            const std::vector<std::string> names = atlas_frame_names(env.project_dir(), *path, error);
+            if (!error.empty()) return fail(error);
+            std::vector<scene::Value> items;
+            for (const std::string& n : names) {
+                if (n.starts_with(prefix)) items.push_back(scene::Value::str(n));
+            }
+            if (items.empty()) return fail(std::format("'{}' has no frames starting with '{}'", *path, prefix));
+            if (auto r = check(doc.set_field(id, "asset", scene::Value::str(*path)))) return *r;
+            if (auto r = check(doc.set_field(id, "frames", scene::Value::list(std::move(items))))) return *r;
+            doc.seal();
         } else {
             return fail(std::format("unknown command '{}'", *cmd));
         }

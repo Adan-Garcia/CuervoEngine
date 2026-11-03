@@ -1,0 +1,27 @@
+// Asks the local test server (port 18433, see tools/web/http_smoke.py) for /hello and posts to /echo,
+// and prints what came back: the web build's fetch glue must deliver status, body and headers.
+class Game extends Node {
+    var get_handle = 0
+    var post_handle = 0
+    var got = false
+    var posted = false
+
+    fn update(dt: float) {
+        if get_handle == 0 {
+            get_handle = Http.get("http://127.0.0.1:18433/hello")
+            if get_handle == 0 { print("http-smoke start failed") }
+        }
+        if get_handle > 0 && !got && Http.done(get_handle) {
+            got = true
+            print("http-smoke get status={Http.status(get_handle)} body={Http.body(get_handle)} method={Http.header(get_handle, "x-method")} error={Http.error(get_handle)}")
+            Http.close(get_handle)
+            post_handle = Http.post("http://127.0.0.1:18433/echo", "ping", "X-Token: abc")
+        }
+        if post_handle > 0 && !posted && Http.done(post_handle) {
+            posted = true
+            print("http-smoke post status={Http.status(post_handle)} body={Http.body(post_handle)} token={Http.header(post_handle, "x-seen-x-token")} error={Http.error(post_handle)}")
+            Http.close(post_handle)
+            print("http-smoke done")
+        }
+    }
+}

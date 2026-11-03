@@ -10,6 +10,8 @@
 
 #include "cuervo/math/vec.hpp"
 
+struct SDL_Window;
+
 namespace cuervo {
 class Window;
 enum class GraphicsApi; // platform/window.hpp
@@ -56,8 +58,13 @@ enum class Feature : std::uint32_t {
                        // that write gl_PointSize write 1.0: WGSL has no point size)
     Msaa,              // DeviceOptions::msaa_samples > 1 (optional: falls back to 1)
     FrameCapture,      // capture_frame (debug aid; optional)
+    TextureMips,       // TextureDesc::mip_levels > 1, per-level data, sRGB RGBA8 (11.2a)
+    RenderTargets,     // create_render_target / set_render_target: offscreen passes (11.2b)
     // Tier::Full -- Vulkan only.
     BaseVertexDraws,   // draw_indexed_base_vertex (GLES 3.0 has no base vertex)
+    // Compatible, listed last to keep the older entries' positions.
+    MultiSurface,      // create_window_surface: more windows than the main one (optional;
+                       // desktop only -- WebGPU and the web stay single-window)
     Count
 };
 
@@ -109,6 +116,8 @@ struct Rect {
 struct BufferHandle { std::uint32_t id = 0; explicit operator bool() const { return id != 0; } };
 struct PipelineHandle { std::uint32_t id = 0; explicit operator bool() const { return id != 0; } };
 struct TextureHandle { std::uint32_t id = 0; explicit operator bool() const { return id != 0; } };
+struct SurfaceHandle { std::uint32_t id = 0; explicit operator bool() const { return id != 0; } };
+struct RenderTargetHandle { std::uint32_t id = 0; explicit operator bool() const { return id != 0; } };
 
 enum class BufferKind { Vertex, Index, Uniform };
 
@@ -135,8 +144,10 @@ struct BufferDesc {
 enum class IndexFormat { UInt16, UInt32 };
 
 // --- textures -------------------------------------------------------------------
-// 2D textures with one mip level, sampled with clamp-to-edge addressing (GLES
-// 3.0 / WebGL2 allow nothing else for non-power-of-two sizes without mips).
+// 2D textures, sampled with clamp-to-edge addressing (GLES 3.0 / WebGL2 allow
+// nothing else for non-power-of-two sizes without mips). A texture may carry a
+// mip chain (Feature::TextureMips); the sampler then filters between levels:
+// Filter::Linear is trilinear, Filter::Nearest picks the nearest level.
 // The sampler is part of the texture: shaders declare combined samplers.
 enum class TextureFormat {
     RGBA8, // 4 x u8 normalized, bytes r, g, b, a in memory
@@ -155,9 +166,41 @@ struct TextureDesc {
     // transparent black.
     const void* initial_data = nullptr;
     std::string_view debug_name;
+    // Mip chain length: 1 = no mips, 0 = the full chain
+    // (floor(log2(max(width, height))) + 1), anything else must not exceed it.
+    // Level n is max(1, width >> n) x max(1, height >> n). Levels without data
+    // start as transparent black; update_texture only writes level 0.
+    std::uint32_t mip_levels = 1;
+    // RGBA8 only: the sampler decodes the stored bytes from sRGB to linear
+    // (filtering happens after decoding). Alpha stays linear.
+    bool srgb = false;
+    // Optional per-level data, level 0 first, each level tightly packed like
+    // initial_data. When non-empty it replaces initial_data (an empty span
+    // leaves that level zeroed); extra entries beyond the chain are an error.
+    std::span<const std::span<const std::byte>> initial_levels = {};
 };
 
+// Number of levels of the full chain for a width x height texture.
+std::uint32_t full_mip_chain_length(std::int32_t width, std::int32_t height);
+
 std::size_t texture_format_size(TextureFormat format); // bytes per texel
+
+// --- render targets (Feature::RenderTargets, 11.2b) -----------------------------
+// An offscreen color target: a pass renders into it with set_render_target and
+// later passes sample it as an ordinary texture (render_target_texture), which
+// is how multi-pass post-processing works (DESIGN.md 4.19).
+//  - The format is the window's color format, and the target has the device's
+//    MSAA sample count (resolved when a pass leaves it), so every pipeline
+//    works with the window and with any target unchanged.
+//  - It starts transparent black. Its contents persist across passes and
+//    frames until cleared; set_render_target(prev) then back resumes drawing.
+//  - A target must not be sampled while it is the current render target.
+struct RenderTargetDesc {
+    std::int32_t width = 0;
+    std::int32_t height = 0;
+    Filter filter = Filter::Linear; // sampler used when the target is read as a texture
+    std::string_view debug_name;
+};
 
 // --- shaders ----------------------------------------------------------------
 // Shaders are authored once in GLSL 450 under cuervo/render/shaders/ and turned
@@ -221,6 +264,11 @@ enum class BlendMode {
     Alpha,         // straight alpha: src*a + dst*(1-a)
     Premultiplied, // src + dst*(1-a)
     Additive,      // src*a + dst
+    // Screen with a premultiplied source: src + dst*(1 - src) per color
+    // channel (alpha accumulates like Premultiplied). A glow that never
+    // exceeds white and never darkens (11.2b).
+    Screen,
+    AdditivePremultiplied, // src + dst: glow from a shader that outputs premultiplied color
 };
 
 enum class Topology { TriangleList, TriangleStrip, LineList, LineStrip, PointList };
@@ -253,6 +301,21 @@ struct DeviceInfo {
     std::uint32_t uniform_offset_alignment = 256;
     // Color samples per pixel actually in use (1 = no MSAA).
     std::uint32_t msaa_samples = 1;
+    // True on GL: a render target's rows are stored bottom-up there, so a pass
+    // that samples a target flips its texture coordinate v (1 - v). Vulkan and
+    // WebGPU store top-down like every other texture. The window itself is
+    // unaffected: draws use NDC y = +1 = top everywhere.
+    bool render_target_flip_v = false;
+    // Linear color (DESIGN.md 4.19, 11.2b): true when DeviceOptions::linear_color
+    // was granted. Render targets (and, where `window_srgb`, the window) are then
+    // sRGB-encoded storage: shaders write linear values, blending happens in
+    // linear space, and sampling a target returns linear values. Textures made
+    // with `srgb = true` decode when sampled either way.
+    bool linear_color = false;
+    // True when the window's own framebuffer encodes linear values on write
+    // (Vulkan/WebGPU sRGB surface formats). Where false (GL), the last pass into
+    // the window must encode in the shader (PostFx does).
+    bool window_srgb = false;
 
     bool supports(Feature f) const { return features.has(f); }
 };
@@ -281,6 +344,10 @@ struct DeviceOptions {
     // the result in DeviceInfo::msaa_samples. Every pipeline is created for
     // the device's sample count.
     std::uint32_t msaa_samples = 4;
+    // Ask for linear color (see DeviceInfo::linear_color). Backends that can't
+    // provide sRGB targets leave DeviceInfo::linear_color false and the caller
+    // stays in sRGB blending.
+    bool linear_color = false;
 };
 
 class Device {
@@ -296,8 +363,37 @@ public:
     virtual void clear(Color color) = 0;
     virtual void end_frame() = 0; // presents
 
-    // Size of the framebuffer of the current frame, in pixels.
+    // --- secondary window surfaces (Feature::MultiSurface, DESIGN.md 4.4) ----
+    // Presents to more windows than the one the device was created for (the
+    // editor's undocked panels). The window must have been created for the
+    // device's graphics API (create_surface_window does that). Buffers,
+    // textures and pipelines are shared with the main window. A surface frame
+    // is an ordinary frame (same draw state rules, reset at begin) bracketed
+    // by begin_frame_surface / end_frame_surface instead of begin_frame /
+    // end_frame; frames never overlap, so finish the main window's first.
+    // On GL render targets can't be used during a surface frame (framebuffer
+    // objects are per context); on Vulkan the surface must present with the
+    // main window's color format. Destroy surfaces before their window.
+    // Without the feature create_window_surface logs why and returns {}.
+    virtual SurfaceHandle create_window_surface(SDL_Window* window);
+    virtual void destroy_window_surface(SurfaceHandle surface);
+    virtual void begin_frame_surface(SurfaceHandle surface, ivec2 framebuffer_size);
+    virtual void end_frame_surface();
+
+    // Size, in pixels, of the current render target (the window's framebuffer
+    // unless set_render_target selected an offscreen target).
     virtual ivec2 framebuffer_size() const = 0;
+
+    // Render targets (Feature::RenderTargets). set_render_target({}) selects the
+    // window again. Selecting a target resets viewport and scissor to its full
+    // size; pipeline and buffer bindings carry over. clear() and draws apply to
+    // the current target. begin_frame selects the window; end_frame presents it
+    // (a target still selected is left first). Destroying a target is deferred
+    // until the GPU is done with it, and destroys its texture handle too.
+    virtual RenderTargetHandle create_render_target(const RenderTargetDesc& desc) = 0;
+    virtual TextureHandle render_target_texture(RenderTargetHandle target) const = 0;
+    virtual void destroy_render_target(RenderTargetHandle target) = 0;
+    virtual void set_render_target(RenderTargetHandle target) = 0;
 
     virtual BufferHandle create_buffer(const BufferDesc& desc) = 0;
     virtual void update_buffer(BufferHandle buffer, std::size_t offset, std::span<const std::byte> data) = 0;
@@ -353,6 +449,11 @@ public:
 // Creates a device for the window. The window must have been created for the
 // matching GraphicsApi. Returns null (and logs why) on failure.
 std::unique_ptr<Device> create_device(Backend backend, Window& window, const DeviceOptions& options = {});
+
+// An SDL window that create_window_surface can present
+// to on `backend` (OpenGL / Vulkan flag set, same GL attributes as the main
+// window). The caller owns it and destroys it after its surface. Null on failure.
+SDL_Window* create_surface_window(Backend backend, const char* title, int width, int height, bool resizable = true);
 
 // Whether this build includes the backend (Vulkan is off for web builds;
 // WebGPU only with CUERVO_WEBGPU).

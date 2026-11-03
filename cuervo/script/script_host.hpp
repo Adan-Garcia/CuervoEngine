@@ -23,6 +23,9 @@ class AudioSystem;
 #include "cuervo/core/hash.hpp"
 #include "cuervo/core/rng.hpp"
 #include "cuervo/input/input_map.hpp"
+#include "cuervo/script/locale_bindings.hpp"
+#include "cuervo/script/net_bindings.hpp"
+#include "cuervo/script/save_bindings.hpp"
 #include "cuervo/math/affine2.hpp"
 #include "cuervo/math/vec.hpp"
 #if CUERVO_FEATURE_PARTICLES
@@ -32,6 +35,8 @@ class AudioSystem;
 #endif
 #include "cuervo/render/light_batcher.hpp"
 #include "cuervo/render/sdf_batcher.hpp"
+#include "cuervo/render/sprite_batcher.hpp"
+#include "cuervo/render/sprite_library.hpp"
 #include "cuervo/render/text_renderer.hpp"
 #include "cuervo/scene/scene_file.hpp"
 #include "pluma/bindings.hpp"
@@ -79,7 +84,8 @@ class VectorCache;
 enum class DrawFlush {
     Shapes, // the SDF shapes queued so far (a vector image comes next)
     Meshes, // the vector meshes queued so far (shapes come next); clear the batcher after
-    Layer,  // shapes, meshes, then text: everything drawn next covers it
+    Layer,  // shapes, meshes, sprites, then text: everything drawn next covers it
+    Sprites, // the raster sprites queued so far (Canvas.sprite / nine_patch); clear the batcher after
 };
 
 // Where a frame's Canvas calls go (ScriptHost::draw). Shapes and text as
@@ -91,6 +97,10 @@ struct DrawTargets {
     render::TextRenderer* text = nullptr;
     render::FontHandle font;
     VectorCache* vectors = nullptr;
+    // Raster sprites (Canvas.sprite / nine_patch, the Sprite2D family): the
+    // images and the batcher they queue into. Either null skips them.
+    render::SpriteLibrary* sprites = nullptr;
+    render::SpriteBatcher* sprite_batcher = nullptr;
     // Draws what is queued: `view` maps world to virtual coordinates (the
     // current Camera2D, identity for the screen view) and `zoom` is its scale,
     // so world units per framebuffer pixel = 1 / (pixels per virtual unit *
@@ -122,7 +132,8 @@ struct DrawTargets {
 // `lights` (optional) receives the scene's lights and occluders.
 DrawTargets make_draw_targets(render::SdfBatcher& shapes, render::TextRenderer& text, render::FontHandle font,
                               VectorCache* vectors, const Affine2& to_ndc, float pixels_per_unit, bool cameras,
-                              render::LightBatcher* lights = nullptr);
+                              render::LightBatcher* lights = nullptr, render::SpriteLibrary* sprites = nullptr,
+                              render::SpriteBatcher* sprite_batcher = nullptr);
 
 // What state_hash() folds in for a script global (numbers, bools, vectors;
 // other values are skipped).
@@ -136,6 +147,26 @@ const std::vector<pluma::Value>& unused_ui_globals();
 inline constexpr std::string_view unused_ui_anchor = "Camera2D.current_camera";
 
 class PluginSet;
+
+// A complete image of a running game's simulation state (DESIGN.md 4.8, milestone 11.7a): the
+// Pluma heap, globals and coroutines, the node tree, particle pools and RNG streams, physics
+// bodies, the input history and the tick. Valid between ticks, for the same loaded scripts
+// (restore refuses an image taken from other code). Move-only; restore() leaves it intact.
+struct SimSnapshot {
+    std::uint64_t tick = 0;
+    std::vector<std::uint8_t> image; // pluma/snapshot.hpp: objects, VM state and the host's scalars
+    Input::State input;
+    std::vector<Input::State> extra_players; // players 1.. (player 0 is `input`)
+#if CUERVO_FEATURE_PARTICLES
+    particles::ParticleSystem::State particles;
+#endif
+#if !CUERVO_FEATURE_PARTICLES
+    Pcg32 rng;
+#endif
+#if CUERVO_FEATURE_PHYSICS
+    physics::PhysicsWorld::StatePtr physics;
+#endif
+};
 
 struct HostOptions {
     std::uint64_t seed = 1;
@@ -152,9 +183,16 @@ struct HostOptions {
     // The game font, for UI.measure (layout runs in the simulation, so it
     // measures with the atlas data, not the GPU font). Null: an estimate.
     const render::FontAtlas* font = nullptr;
+    // Fonts tried after `font` for characters it lacks (Latin -> Arabic ->
+    // Japanese); must match TextRenderer::set_fallbacks so measuring agrees with drawing.
+    std::vector<const render::FontAtlas*> font_fallbacks;
     // Audio triggers go here (cuervo/audio); null = a private null-backend
     // system, so scripts behave identically with or without sound.
     audio::AudioSystem* audio = nullptr;
+    // Save / Settings natives (prelude/save.plm): the per-user directory of
+    // `game_name` unless `save_store` is given (tests, the web's IndexedDB backend).
+    std::string game_name = "Game";
+    std::shared_ptr<save::SaveStore> save_store;
     // Native plugins (cuervo/script/plugin_host.hpp): their natives and
     // finalizers are bound beside the engine's. Kept alive by every host.
     std::shared_ptr<const PluginSet> plugins;
@@ -217,6 +255,17 @@ public:
     void clear_error();
 
     void tick(const InputFrame& frame);
+    // One frame per player (networked or local multiplayer, DESIGN.md 4.19): players[0] drives the
+    // `Input.*` queries as in the single-player tick; the others are read with `Input.held_by(player, ...)`.
+    // The frames are recorded input, so a replay or a rollback re-feeds the same span.
+    void tick_players(std::span<const InputFrame> players);
+    // One host step of a networked game (Net.host/join/relay, DESIGN.md 4.19): exchanges input with the
+    // peers and runs a tick from every player's frame when they are all in (lockstep) or from predicted
+    // ones (rollback). `local` is this machine's input for the step. True when a tick ran; false when
+    // stalled waiting for a peer or when no session is active (then call tick() as usual).
+    bool net_tick(const InputFrame& local) { return net_.step(*this, local); }
+    NetContext& net_context() { return net_; }
+    const NetContext& net_context() const { return net_; }
     // Calls the tree's draw(g) (Scene.draw_frame); shapes go to `shapes`,
     // text to `text`. `layer_break` flushes both, so what is drawn next
     // covers them (Canvas.new_layer); without it layers just append.
@@ -241,10 +290,36 @@ public:
     // A text field had the focus in the last tick (UI.wants_text): the window
     // should deliver typed text (Window::set_text_input).
     bool wants_text_input() const { return text_wanted_; }
+    // IME composition from the window (live input, never part of the
+    // simulation or a replay): the text being composed and its caret in
+    // characters (-1: none). Set by the runner each frame.
+    void set_composition(std::string text, int cursor) {
+        composition_ = std::move(text);
+        composition_cursor_ = cursor;
+    }
+    // The text field's rectangle in layout space as of the last draw, for the
+    // IME candidate window; `has_text_area()` false when no field is editing.
+    bool has_text_area() const { return text_area_set_; }
+    vec2 text_area_position() const { return text_area_pos_; }
+    vec2 text_area_size() const { return text_area_size_; }
+    float text_area_caret() const { return text_area_caret_; }
+    void clear_text_area() { text_area_set_ = false; }
 
     // Fingerprint of the simulation (particles, RNG, tick, and the script
     // globals' numbers), for replay comparison.
     std::uint64_t state_hash() const;
+
+    // ---- simulation snapshots (DESIGN.md 4.8, milestone 11.7a)
+    // Saves the whole simulation. False with `error` set when it cannot be saved (a script is
+    // running, native plugin data, a panic).
+    bool save(SimSnapshot& out, std::string& error) const;
+    // Rewinds the simulation to `snap`: after it the game continues bit for bit as it did from
+    // that point (a fresh draw is needed). On a failure the game may be left unusable (panicked).
+    bool restore(const SimSnapshot& snap, std::string& error);
+    // A fingerprint of ALL simulation state (the snapshot's image, particle and physics detail,
+    // the input history), where state_hash() covers only particles, physics bodies, the tick,
+    // the animation digest and numeric globals. 0 when the state cannot be saved.
+    std::uint64_t snapshot_hash() const;
 
     pluma::Session* session() { return session_.get(); }
     // Script profiling (pluma/profiler.hpp, DESIGN.md 5.14 "Clarified (Phase
@@ -260,7 +335,10 @@ public:
     particles::ParticleSystem& particles() { return particles_; }
     Pcg32& rng() { return particles_.rng(); }
     // ---- used by the natives
-    struct EmitterData;
+    struct EmitterData {
+        ScriptHost* host = nullptr;
+        particles::EmitterId id = 0;
+    };
     void free_emitter(particles::EmitterId id);
 #else
     Pcg32& rng() { return rng_; }
@@ -273,6 +351,10 @@ public:
     const physics::PhysicsWorld& physics_world() const { return *physics_; }
 #endif
     float tick_seconds() const { return 1.0f / options_.tick_rate; }
+    // Save / Settings state (never part of the simulation or its hash); the
+    // runner sets `target` so Settings reach the window and the input map.
+    SaveContext& save_context() { return save_; }
+    LocaleContext& locale_context() { return locale_; }
 
 private:
     void install_debug_hooks(pluma::Session& s) {
@@ -285,6 +367,7 @@ private:
     void bind_scene_and_ui(); // script_host_scene.cpp
     void bind_animation();    // anim_bindings.cpp
     void bind_lighting();     // light_bindings.cpp
+    void bind_sprites();      // sprite_bindings.cpp
 #if CUERVO_FEATURE_PHYSICS
     void bind_physics();
 #endif
@@ -302,6 +385,8 @@ private:
 
     HostOptions options_;
     Input input_;
+    const InputMap* input_map_;
+    std::vector<Input> extra_inputs_; // players 1..
     pluma::Bindings bindings_;
     std::unique_ptr<pluma::Session> session_;
     pluma::Value root_;
@@ -319,6 +404,9 @@ private:
     // Unpaused ticks: what the particle system would count (state_hash()).
     std::uint64_t particle_ticks_ = 0;
 #endif
+    SaveContext save_;
+    LocaleContext locale_;
+    NetContext net_;
 #if CUERVO_FEATURE_AUDIO
     std::unique_ptr<audio::AudioSystem> own_audio_;
     audio::AudioSystem* audio_ = nullptr;
@@ -358,11 +446,21 @@ private:
     Affine2 view_{};
     float view_zoom_ = 1.0f;
     bool meshes_pending_ = false; // vector meshes queued since the last flush
+    bool sprites_pending_ = false; // raster sprites queued since the last flush
+    // Flushes what must go out before raster sprites are queued (call order).
+    void settle_for_sprites();
     // The SDF batcher, after flushing queued vector meshes (call order).
     render::SdfBatcher* shape_target();
     void flush_draw(DrawFlush what);
     bool quit_requested_ = false;
     bool text_wanted_ = false;
+    // Display-side IME state: not in snapshots, not hashed.
+    std::string composition_;
+    int composition_cursor_ = -1;
+    bool text_area_set_ = false;
+    vec2 text_area_pos_{0.0f, 0.0f};
+    vec2 text_area_size_{0.0f, 0.0f};
+    float text_area_caret_ = 0.0f;
     // UI.image_size results by path (layout reads them in the simulation).
     std::map<std::string, vec2, std::less<>> image_sizes_;
 

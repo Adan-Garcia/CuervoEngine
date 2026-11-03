@@ -170,6 +170,7 @@ def build_pages(opts):
     add("manual/editor.html", "The editor", "manual", "Reference", doc("editor/README.md"))
     add("manual/scenes.html", "Scene files", "manual", "Reference", doc("docs/SCENES.md"))
     add("manual/replays.html", "Replays", "manual", "Reference", doc("docs/REPLAYS.md"))
+    add("manual/cli.html", "Command line", "manual", "Reference", doc("docs/CLI.md"))
     add("manual/export.html", "Packing and export", "manual", "Reference", doc("docs/EXPORT.md"))
     add("manual/packages.html", "Packages", "manual", "Reference", doc("docs/PACKAGES.md"))
     add("manual/plugins.html", "Plugins, FFI and embedding", "manual", "Reference", doc("docs/PLUGINS.md"))
@@ -615,7 +616,30 @@ def page_html(page, pages_by_section, build_id):
 """
 
 
-def home_html(pages):
+def readme_section(heading):
+    """Lines of a `## heading` section of README.md (without the heading), so the landing page
+    shows the same quickstart and benchmark table as the README instead of a copy that drifts."""
+    lines = (ROOT / "README.md").read_text(encoding="utf-8").split("\n")
+    try:
+        start = lines.index(f"## {heading}") + 1
+    except ValueError:
+        return []
+    end = start
+    while end < len(lines) and not lines[end].startswith("## "):
+        end += 1
+    return lines[start:end]
+
+
+def render_readme_section(heading, resolver):
+    """README links are relative to the repository root; the resolver treats paths as relative to docs/."""
+    ctx = mdlite.Context(resolve=lambda href: resolver(href if re.match(r"^[a-z]+:|#", href) else "../" + href))
+    out = mdlite.render(readme_section(heading), ctx)
+    if ctx.warnings:
+        raise SystemExit("build_site: README.md section %r: %s" % (heading, "; ".join(ctx.warnings)))
+    return out
+
+
+def home_html(pages, resolver):
     by_url = {p.url: p for p in pages}
     hero = """
 <section class="hero">
@@ -631,6 +655,13 @@ def home_html(pages):
   </div>
 </section>
 """
+    demo = (
+        '<section class="demo"><figure class="gif"><img src="@@SITE/assets/shmup.gif" width="640" height="360" '
+        'alt="The shmup example: a ship fires at waves of enemies that shoot rings of bullets">'
+        "<figcaption>examples/shmup, captured headless: the same frames on every run.</figcaption></figure></section>"
+        '<section><h2 class="sec-h">Quickstart</h2>' + render_readme_section("Quickstart", resolver) + "</section>"
+        '<section><h2 class="sec-h">How fast</h2>' + render_readme_section("How fast", resolver) + "</section>"
+    )
     cards = [
         ("Manual", "manual/getting-started.html", "Install, build and run; the editor, scenes, replays, debugging, and packing a game for Linux and the web. Start with the support status."),
         ("Pluma", "pluma/guide.html", "A guide to the scripting language, Pluma in five minutes, and the full language reference."),
@@ -667,6 +698,7 @@ def home_html(pages):
     code = mdlite.render_code(sample, "pluma")
     return (
         hero
+        + demo
         + f'<section><h2 class="sec-h">Where to start</h2><div class="cards">{c}</div></section>'
         + '<section class="split"><div><h2 class="sec-h">Pluma reads like what it does</h2>'
         "<p>Static types, brace syntax, and a node tree you can edit live. Scripts hot-reload while the game runs, and a replay of the same inputs always reaches the same state hash.</p>"
@@ -785,6 +817,17 @@ def main(argv=None):
                 print(f"build_site: {m}", file=sys.stderr)
             return 1
 
+    # Milestone 11.5: versions, platform support levels, milestone numbers and the width of `int`
+    # stated in the documents must agree with their sources of truth.
+    if not args.no_check:
+        import doc_checks  # noqa: E402
+
+        inconsistent = doc_checks.check_repo(ROOT)
+        if inconsistent:
+            for m in inconsistent:
+                print(f"build_site: inconsistent: {m}", file=sys.stderr)
+            return 1
+
     out = Path(args.out)
     if out.exists():
         shutil.rmtree(out)
@@ -806,7 +849,7 @@ def main(argv=None):
         pages_by_section.setdefault(p.section, []).append(p)
     # The Pluma section lists the guide chapters under the guide.
     home = Page("index.html", "Home", "", body="")
-    home.body = home_html(pages)
+    home.body = home_html(pages, make_resolver(home, docs, targets))
     home.description = "Cuervo Engine documentation: manual, Pluma language guide, tutorial and API reference."
 
     version = args.build_id
@@ -823,6 +866,7 @@ def main(argv=None):
     tokens = json.loads((ROOT / "assets/brand/tokens.json").read_text(encoding="utf-8"))
     css = (HERE / "site/site.css").read_text(encoding="utf-8").replace("/*@TOKENS@*/", css_tokens(tokens))
     write(out / "assets/site.css", css)
+    shutil.copyfile(ROOT / "docs/assets/shmup.gif", out / "assets/shmup.gif")
     for name in ("site.js", "search.js"):
         shutil.copyfile(HERE / "site" / name, out / "assets" / name)
     # The wordmark is drawn in currentColor, which an <img> can't inherit: one copy per theme.

@@ -1,0 +1,39 @@
+class Game extends Node {
+    fn panel(x: float, y: float, w: float, h: float) {
+        var p = NinePatchRect()
+        p.asset = "assets/panel.png"
+        p.position = vec2(x, y)
+        p.size = vec2(w, h)
+        p.margin_left = 6.0
+        p.margin_top = 6.0
+        p.margin_right = 6.0
+        p.margin_bottom = 6.0
+        self.add_child(p)
+    }
+
+    fn orb(path: str, x: float, y: float) {
+        var s = Sprite2D()
+        s.asset = path
+        s.position = vec2(x, y)
+        self.add_child(s)
+    }
+
+    fn label(s: str, size: float, x: float, y: float) {
+        var t = Text()
+        t.text = s
+        t.size = size
+        t.align = #center
+        t.baseline = #middle
+        t.position = vec2(x, y)
+        self.add_child(t)
+    }
+
+    fn ready() {
+        self.panel(20.0, 20.0, 150.0, 70.0)
+        self.panel(190.0, 20.0, 110.0, 140.0)
+        self.orb("assets/orb.png", 60.0, 130.0)
+        self.orb("assets/orb.webp", 120.0, 130.0)
+        self.label("مرحبا بالعالم", 24.0, 95.0, 55.0)
+        self.label("مرحبا", 20.0, 245.0, 90.0)
+    }
+}

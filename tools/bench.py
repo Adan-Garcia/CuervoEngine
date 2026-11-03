@@ -66,7 +66,12 @@ WORKLOADS = [1000, 10000, 50000, 100000]
 PRESSES = {1000: "5:more,15:more", 10000: "5:more,15:more,25:more", 50000: "", 100000: "5:more"}
 HASH_TICK = 600
 # The two capacity scenes (docs/PERFORMANCE.md "Scenes"): the project that holds each one.
-SCENES = {"dense": "bench", "sparse": "bench_spread"}
+SCENES = {"dense": "bench", "sparse": "bench_spread", "colliding": "bench_collide"}
+# Colliding-bullet record (milestone 11.8): every bullet is collidable, so counts are not comparable
+# with the draw-only workloads; they are kept under their own key in the record.
+COLLIDE_PROJECT = "bench_collide"
+COLLIDE_WORKLOADS = [10000, 50000, 100000]
+WORKLOAD_KEYS = ("workloads", "colliding_workloads")
 STEPS_LINE = "var steps = [1000, 10000, 50000, 100000]"
 
 BENCH_RE = re.compile(
@@ -216,16 +221,17 @@ def validate_record(rec):
             for k in ("gpu", "threads"):
                 if k not in d:
                     errors.append(f"{where}: missing '{k}'")
-            for wl, w in (d.get("workloads") or {}).items():
+            for wkey in WORKLOAD_KEYS:
+              for wl, w in (d.get(wkey) or {}).items():
                 if not wl.isdigit():
-                    errors.append(f"{where}.workloads: key '{wl}' is not a particle count")
+                    errors.append(f"{where}.{wkey}: key '{wl}' is not a particle count")
                 for k in ("frame_ms", "sim_tick_ms", "particles", "state_hash", "state_hash_jobs1"):
                     if k not in w:
-                        errors.append(f"{where}.workloads.{wl}: missing '{k}'")
+                        errors.append(f"{where}.{wkey}.{wl}: missing '{k}'")
                 if "frame_ms" in w and not all(x in w["frame_ms"] for x in ("mean", "p50", "p95", "p99", "max")):
-                    errors.append(f"{where}.workloads.{wl}.frame_ms: needs mean, p50, p95, p99, max")
+                    errors.append(f"{where}.{wkey}.{wl}.frame_ms: needs mean, p50, p95, p99, max")
                 if w.get("state_hash") != w.get("state_hash_jobs1"):
-                    errors.append(f"{where}.workloads.{wl}: state hash differs between job counts")
+                    errors.append(f"{where}.{wkey}.{wl}: state hash differs between job counts")
             for scene, cap in (d.get("capacity_60fps") or {}).items():
                 for k in ("particles", "binding_limit", "frame_limit", "cpu_limit", "context", "probes"):
                     if k not in cap:
@@ -242,11 +248,13 @@ def determinism_problems(rec):
     for bt, b in rec.get("builds", {}).items():
         seen = {}
         for be, d in b.get("backends", {}).items():
-            for wl, w in d.get("workloads", {}).items():
+            for wkey in WORKLOAD_KEYS:
+              for wl, w in d.get(wkey, {}).items():
                 h = w.get("state_hash")
-                if wl in seen and seen[wl][1] != h:
-                    problems.append(f"{bt}/{wl}: {seen[wl][0]} {seen[wl][1]} != {be} {h}")
-                seen.setdefault(wl, (be, h))
+                key = wl if wkey == "workloads" else f"collide-{wl}"
+                if key in seen and seen[key][1] != h:
+                    problems.append(f"{bt}/{key}: {seen[key][0]} {seen[key][1]} != {be} {h}")
+                seen.setdefault(key, (be, h))
     return problems
 
 
@@ -287,11 +295,12 @@ def compare_records(base, new, thresholds=None, allow_machine_mismatch=False):
             nd = nb.get("backends", {}).get(be)
             if nd is None:
                 continue
-            for wl, bw in bd.get("workloads", {}).items():
-                nw = nd.get("workloads", {}).get(wl)
+            pairs = [(wk, wl, bw) for wk in WORKLOAD_KEYS for wl, bw in bd.get(wk, {}).items()]
+            for wk, wl, bw in pairs:
+                nw = nd.get(wk, {}).get(wl)
                 if nw is None:
                     continue
-                scope = f"{bt}/{be}/{int(wl) // 1000}k"
+                scope = f"{bt}/{be}/{'collide-' if wk == 'colliding_workloads' else ''}{int(wl) // 1000}k"
                 same_hash = bw["state_hash"] == nw["state_hash"]
                 failed |= not same_hash
                 rows.append((scope, "state_hash", bw["state_hash"], nw["state_hash"], None, "equal",
@@ -688,6 +697,26 @@ def web_target(a):
     return rec, entry
 
 
+def record_workload(eng, project, n, a, label):
+    """Median stats, memory and the state hashes (default and --jobs 1) of `project` at `n` particles."""
+    samples = []
+    for i in range(a.runs):
+        s = eng.bench(project, PRESSES[n], a.duration, a.warmup)
+        samples.append(s)
+        print(f"  {label}: run {i + 1}/{a.runs} frame p95 {s['frame_ms']['p95']:.3f} ms, "
+              f"sim {s['sim_tick_ms']['mean']:.3f} ms/tick, {s['fps']:.0f} fps", flush=True)
+    w = median_stats(samples)
+    w.update(_gpu=samples[0]["_gpu"], _threads=samples[0]["_threads"], _resolution=samples[0]["resolution"],
+             _msaa=samples[0]["msaa"])
+    rss = [s["_rss"] for s in samples if s["_rss"] is not None]
+    if rss:
+        w["peak_rss_mb"] = round(statistics.median(rss), 1)
+    w["state_hash"] = eng.state_hash(project, PRESSES[n], None)
+    w["state_hash_jobs1"] = eng.state_hash(project, PRESSES[n], 1)
+    w["hash_tick"] = HASH_TICK
+    return w
+
+
 def cmd_record(a):
     check_backends(a)
     rec, entry = web_target(a) if a.web else merge_target(a.out, a.machine_id, a.build_dir)
@@ -699,25 +728,19 @@ def cmd_record(a):
         data["bench"] = {"runs": a.runs, "warmup_s": a.warmup, "duration_s": a.duration}
         workloads = {}
         for n in a.workloads:
-            samples = []
-            for i in range(a.runs):
-                s = eng.bench(project, PRESSES[n], a.duration, a.warmup)
-                samples.append(s)
-                print(f"  {backend} {n}: run {i + 1}/{a.runs} frame p95 {s['frame_ms']['p95']:.3f} ms, "
-                      f"sim {s['sim_tick_ms']['mean']:.3f} ms/tick, {s['fps']:.0f} fps", flush=True)
-            w = median_stats(samples)
-            data["gpu"] = samples[0]["_gpu"]
-            data["threads"] = samples[0]["_threads"]
-            data["resolution"] = samples[0]["resolution"]
-            data["msaa"] = samples[0]["msaa"]
-            rss = [s["_rss"] for s in samples if s["_rss"] is not None]
-            if rss:
-                w["peak_rss_mb"] = round(statistics.median(rss), 1)
-            w["state_hash"] = eng.state_hash(project, PRESSES[n], None)
-            w["state_hash_jobs1"] = eng.state_hash(project, PRESSES[n], 1)
-            w["hash_tick"] = HASH_TICK
+            w = record_workload(eng, project, n, a, f"{backend} {n}")
+            data["gpu"], data["threads"] = w.pop("_gpu"), w.pop("_threads")
+            data["resolution"], data["msaa"] = w.pop("_resolution"), w.pop("_msaa")
             workloads[str(n)] = w
         data["workloads"] = workloads
+        collide = {}
+        for n in (a.collide_workloads if not a.web else []):
+            w = record_workload(eng, ROOT / "examples" / COLLIDE_PROJECT, n, a, f"{backend} collide-{n}")
+            for k, dest in (("_gpu", "gpu"), ("_threads", "threads"), ("_resolution", "resolution"), ("_msaa", "msaa")):
+                data.setdefault(dest, w.pop(k))
+            collide[str(n)] = w
+        if collide:
+            data["colliding_workloads"] = collide
     if not a.no_export and not a.web:  # web export sizes: docs/EXPORT.md "Sizes"
         with tempfile.TemporaryDirectory(prefix="cuervo-export-") as work:
             entry["exports"] = export_sizes(a.build_dir, ["shmup", "bench"], work, ["full", "stripped"],
@@ -868,7 +891,9 @@ def main(argv=None):
 
     r = sub.add_parser("record", help="measure the 1k/10k/50k/100k workloads")
     common(r)
-    r.add_argument("--workloads", nargs="+", type=int, default=WORKLOADS, choices=WORKLOADS)
+    r.add_argument("--workloads", nargs="*", type=int, default=WORKLOADS, choices=WORKLOADS)
+    r.add_argument("--collide-workloads", nargs="*", type=int, default=COLLIDE_WORKLOADS, choices=WORKLOADS,
+                   help="colliding-bullet counts to record under colliding_workloads (none: skip)")
     r.add_argument("--runs", type=int, default=3)
     r.add_argument("--warmup", type=float, default=4.0)
     r.add_argument("--duration", type=float, default=6.0)
@@ -883,7 +908,7 @@ def main(argv=None):
     c.add_argument("--duration", type=float, default=4.0)
     c.add_argument("--min", type=int, default=10000)
     c.add_argument("--max", type=int, default=2000000)
-    c.add_argument("--scenes", nargs="+", default=["dense", "sparse"], choices=list(SCENES))
+    c.add_argument("--scenes", nargs="+", default=["dense", "sparse", "colliding"], choices=list(SCENES))
     c.add_argument("--resolution", type=float, default=0.05)
     c.set_defaults(fn=cmd_capacity)
 

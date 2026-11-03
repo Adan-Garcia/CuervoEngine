@@ -6,6 +6,7 @@
 
 #include "cuervo/core/log.hpp"
 #include "cuervo/math/dmath.hpp"
+#include "cuervo/render/post_fx.hpp" // srgb_to_linear
 #include "cuervo/render/sdf_batcher.hpp"
 #include "shaders/light_frag.hpp"
 #include "shaders/light_vert.hpp"
@@ -579,13 +580,17 @@ void LightBatcher::flush(const Affine2& world_to_ndc, vec2 world_bounds_center, 
     const std::size_t n_lights = std::min(lights_.size(), max_gpu_lights);
 
     LightViewUniforms view_u;
-    view_u.row0 = vec4{world_to_ndc.a, world_to_ndc.c, world_to_ndc.tx, 0.0f};
+    view_u.row0 = vec4{world_to_ndc.a, world_to_ndc.c, world_to_ndc.tx, device_->info().linear_color ? 1.0f : 0.0f};
     view_u.row1 = vec4{world_to_ndc.b, world_to_ndc.d, world_to_ndc.ty, 0.0f};
 
     LightSceneUniforms scene_u{};
     scene_u.counts[2] = 80u;
+    // Authored colors are sRGB; in linear mode the scene math runs on linear values (4.19).
+    const bool linear = device_->info().linear_color;
+    const auto working = [linear](rhi::Color c) { return linear ? srgb_to_linear(c) : c; };
+    const rhi::Color ambient_rgb = working(ambient_.color);
     scene_u.ambient_color =
-        vec4{ambient_.color.r, ambient_.color.g, ambient_.color.b, std::clamp(ambient_.darkness, 0.0f, 1.0f)};
+        vec4{ambient_rgb.r, ambient_rgb.g, ambient_rgb.b, std::clamp(ambient_.darkness, 0.0f, 1.0f)};
     scene_u.ambient_params = vec4{std::max(ambient_.light_glow, 0.0f), world_units_per_pixel, 0.0f, 0.0f};
 
     // Per light, the occluders whose bounds come within its reach (plus the
@@ -646,9 +651,10 @@ void LightBatcher::flush(const Affine2& world_to_ndc, vec2 world_bounds_center, 
         compute_spot_cos(l, cos_outer, cos_inner);
         scene_u.light_pos_rad[i] =
             vec4{l.position.x(), l.position.y(), std::max(l.radius, 0.0f), std::max(l.source_radius, 0.0f)};
-        scene_u.light_color[i] =
-            vec4{l.color.r * l.color.a, l.color.g * l.color.a, l.color.b * l.color.a, std::max(l.energy, 0.0f)};
-        scene_u.light_shadow[i] = vec4{l.shadow_color.r, l.shadow_color.g, l.shadow_color.b, l.shadow_color.a};
+        const rhi::Color lc = working(l.color);
+        const rhi::Color sc = working(l.shadow_color);
+        scene_u.light_color[i] = vec4{lc.r * l.color.a, lc.g * l.color.a, lc.b * l.color.a, std::max(l.energy, 0.0f)};
+        scene_u.light_shadow[i] = vec4{sc.r, sc.g, sc.b, l.shadow_color.a};
         scene_u.light_params0[i] = vec4{dmath::cos(l.rotation), dmath::sin(l.rotation), cos_outer, cos_inner};
         scene_u.light_params1[i] = vec4{std::max(l.falloff, 0.0f), std::max(l.shadow_softness, 0.0f),
                                         static_cast<float>(first), static_cast<float>(n_refs - first)};

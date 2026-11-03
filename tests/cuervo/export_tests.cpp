@@ -12,7 +12,9 @@
 #include "cuervo/assets/manifest.hpp"
 #include "cuervo/assets/pack.hpp"
 #include "cuervo/input/devices.hpp"
+#include "cuervo/render/font_import.hpp"
 #include "cuervo/script/game_session.hpp"
+#include "cuervo/script/project.hpp"
 #include "cuervo/script/tier_check.hpp"
 #include "tools/cuervo_tools/export.hpp"
 
@@ -292,6 +294,63 @@ class Main extends Node {
     CHECK(fs::exists(dir / "user/saves/slot.scene"));
 }
 
+TEST_CASE("[text] fallbacks: loaded from the project and from the pack") {
+    if (!render::font_import_available()) return;
+    const fs::path dir = temp_dir("fallbacks");
+    write_text(dir / "game/project.toml",
+               "name = \"Fb\"\nmain = \"Main\"\n[text]\nfallbacks = [\"assets/fonts/extra.ttf\"]\n");
+    write_text(dir / "game/scripts/main.plm", "class Main extends Node {}\n");
+    fs::create_directories(dir / "game/assets/fonts");
+    fs::copy_file(font, dir / "game/assets/fonts/extra.ttf");
+
+    std::string error;
+    auto project = script::load_project(dir / "game", error);
+    REQUIRE_MESSAGE(project, error);
+    REQUIRE(project->font_fallbacks.size() == 1);
+    CHECK(project->font_fallbacks[0] == "assets/fonts/extra.ttf");
+
+    script::SessionOptions dev;
+    dev.dir = dir / "game";
+    dev.font_path = font;
+    dev.jobs = 1;
+    {
+        script::GameSession session;
+        REQUIRE_MESSAGE(session.init(dev, error), error);
+        CHECK(session.fallback_atlases().size() == 1);
+    }
+
+    tools::PackOptions o = options();
+    o.tier_gate = false;
+    tools::PackSummary s;
+    auto bytes = tools::pack_project(dir / "game", o, s, error);
+    REQUIRE_MESSAGE(bytes, error);
+    auto pack = assets::Pack::from_bytes(*bytes, error);
+    REQUIRE_MESSAGE(pack, error);
+    CHECK(pack->contains("assets/fonts/extra.efont")); // the export carries the imported fallback
+    {
+        std::ofstream out(dir / "game.pak", std::ios::binary);
+        out.write(reinterpret_cast<const char*>(bytes->data()), static_cast<std::streamsize>(bytes->size()));
+    }
+    script::SessionOptions rel;
+    rel.pack = dir / "game.pak";
+    rel.jobs = 1;
+    script::GameSession session;
+    REQUIRE_MESSAGE(session.init(rel, error), error);
+    CHECK(session.fallback_atlases().size() == 1);
+}
+
+TEST_CASE("[text] fallbacks: bad paths are rejected") {
+    std::string error;
+    auto write = [&](const char* v) {
+        const fs::path d = temp_dir("fallback_bad");
+        write_text(d / "project.toml", std::string("name = \"X\"\n[text]\nfallbacks = ") + v + "\n");
+        return script::load_project(d, error);
+    };
+    CHECK_FALSE(write("[\"../x.ttf\"]"));
+    CHECK_FALSE(write("\"x.ttf\""));
+    CHECK(write("[\"a.ttf\"]"));
+}
+
 TEST_CASE("release session: a pack that isn't an exported game is refused") {
     const fs::path dir = temp_dir("not_a_game");
     assets::PackBuilder b;
@@ -333,4 +392,33 @@ TEST_CASE("export: third-party notices are copied into licenses/") {
     // The repository's own notices exist and are what export ships.
     const fs::path repo = fs::path(CUERVO_EXAMPLES_DIR).parent_path();
     CHECK(fs::is_regular_file(repo / "THIRD_PARTY_NOTICES.md"));
+}
+
+TEST_CASE("pack_project: images ship as .ctex and atlases as .catlas (11.2a)") {
+    const fs::path dir = temp_dir("sprites");
+    fs::copy(shmup_dir, dir / "game", fs::copy_options::recursive);
+    const fs::path p = dir / "game";
+    fs::create_directories(p / "art");
+    // A 1x1 QOI image (one RGBA op).
+    const unsigned char png[] = {'q', 'o', 'i', 'f', 0, 0, 0, 1, 0, 0, 0, 1, 4, 0, 0xff, 200, 100, 50, 255,
+                                 0, 0, 0, 0, 0, 0, 0, 1};
+    {
+        std::ofstream out(p / "art/dot.qoi", std::ios::binary);
+        out.write(reinterpret_cast<const char*>(png), sizeof png);
+    }
+    fs::copy_file(fs::path(CUERVO_ASSETS_DIR) / "demo/robot.svg", p / "art/robot.svg");
+    write_text(p / "art/ui.atlas", R"({"sprites":["art/dot.qoi",{"path":"art/robot.svg","name":"robot","scale":0.25}]})");
+    auto pack = pack_of(p, options());
+    REQUIRE(pack);
+    CHECK(pack->contains("art/dot.ctex"));
+    CHECK_FALSE(pack->contains("art/dot.qoi"));
+    CHECK(pack->contains("art/ui.catlas"));
+    CHECK_FALSE(pack->contains("art/ui.atlas"));
+    auto bytes = pack->find("art/ui.catlas");
+    REQUIRE(bytes.has_value());
+    // Packing twice gives the same atlas bytes.
+    auto again = pack_of(p, options());
+    auto bytes2 = again->find("art/ui.catlas");
+    REQUIRE(bytes2.has_value());
+    CHECK(std::equal(bytes->begin(), bytes->end(), bytes2->begin(), bytes2->end()));
 }

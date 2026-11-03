@@ -128,6 +128,8 @@ private:
     NodeId selection_ = 0;
     std::vector<NodeId> selected_;
     std::filesystem::path path_;
+    // A scene opened from a binary file stays binary on Save; new scenes are text (11.2c).
+    bool binary_ = false;
     std::string error_;
     std::uint64_t reloads_ = 0; // bumps revision() on new/open
 };

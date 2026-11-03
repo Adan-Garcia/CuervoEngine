@@ -1,6 +1,6 @@
 # Windows status
 
-Windows is a target platform (DESIGN.md 2). Milestone 10.5a verified it: the engine builds
+Windows is a target platform (DESIGN.md 2). The engine builds
 with zero warnings using MSVC, MinGW-w64 GCC and Clang. The test suite passes and the
 shmup reaches the Linux state hash. Exports ship a GUI-subsystem player, and the release
 workflow publishes prebuilt editor, tools and export templates. Validation ran on a

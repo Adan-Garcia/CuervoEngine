@@ -1,0 +1,57 @@
+// Engine API: localization (DESIGN.md 4.19, 11.3).
+//
+// String tables map a key (a name such as `#start_game`) to the text of each
+// locale. Load a CSV from the project with `Locale.load("locale/strings.csv")`:
+// the first row is `key,en,ar,ja`, then one row per key; a plural form is a key
+// with a category suffix (`items.one`, `items.other`; Arabic also uses
+// `.zero`, `.two`, `.few`, `.many`). Quote cells that contain commas.
+//
+// The locale is display state, outside the simulation: it is never hashed or
+// replayed, so do not branch game logic on translated text, formatted numbers
+// or `Locale.current()`. Use `Locale.revision()` to know when a UI should
+// rebuild its text after a switch.
+//
+// Usage: `Locale.set_locale("ar")`, `tr(#start_game)`,
+// `Locale.tr_plural(#items, 3, [Locale.format_int(3)])` with the table text
+// `You have {0} items`.
+class Locale {
+    // Reads a CSV string table from a project file; false (and a warning) on failure.
+    @native static fn load(path: str) -> bool {}
+    // Adds or replaces one entry.
+    @native static fn add(locale: str, key: str, text: str) {}
+    // Switches the active locale ("ar", "ja", "pt-BR"); false if no table has it.
+    @native static fn set_locale(locale: str) -> bool {}
+    // The locale used for keys the active one lacks (default "en").
+    @native static fn set_fallback(locale: str) {}
+    // The active locale id.
+    @native static fn current() -> str {}
+    // True if a table exists for the locale.
+    @native static fn has_locale(locale: str) -> bool {}
+    // Every locale with a table, sorted.
+    @native static fn locales() -> List<str> {}
+    // True for right-to-left locales: mirror your layout.
+    @native static fn is_rtl() -> bool {}
+    // Changes whenever the locale or a table changes.
+    @native static fn revision() -> int {}
+    // True if the active locale or a fallback has text for the key.
+    @native static fn has(key: name) -> bool {}
+    // The text of `key` (the key itself if missing).
+    @native static fn tr(key: name) -> str {}
+    // As tr(), replacing {0}, {1} ... with the arguments.
+    @native static fn tr_args(key: name, args: List<str>) -> str {}
+    // The plural form of `key` for `n` (`key.one`, `key.other` ...), with arguments.
+    @native static fn tr_plural(key: name, n: int, args: List<str> = []) -> str {}
+    // Number and date formatting for the active locale (digits, separators, field order).
+    @native static fn format_int(n: int) -> str {}
+    // Decimal with `decimals` places, e.g. "1,234.50" (en) or "1.234,50" (de).
+    @native static fn format_float(x: float, decimals: int = 2) -> str {}
+    // Short numeric date in the locale's field order.
+    @native static fn format_date(year: int, month: int, day: int) -> str {}
+    // 12 or 24 hour time per locale.
+    @native static fn format_time(hour: int, minute: int) -> str {}
+}
+
+// Shorthand for Locale.tr.
+fn tr(key: name) -> str {
+    return Locale.tr(key)
+}

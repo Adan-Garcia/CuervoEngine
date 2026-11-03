@@ -97,9 +97,9 @@ WGPUPrimitiveTopology to_wgpu(rhi::Topology topology) {
     return WGPUPrimitiveTopology_TriangleList;
 }
 
-WGPUTextureFormat to_wgpu(rhi::TextureFormat format) {
+WGPUTextureFormat to_wgpu(rhi::TextureFormat format, bool srgb = false) {
     switch (format) {
-        case rhi::TextureFormat::RGBA8: return WGPUTextureFormat_RGBA8Unorm;
+        case rhi::TextureFormat::RGBA8: return srgb ? WGPUTextureFormat_RGBA8UnormSrgb : WGPUTextureFormat_RGBA8Unorm;
         case rhi::TextureFormat::R8:    return WGPUTextureFormat_R8Unorm;
     }
     return WGPUTextureFormat_RGBA8Unorm;
@@ -130,6 +130,14 @@ std::optional<WGPUBlendState> blend_state(rhi::BlendMode mode) {
         case rhi::BlendMode::Additive:
             b.color = blend_component(WGPUBlendFactor_SrcAlpha, WGPUBlendFactor_One);
             b.alpha = blend_component(WGPUBlendFactor_One, WGPUBlendFactor_One);
+            return b;
+        case rhi::BlendMode::AdditivePremultiplied:
+            b.color = blend_component(WGPUBlendFactor_One, WGPUBlendFactor_One);
+            b.alpha = blend_component(WGPUBlendFactor_One, WGPUBlendFactor_One);
+            return b;
+        case rhi::BlendMode::Screen: // src + dst*(1 - src), premultiplied source
+            b.color = blend_component(WGPUBlendFactor_OneMinusDst, WGPUBlendFactor_One);
+            b.alpha = blend_component(WGPUBlendFactor_One, WGPUBlendFactor_OneMinusSrcAlpha);
             return b;
     }
     return std::nullopt;
@@ -201,6 +209,19 @@ struct Texture {
     std::int32_t width = 0;
     std::int32_t height = 0;
     rhi::TextureFormat format = rhi::TextureFormat::RGBA8;
+};
+
+// An offscreen target: `texture` (in textures_by_id_) is the sampled color;
+// with MSAA a persistent multisampled texture is drawn into and resolved into
+// it by every pass.
+struct RenderTarget {
+    std::uint32_t texture = 0;
+    std::int32_t width = 0;
+    std::int32_t height = 0;
+    WGPUTexture msaa = nullptr;
+    WGPUTextureView msaa_view = nullptr;
+    bool drawn = false;
+    std::optional<rhi::Color> pending_clear;
 };
 
 struct Pipeline {
@@ -318,7 +339,8 @@ public:
         wgpuDeviceGetLimits(device_, &limits);
         max_uniform_binding_ = static_cast<std::size_t>(limits.maxUniformBufferBindingSize);
 
-        target_format_ = WGPUTextureFormat_RGBA8Unorm;
+        linear_requested_ = options.linear_color;
+        target_format_ = linear_requested_ ? WGPUTextureFormat_RGBA8UnormSrgb : WGPUTextureFormat_RGBA8Unorm;
         bool capture = true;
         if (surface_ && !choose_surface_config(options.vsync, capture)) {
             wgpuSurfaceRelease(surface_);
@@ -338,7 +360,7 @@ public:
         rhi::FeatureSet hw;
         for (rhi::Feature f : {rhi::Feature::InstancedDraws, rhi::Feature::IndexUInt32, rhi::Feature::UniformBuffers,
                                rhi::Feature::Textures, rhi::Feature::IntegerAttributes, rhi::Feature::PointsAndLines,
-                               rhi::Feature::Msaa}) {
+                               rhi::Feature::Msaa, rhi::Feature::TextureMips, rhi::Feature::RenderTargets}) {
             hw.set(f);
         }
         hw.set(rhi::Feature::FrameCapture, capture);
@@ -349,6 +371,11 @@ public:
             static_cast<std::uint32_t>(std::min<std::uint64_t>(limits.maxUniformBufferBindingSize, 0xffffffffu));
         info_.limits.max_vertex_attributes = limits.maxVertexAttributes;
         info_.limits.uniform_offset_alignment = limits.minUniformBufferOffsetAlignment;
+        info_.linear_color = info_.window_srgb = linear_requested_ && (target_format_ == WGPUTextureFormat_BGRA8UnormSrgb ||
+                                                                       target_format_ == WGPUTextureFormat_RGBA8UnormSrgb);
+        if (linear_requested_ && !info_.linear_color) {
+            LOG_WARN("WebGPU: the surface has no sRGB format; linear color is unavailable");
+        }
         rhi::detail::apply_tier_gate(info_, options.tier);
         // WebGPU has no 2x: anything below 4 renders without MSAA.
         msaa_samples_ = rhi::detail::msaa_sample_count(options.msaa_samples, info_.limits.max_msaa_samples) >= 4 ? 4 : 1;
@@ -373,6 +400,7 @@ public:
         in_frame_ = true;
         first_pass_ = true;
         pending_clear_.reset();
+        current_target_ = 0;
         pipeline_ = 0;
         vertex_ = {};
         index_buffer_ = 0;
@@ -384,9 +412,10 @@ public:
 
     void clear(rhi::Color color) override {
         if (!in_frame_) return;
-        const rhi::Rect full{0, 0, fb_size_.x(), fb_size_.y()};
-        if (!pass_ && clamp_rect(scissor_, fb_size_) == full) {
-            pending_clear_ = color; // the next pass starts with it
+        const ivec2 size = framebuffer_size();
+        const rhi::Rect full{0, 0, size.x(), size.y()};
+        if (!pass_ && clamp_rect(scissor_, size) == full) {
+            pending_clear_ref() = color; // the next pass starts with it
             return;
         }
         // Scissored (or mid-pass) clear: a triangle over the whole target,
@@ -409,6 +438,7 @@ public:
 
     void end_frame() override {
         if (!in_frame_) return;
+        set_render_target({});
         if (first_pass_ || pending_clear_) ensure_pass(); // clears land even in a frame without draws
         end_pass();
         submit(true);
@@ -422,7 +452,82 @@ public:
         trim_caches();
     }
 
-    ivec2 framebuffer_size() const override { return fb_size_; }
+    ivec2 framebuffer_size() const override {
+        if (const RenderTarget* t = find(targets_, current_target_)) return {t->width, t->height};
+        return fb_size_;
+    }
+
+    rhi::RenderTargetHandle create_render_target(const rhi::RenderTargetDesc& desc) override {
+        if (!rhi::detail::render_target_allowed(info_, desc)) return {};
+        WGPUTextureDescriptor td = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        td.label = sv(desc.debug_name);
+        td.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+        td.dimension = WGPUTextureDimension_2D;
+        td.size = {static_cast<std::uint32_t>(desc.width), static_cast<std::uint32_t>(desc.height), 1};
+        td.format = target_format_; // the window's, so every pipeline fits
+        td.mipLevelCount = 1;
+        td.sampleCount = 1;
+        Texture t;
+        t.gpu = wgpuDeviceCreateTexture(device_, &td); // zero-initialized by WebGPU
+        if (!t.gpu) return {};
+        t.view = wgpuTextureCreateView(t.gpu, nullptr);
+        t.filter = desc.filter;
+        t.width = desc.width;
+        t.height = desc.height;
+        RenderTarget target;
+        target.width = desc.width;
+        target.height = desc.height;
+        if (msaa_samples_ > 1) {
+            td.usage = WGPUTextureUsage_RenderAttachment;
+            td.sampleCount = msaa_samples_;
+            target.msaa = wgpuDeviceCreateTexture(device_, &td);
+            if (!target.msaa) {
+                wgpuTextureViewRelease(t.view);
+                wgpuTextureRelease(t.gpu);
+                return {};
+            }
+            target.msaa_view = wgpuTextureCreateView(target.msaa, nullptr);
+        }
+        target.texture = next_id_++;
+        textures_by_id_.emplace(target.texture, t);
+        const std::uint32_t id = next_id_++;
+        targets_.emplace(id, target);
+        return {id};
+    }
+
+    rhi::TextureHandle render_target_texture(rhi::RenderTargetHandle handle) const override {
+        const RenderTarget* t = find(targets_, handle.id);
+        return t ? rhi::TextureHandle{t->texture} : rhi::TextureHandle{};
+    }
+
+    void destroy_render_target(rhi::RenderTargetHandle handle) override {
+        auto it = targets_.find(handle.id);
+        if (it == targets_.end()) return;
+        if (current_target_ == handle.id) set_render_target({});
+        const RenderTarget target = it->second;
+        targets_.erase(it);
+        if (target.msaa_view) wgpuTextureViewRelease(target.msaa_view);
+        if (target.msaa) wgpuTextureRelease(target.msaa);
+        destroying_target_ = true;
+        destroy_texture({target.texture});
+        destroying_target_ = false;
+    }
+
+    void set_render_target(rhi::RenderTargetHandle handle) override {
+        if (!in_frame_) {
+            LOG_ERROR("set_render_target outside begin_frame/end_frame");
+            return;
+        }
+        if (handle.id && !find(targets_, handle.id)) {
+            LOG_ERROR("set_render_target: invalid render target {}", handle.id);
+            return;
+        }
+        if (handle.id == current_target_) return;
+        end_pass(); // contents persist; the next pass on a target loads them
+        current_target_ = handle.id;
+        const ivec2 size = framebuffer_size();
+        viewport_ = scissor_ = rhi::Rect{0, 0, size.x(), size.y()};
+    }
 
     rhi::BufferHandle create_buffer(const rhi::BufferDesc& desc) override {
         Buffer b;
@@ -492,14 +597,15 @@ public:
     }
 
     rhi::TextureHandle create_texture(const rhi::TextureDesc& desc) override {
-        if (!rhi::detail::texture_size_allowed(info_, desc)) return {};
+        const std::uint32_t levels = rhi::detail::texture_levels(info_, desc);
+        if (levels == 0) return {};
         WGPUTextureDescriptor td = WGPU_TEXTURE_DESCRIPTOR_INIT;
         td.label = sv(desc.debug_name);
         td.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
         td.dimension = WGPUTextureDimension_2D;
         td.size = {static_cast<std::uint32_t>(desc.width), static_cast<std::uint32_t>(desc.height), 1};
-        td.format = to_wgpu(desc.format);
-        td.mipLevelCount = 1;
+        td.format = to_wgpu(desc.format, desc.srgb);
+        td.mipLevelCount = levels;
         td.sampleCount = 1;
         Texture t;
         t.gpu = wgpuDeviceCreateTexture(device_, &td); // zero-initialized by WebGPU
@@ -509,8 +615,13 @@ public:
         t.width = desc.width;
         t.height = desc.height;
         t.format = desc.format;
-        if (desc.initial_data) {
-            write_texture(t, {0, 0, desc.width, desc.height}, desc.initial_data);
+        for (std::uint32_t level = 0; level < levels; ++level) {
+            const std::span<const std::byte> data = rhi::detail::texture_level_data(desc, level);
+            if (!data.empty()) {
+                write_texture(t, {0, 0, rhi::detail::mip_extent(desc.width, level),
+                                  rhi::detail::mip_extent(desc.height, level)},
+                              data.data(), level);
+            }
         }
         const std::uint32_t id = next_id_++;
         textures_by_id_.emplace(id, t);
@@ -533,6 +644,14 @@ public:
     void destroy_texture(rhi::TextureHandle handle) override {
         auto it = textures_by_id_.find(handle.id);
         if (it == textures_by_id_.end()) return;
+        if (!destroying_target_) {
+            for (const auto& [id, target] : targets_) {
+                if (target.texture == handle.id) {
+                    LOG_ERROR("destroy_texture: texture {} belongs to a render target; destroy the target", handle.id);
+                    return;
+                }
+            }
+        }
         wgpuTextureViewRelease(it->second.view);
         wgpuTextureRelease(it->second.gpu); // deferred by reference counting
         textures_by_id_.erase(it);
@@ -723,7 +842,8 @@ public:
         begin_encoder(); // the rest of the frame continues in a new pass (load op Load)
 
         auto capture = std::make_unique<Capture>(Capture{readback, std::move(path), width, height, row,
-                                                         target_format_ == WGPUTextureFormat_BGRA8Unorm});
+                                                         target_format_ == WGPUTextureFormat_BGRA8Unorm ||
+                                                         target_format_ == WGPUTextureFormat_BGRA8UnormSrgb});
         WGPUBufferMapCallbackInfo cb = WGPU_BUFFER_MAP_CALLBACK_INFO_INIT;
 #ifdef __EMSCRIPTEN__
         // A main-loop callback can't block in the browser: the file is
@@ -770,6 +890,12 @@ public:
     }
 
 private:
+    template<typename T>
+    static const T* find(const std::unordered_map<std::uint32_t, T>& map, std::uint32_t id) {
+        auto it = map.find(id);
+        return it == map.end() ? nullptr : &it->second;
+    }
+
     template<typename T>
     static T* find(std::unordered_map<std::uint32_t, T>& map, std::uint32_t id) {
         auto it = map.find(id);
@@ -931,7 +1057,13 @@ private:
         const std::span<const WGPUCompositeAlphaMode> alphas(caps.alphaModes, caps.alphaModeCount);
         auto has = [](auto list, auto value) { return std::find(list.begin(), list.end(), value) != list.end(); };
         bool found = false;
-        for (WGPUTextureFormat f : {WGPUTextureFormat_BGRA8Unorm, WGPUTextureFormat_RGBA8Unorm}) {
+        std::vector<WGPUTextureFormat> wanted;
+        if (linear_requested_) {
+            wanted = {WGPUTextureFormat_BGRA8UnormSrgb, WGPUTextureFormat_RGBA8UnormSrgb};
+        }
+        wanted.push_back(WGPUTextureFormat_BGRA8Unorm);
+        wanted.push_back(WGPUTextureFormat_RGBA8Unorm);
+        for (WGPUTextureFormat f : wanted) {
             if (!found && has(formats, f)) {
                 target_format_ = f;
                 found = true;
@@ -1071,23 +1203,35 @@ private:
         ++epoch_;
     }
 
+    std::optional<rhi::Color>& pending_clear_ref() {
+        RenderTarget* t = find(targets_, current_target_);
+        return t ? t->pending_clear : pending_clear_;
+    }
+
     void ensure_pass() {
         if (pass_) return;
+        RenderTarget* rt = find(targets_, current_target_);
+        WGPUTextureView single = rt ? textures_by_id_.at(rt->texture).view : target_view_;
+        WGPUTextureView multi = rt ? rt->msaa_view : msaa_view_;
+        std::optional<rhi::Color>& pending = pending_clear_ref();
         WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
-        color.view = msaa_samples_ > 1 ? msaa_view_ : target_view_;
-        color.resolveTarget = msaa_samples_ > 1 ? target_view_ : nullptr;
+        color.view = multi ? multi : single;
+        color.resolveTarget = multi ? single : nullptr;
         // The first pass of a frame starts from black (the GL and Vulkan
-        // targets hold undefined contents there; callers clear first).
-        color.loadOp = first_pass_ || pending_clear_ ? WGPULoadOp_Clear : WGPULoadOp_Load;
+        // targets hold undefined contents there; callers clear first); a render
+        // target starts transparent black and keeps its contents after that.
+        const bool fresh = rt ? !rt->drawn : first_pass_;
+        color.loadOp = fresh || pending ? WGPULoadOp_Clear : WGPULoadOp_Load;
         color.storeOp = WGPUStoreOp_Store;
-        const rhi::Color c = pending_clear_.value_or(rhi::Color{0.0f, 0.0f, 0.0f, 1.0f});
+        const rhi::Color c = pending.value_or(rt ? rhi::Color{0.0f, 0.0f, 0.0f, 0.0f} : rhi::Color{0.0f, 0.0f, 0.0f, 1.0f});
         color.clearValue = {c.r, c.g, c.b, c.a};
         WGPURenderPassDescriptor rp = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         rp.colorAttachmentCount = 1;
         rp.colorAttachments = &color;
         pass_ = wgpuCommandEncoderBeginRenderPass(encoder_, &rp);
-        first_pass_ = false;
-        pending_clear_.reset();
+        if (rt) rt->drawn = true;
+        else first_pass_ = false;
+        pending.reset();
         applied_ = {};
     }
 
@@ -1131,10 +1275,11 @@ private:
         }
     }
 
-    void write_texture(const Texture& t, rhi::Rect region, const void* data) {
+    void write_texture(const Texture& t, rhi::Rect region, const void* data, std::uint32_t level = 0) {
         const std::size_t texel = rhi::texture_format_size(t.format);
         WGPUTexelCopyTextureInfo dst = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
         dst.texture = t.gpu;
+        dst.mipLevel = level;
         dst.origin = {static_cast<std::uint32_t>(region.x), static_cast<std::uint32_t>(region.y), 0};
         WGPUTexelCopyBufferLayout layout = WGPU_TEXEL_COPY_BUFFER_LAYOUT_INIT;
         layout.bytesPerRow = static_cast<std::uint32_t>(texel * static_cast<std::size_t>(region.width));
@@ -1237,7 +1382,7 @@ private:
                                              static_cast<float>(viewport_.height), 0.0f, 1.0f);
             applied_.viewport = viewport_;
         }
-        const rhi::Rect scissor = clamp_rect(scissor_, fb_size_);
+        const rhi::Rect scissor = clamp_rect(scissor_, framebuffer_size());
         if (applied_.scissor != scissor) {
             wgpuRenderPassEncoderSetScissorRect(pass_, static_cast<std::uint32_t>(scissor.x),
                                                 static_cast<std::uint32_t>(scissor.y),
@@ -1325,7 +1470,10 @@ private:
             WGPUSamplerDescriptor sd = WGPU_SAMPLER_DESCRIPTOR_INIT;
             sd.addressModeU = sd.addressModeV = sd.addressModeW = WGPUAddressMode_ClampToEdge;
             sd.magFilter = sd.minFilter = f == 1 ? WGPUFilterMode_Linear : WGPUFilterMode_Nearest;
-            sd.mipmapFilter = WGPUMipmapFilterMode_Nearest;
+            // Trilinear for Linear, nearest level for Nearest, like the other backends.
+            sd.mipmapFilter = f == 1 ? WGPUMipmapFilterMode_Linear : WGPUMipmapFilterMode_Nearest;
+            sd.lodMinClamp = 0.0f;
+            sd.lodMaxClamp = 32.0f;
             samplers_[static_cast<std::size_t>(f)] = wgpuDeviceCreateSampler(device_, &sd);
         }
         WGPUBufferDescriptor bd = WGPU_BUFFER_DESCRIPTOR_INIT;
@@ -1381,6 +1529,11 @@ private:
             wgpuTextureRelease(t.gpu);
         }
         textures_by_id_.clear();
+        for (auto& [id, t] : targets_) {
+            if (t.msaa_view) wgpuTextureViewRelease(t.msaa_view);
+            if (t.msaa) wgpuTextureRelease(t.msaa);
+        }
+        targets_.clear();
         for (WGPUSampler& s : samplers_) {
             if (s) wgpuSamplerRelease(s);
             s = nullptr;
@@ -1417,6 +1570,7 @@ private:
     WGPUQueue queue_ = nullptr;
     WGPUSurface surface_ = nullptr;
     WGPUTextureFormat target_format_ = WGPUTextureFormat_RGBA8Unorm;
+    bool linear_requested_ = false;
     WGPUTextureUsage surface_usage_ = WGPUTextureUsage_RenderAttachment;
     WGPUPresentMode present_mode_ = WGPUPresentMode_Fifo;
     WGPUCompositeAlphaMode alpha_mode_ = WGPUCompositeAlphaMode_Opaque;
@@ -1456,6 +1610,9 @@ private:
     std::uint32_t next_id_ = 1;
     std::unordered_map<std::uint32_t, Buffer> buffers_;
     std::unordered_map<std::uint32_t, Texture> textures_by_id_;
+    std::unordered_map<std::uint32_t, RenderTarget> targets_;
+    std::uint32_t current_target_ = 0; // 0 = the window
+    bool destroying_target_ = false;
     std::unordered_map<std::uint32_t, Pipeline> pipelines_;
     std::deque<RetiredBuffer> retired_;
     std::map<std::vector<std::uint64_t>, WGPUBindGroup> bind_groups_;

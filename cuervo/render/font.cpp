@@ -26,6 +26,54 @@ const FontGlyph* FontAtlas::find(std::uint32_t codepoint) const {
     return it != glyphs.end() && it->codepoint == codepoint ? &*it : nullptr;
 }
 
+const FontGlyph* FontAtlas::find_by_id(std::uint32_t glyph_id) const {
+    if (!has_glyph_ids) {
+        return nullptr;
+    }
+    const auto at = [&](std::uint32_t i) -> const FontGlyph& {
+        return i < glyphs.size() ? glyphs[i] : extra_glyphs[i - glyphs.size()];
+    };
+    if (by_id.size() == glyphs.size() + extra_glyphs.size()) {
+        auto it = std::lower_bound(by_id.begin(), by_id.end(), glyph_id,
+                                   [&](std::uint32_t i, std::uint32_t id) { return at(i).glyph_id < id; });
+        return it != by_id.end() && at(*it).glyph_id == glyph_id ? &at(*it) : nullptr;
+    }
+    for (const FontGlyph& g : glyphs) { // index not built: slow path
+        if (g.glyph_id == glyph_id) {
+            return &g;
+        }
+    }
+    for (const FontGlyph& g : extra_glyphs) {
+        if (g.glyph_id == glyph_id) {
+            return &g;
+        }
+    }
+    return nullptr;
+}
+
+void FontAtlas::build_glyph_index() {
+    by_id.clear();
+    if (!has_glyph_ids) {
+        return;
+    }
+    by_id.resize(glyphs.size() + extra_glyphs.size());
+    for (std::uint32_t i = 0; i < by_id.size(); ++i) {
+        by_id[i] = i;
+    }
+    const auto at = [&](std::uint32_t i) -> const FontGlyph& {
+        return i < glyphs.size() ? glyphs[i] : extra_glyphs[i - glyphs.size()];
+    };
+    std::stable_sort(by_id.begin(), by_id.end(),
+                     [&](std::uint32_t a, std::uint32_t b) { return at(a).glyph_id < at(b).glyph_id; });
+}
+
+void FontAtlas::prepare_shaping() {
+    build_glyph_index();
+    if (!shaper && has_glyph_ids && !shaping_data.empty()) {
+        shaper = text::ShapingFont::create(shaping_data);
+    }
+}
+
 float FontAtlas::kerning_between(std::uint32_t first, std::uint32_t second) const {
     auto it = std::lower_bound(kerning.begin(), kerning.end(), std::pair{first, second},
                                [](const KerningPair& k, std::pair<std::uint32_t, std::uint32_t> key) {
@@ -65,6 +113,22 @@ std::string validate_font_atlas(const FontAtlas& font) {
             return std::format("glyph U+{:04X} atlas rectangle outside the atlas", g.codepoint);
         }
     }
+    for (std::size_t i = 0; i < font.extra_glyphs.size(); ++i) {
+        const FontGlyph& g = font.extra_glyphs[i];
+        if (!font.has_glyph_ids || g.codepoint != 0 || (i > 0 && font.extra_glyphs[i - 1].glyph_id >= g.glyph_id)) {
+            return "extra glyphs must be glyph-id sorted, unique and have no codepoint";
+        }
+        for (float v : {g.advance, g.left, g.top, g.right, g.bottom}) {
+            if (!finite(v)) {
+                return std::format("non-finite metric in glyph id {}", g.glyph_id);
+            }
+        }
+        if (g.has_quad() && (g.atlas_left < 0.0f || g.atlas_top < 0.0f || g.atlas_right > static_cast<float>(font.width) ||
+                             g.atlas_bottom > static_cast<float>(font.height) || g.atlas_left >= g.atlas_right ||
+                             g.atlas_top >= g.atlas_bottom)) {
+            return std::format("glyph id {} atlas rectangle outside the atlas", g.glyph_id);
+        }
+    }
     for (std::size_t i = 1; i < font.kerning.size(); ++i) {
         const KerningPair& a = font.kerning[i - 1];
         const KerningPair& b = font.kerning[i];
@@ -79,7 +143,7 @@ std::vector<std::byte> serialize_font_atlas(const FontAtlas& font) {
     ByteWriter w;
     w.raw(font_atlas_magic, 4);
     w.u32(font_atlas_version);
-    w.u32(0); // flags
+    w.u32(font.has_glyph_ids ? 1u : 0u); // flags
     w.u32(0); // reserved
     w.str(font.name);
     w.f32(font.em_size);
@@ -90,23 +154,29 @@ std::vector<std::byte> serialize_font_atlas(const FontAtlas& font) {
     }
     w.i32(font.width);
     w.i32(font.height);
-    w.u32(static_cast<std::uint32_t>(font.glyphs.size()));
-    for (const FontGlyph& g : font.glyphs) {
-        w.u32(g.codepoint);
-        for (float v : {g.advance, g.left, g.top, g.right, g.bottom, g.atlas_left, g.atlas_top, g.atlas_right,
-                        g.atlas_bottom}) {
-            w.f32(v);
+    const auto write_glyphs = [&](const std::vector<FontGlyph>& list) {
+        w.u32(static_cast<std::uint32_t>(list.size()));
+        for (const FontGlyph& g : list) {
+            w.u32(g.codepoint);
+            for (float v : {g.advance, g.left, g.top, g.right, g.bottom, g.atlas_left, g.atlas_top, g.atlas_right,
+                            g.atlas_bottom}) {
+                w.f32(v);
+            }
+            w.u32(g.glyph_id);
         }
-        w.u32(0); // reserved (per-glyph flags)
-    }
+    };
+    write_glyphs(font.glyphs);
     w.u32(static_cast<std::uint32_t>(font.kerning.size()));
     for (const KerningPair& k : font.kerning) {
         w.u32(k.first);
         w.u32(k.second);
         w.f32(k.adjust);
     }
+    write_glyphs(font.extra_glyphs);
     w.u32(static_cast<std::uint32_t>(font.pixels.size()));
     w.raw(font.pixels.data(), font.pixels.size());
+    w.u32(static_cast<std::uint32_t>(font.shaping_data.size()));
+    w.raw(font.shaping_data.data(), font.shaping_data.size());
     return w.take();
 }
 
@@ -130,10 +200,11 @@ bool deserialize_font_atlas(std::span<const std::byte> data, FontAtlas& out, std
         return failed(std::format("font atlas version {} is not supported (newest known: {})", version,
                                   font_atlas_version));
     }
-    r.u32(); // flags
+    const std::uint32_t flags = r.u32();
     r.u32(); // reserved
 
     FontAtlas font;
+    font.has_glyph_ids = version >= 2 && (flags & 1u) != 0;
     font.name = r.str();
     font.em_size = r.f32();
     font.distance_range = r.f32();
@@ -145,23 +216,34 @@ bool deserialize_font_atlas(std::span<const std::byte> data, FontAtlas& out, std
     m.underline_thickness = r.f32();
     font.width = r.i32();
     font.height = r.i32();
-    font.glyphs.resize(r.count(glyph_record_size));
-    for (FontGlyph& g : font.glyphs) {
-        g.codepoint = r.u32();
-        for (float* v : {&g.advance, &g.left, &g.top, &g.right, &g.bottom, &g.atlas_left, &g.atlas_top,
-                         &g.atlas_right, &g.atlas_bottom}) {
-            *v = r.f32();
+    const auto read_glyphs = [&](std::vector<FontGlyph>& list) {
+        list.resize(r.count(glyph_record_size));
+        for (FontGlyph& g : list) {
+            g.codepoint = r.u32();
+            for (float* v : {&g.advance, &g.left, &g.top, &g.right, &g.bottom, &g.atlas_left, &g.atlas_top,
+                             &g.atlas_right, &g.atlas_bottom}) {
+                *v = r.f32();
+            }
+            const std::uint32_t id = r.u32(); // reserved (0) before version 2
+            g.glyph_id = font.has_glyph_ids ? id : 0;
         }
-        r.u32(); // reserved
-    }
+    };
+    read_glyphs(font.glyphs);
     font.kerning.resize(r.count(kerning_record_size));
     for (KerningPair& k : font.kerning) {
         k.first = r.u32();
         k.second = r.u32();
         k.adjust = r.f32();
     }
+    if (version >= 2) {
+        read_glyphs(font.extra_glyphs);
+    }
     font.pixels.resize(r.count(1));
     r.raw(font.pixels.data(), font.pixels.size());
+    if (version >= 2) {
+        font.shaping_data.resize(r.count(1));
+        r.raw(font.shaping_data.data(), font.shaping_data.size());
+    }
     if (!r.ok()) {
         return failed(r.error());
     }
@@ -171,6 +253,7 @@ bool deserialize_font_atlas(std::span<const std::byte> data, FontAtlas& out, std
     if (std::string invalid = validate_font_atlas(font); !invalid.empty()) {
         return failed("FontAtlas: " + invalid);
     }
+    font.prepare_shaping();
     out = std::move(font);
     return true;
 }

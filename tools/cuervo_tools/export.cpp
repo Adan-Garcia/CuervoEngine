@@ -1,5 +1,6 @@
 #include "tools/cuervo_tools/export.hpp"
 #include "tools/cuervo_tools/registry.hpp"
+#include "tools/cuervo_tools/shader_build.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -8,6 +9,9 @@
 #include <fstream>
 #include <system_error>
 
+#include "cuervo/scene/scene_file.hpp"
+#include "cuervo/assets/atlas_file.hpp"
+#include "cuervo/assets/image.hpp"
 #include "cuervo/assets/vfs.hpp"
 #include "cuervo/input/devices.hpp"
 #include "cuervo/platform/platform.hpp"
@@ -229,6 +233,62 @@ std::optional<std::vector<std::byte>> pack_project(const fs::path& project, cons
             if (!efont) return std::nullopt;
             path = replace_extension(rel, ".efont");
             data = std::move(*efont);
+            ++summary.imported;
+            summary.notes.push_back(std::format("import: {} -> {}", rel, path));
+        } else if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".webp" || ext == ".qoi") {
+            // Raster images ship as the engine's texture with the mip chain (11.2a), so a
+            // shipped game never decodes source formats.
+            assets::DecodeResult decoded = assets::decode_image(data);
+            if (!decoded.image) {
+                error = std::format("'{}': {}", rel, decoded.error);
+                return std::nullopt;
+            }
+            path = replace_extension(rel, ".ctex");
+            data = assets::encode_ctex(assets::build_texture(*decoded.image, true));
+            ++summary.imported;
+            summary.notes.push_back(std::format("import: {} -> {}", rel, path));
+        } else if (ext == ".glsl") {
+            // User shaders (4.19) ship precompiled: the game has no shader compiler.
+            const std::string source(reinterpret_cast<const char*>(data.data()), data.size());
+            std::vector<std::string> shader_notes;
+            auto compiled = build_cshader(source, rel, error, &shader_notes);
+            if (!compiled) return std::nullopt;
+            for (std::string& note : shader_notes) summary.notes.push_back(std::move(note));
+            path = replace_extension(rel, ".cshader");
+            data = std::move(*compiled);
+            ++summary.imported;
+            summary.notes.push_back(std::format("import: {} -> {}", rel, path));
+        } else if (ext == ".scene" && !scene::is_binary(data)) {
+            // Text scenes (11.2c) are the authoring form; the pack holds binary
+            // so a shipped game never parses text and loads faster.
+            auto doc = scene::read_any(data, error);
+            if (!doc) {
+                error = std::format("'{}': {}", rel, error);
+                return std::nullopt;
+            }
+            data = scene::write_binary(*doc);
+            ++summary.imported;
+            summary.notes.push_back(std::format("import: {} -> binary scene", rel));
+        } else if (ext == ".atlas") {
+            // Atlas source -> packed pages + frames (SVG sprites rasterized here).
+            assets::FileReader read = [&project](std::string_view p, std::vector<std::byte>& out, std::string& err) {
+                std::string norm;
+                if (!assets::Vfs::normalize(p, norm, err)) return false;
+                if (!read_bytes(project / platform::path_from_utf8(norm), out)) {
+                    err = std::format("can't read '{}'", norm);
+                    return false;
+                }
+                return true;
+            };
+            assets::AtlasBuildResult built = assets::build_atlas_from_json(
+                std::string_view(reinterpret_cast<const char*>(data.data()), data.size()), read);
+            for (const std::string& w : built.warnings) summary.notes.push_back(std::format("warning: {}", w));
+            if (!built.atlas) {
+                error = std::format("'{}': {}", rel, built.error);
+                return std::nullopt;
+            }
+            path = replace_extension(rel, ".catlas");
+            data = assets::encode_catlas(*built.atlas);
             ++summary.imported;
             summary.notes.push_back(std::format("import: {} -> {}", rel, path));
         } else if (ext == ".svg") {

@@ -238,32 +238,35 @@
     {
      "id": "raster-processes",
      "name": "Raster processes: images, sprite sheets, atlases, 9-slice, SVG fallback",
-     "status": "planned",
-     "platforms": [],
-     "desktop_only": false,
+     "status": "experimental",
+     "platforms": [
+      "linux",
+      "windows"
+     ],
+     "desktop_only": true,
      "web": false,
-     "tier": "none",
-     "note": "Milestone 11.2a. Art is vector first."
+     "tier": "compatible",
+     "note": "Milestone 11.2a. Art is vector first. PNG, JPEG and QOI import with mip chains, a deterministic atlas packer, sprite-sheet slicing, mips in the RHI on every backend, an instanced sprite batcher, the `Sprite2D`, `AnimatedSprite2D` and `NinePatchRect` nodes, an SVG raster fallback and `.catlas`/`.ctex` in the pack (checked by the `mips` and `sprites` parity scenes on GL, Vulkan and WebGPU). WebP is decoded through libwebp (animated files are rejected). A Chrome smoke covers WebGL2 and WebGPU."
     },
     {
      "id": "custom-shaders",
      "name": "Custom user shaders, post-processing",
-     "status": "planned",
-     "platforms": [],
+     "status": "experimental",
+     "platforms": ["linux", "windows", "web"],
      "desktop_only": false,
-     "web": false,
-     "tier": "none",
-     "note": "Milestone 11.2b."
+     "web": true,
+     "tier": "compatible",
+     "note": "Milestone 11.2b. Offscreen render targets and multi-pass, additive and screen blend modes, built-in post passes (bloom, vignette, LUT, CRT) set by `[render.post]`, `[render] color_space = \"linear\"`, and user `.glsl` shaders with `@export` uniforms compiled by `cuervo-tools shader build` to `.cshader` (SPIR-V, GLES and WGSL). Mesh gradients and light colors are converted in linear mode. Not yet: the editor inspector for `@export` values."
     },
     {
      "id": "svg-fallback",
      "name": "SVG rasterized fallback, text shaping (right-to-left, complex scripts)",
-     "status": "planned",
-     "platforms": [],
+     "status": "experimental",
+     "platforms": ["linux", "windows", "web"],
      "desktop_only": false,
-     "web": false,
-     "tier": "none",
-     "note": "Milestones 11.2a and 11.3."
+     "web": true,
+     "tier": "compatible",
+     "note": "Milestones 11.2a and 11.3. An own SVG rasterizer draws SVG features the vector path does not support into atlases and reports filters and masks instead of drawing them. Text shaping with HarfBuzz, bidirectional text with SheenBidi, Arabic and Japanese fallback fonts and right-to-left layout mirroring work; fallback fonts come from `[text] fallbacks` in `project.toml`, and `LineEdit` and the Split and Scroll containers follow right-to-left layout."
     },
     {
      "id": "lighting",
@@ -282,7 +285,7 @@
     {
      "id": "webgpu",
      "name": "WebGPU",
-     "status": "experimental",
+     "status": "stable",
      "platforms": [
       "linux",
       "web"
@@ -324,7 +327,7 @@
      "desktop_only": false,
      "web": true,
      "tier": "none",
-     "note": "[REPLAYS.md](REPLAYS.md)."
+     "note": "[REPLAYS.md](REPLAYS.md). Milestone 11.7a: actions have stable IDs (replay format 3; older files load by action name) and a backward seek in the editor resumes from a snapshot."
     },
     {
      "id": "jobs-simd",
@@ -503,22 +506,25 @@
     {
      "id": "networking",
      "name": "Networking (lockstep, rollback), HTTP and WebSocket",
-     "status": "planned",
-     "platforms": [],
-     "desktop_only": false,
+     "status": "experimental",
+     "platforms": [
+      "linux",
+      "windows"
+     ],
+     "desktop_only": true,
      "web": false,
-     "tier": "none",
-     "note": "Milestone 11.1."
+     "tier": "compatible",
+     "note": "Milestone 11.1. Transport interface, seeded loopback, lockstep and rollback with snapshot-hash desync detection, a UDP transport, WebSocket (`ws://` and `wss://`) transports, a relay, the `Net` and `Http` APIs and end-to-end netplay. Games for up to four players run over UDP mesh or a relay. The web transport and the HTTP fetch path are checked in headless Chrome."
     },
     {
      "id": "services",
      "name": "Localization, save and settings API, accessibility features",
-     "status": "planned",
-     "platforms": [],
+     "status": "experimental",
+     "platforms": ["linux", "windows", "web"],
      "desktop_only": false,
-     "web": false,
-     "tier": "none",
-     "note": "Milestones 11.3, 11.4 and 12.3. Today games save through `Scene.save`."
+     "web": true,
+     "tier": "compatible",
+     "note": "Milestones 11.3 and 11.4. `Locale` and `tr` for translation tables, plurals and number and date formatting, IME composition in `LineEdit`, typed save slots with versions and migrations, a `Settings` API and a Chrome-trace profiler. Web saves persist through IndexedDB. Accessibility features (12.3) are still to do."
     }
    ]
   },
@@ -655,7 +661,19 @@
    "entries": [
     {
      "id": "editor",
-     "name": "Editor (`cuervo-editor`)",
+     "name": "Editor (`cuervo-editor`, RmlUi)",
+     "status": "stable",
+     "platforms": [
+      "linux"
+     ],
+     "desktop_only": true,
+     "web": false,
+     "tier": "none",
+     "note": "The default editor: scene tree, inspector, gizmos, fixed panel layout with named layouts, script editor with debugger, play-in-editor, replays, profiler. Desktop only; there is no web editor. Checked on Linux (Vulkan, GL). The Windows and macOS builds are not yet verified (CI results pending). See [editor/README.md](../editor/README.md)."
+    },
+    {
+     "id": "editor-imgui",
+     "name": "Dear ImGui editor (`cuervo-editor --imgui`, deprecated)",
      "status": "stable",
      "platforms": [
       "linux",
@@ -664,7 +682,7 @@
      "desktop_only": true,
      "web": false,
      "tier": "none",
-     "note": "Scene tree, inspector, gizmos, docking layouts, play-in-editor, replays, debugger, profiler. Desktop only; there is no web editor. See [editor/README.md](../editor/README.md)."
+     "note": "Deprecated and planned for removal: the previous editor, kept behind `--imgui` and compiled out with `-DCUERVO_EDITOR_IMGUI=OFF`. Docking layouts and panels that move to their own OS windows exist only here. See [DESIGN.md 4.13](DESIGN.md)."
     },
     {
      "id": "export-linux",
@@ -766,7 +784,7 @@
      "desktop_only": true,
      "web": false,
      "tier": "none",
-     "note": "Milestone 10.5a. The release workflow builds the editor, tools and players on a `v*` tag, with export templates in `templates/<platform>/`, a SHA-256 sum for every file (and a Sigstore attestation once the repository is public), and Authenticode signatures on the Windows executables when the repository has a signing certificate (docs/WINDOWS.md \"Prebuilt binaries\"). No release has been tagged yet."
+     "note": "Milestone 10.5a. The release workflow builds the editor, tools and players on a `v*` tag, with export templates in `templates/<platform>/`, a SHA-256 sum for every file (and a Sigstore attestation once the repository is public), and Authenticode signatures on the Windows executables when the repository has a signing certificate (docs/WINDOWS.md \"Prebuilt binaries\"). Released builds are attached to each `v*` tag of the public repository."
     },
     {
      "id": "content-tools",
@@ -885,10 +903,28 @@
    "note": "a debug aid"
   },
   {
+   "name": "texture mips",
+   "tier": "compatible",
+   "required": true,
+   "note": "mip chains, per-level data, sRGB RGBA8"
+  },
+  {
+   "name": "render targets",
+   "tier": "compatible",
+   "required": true,
+   "note": "offscreen color targets, multi-pass"
+  },
+  {
    "name": "base-vertex draws",
    "tier": "full",
    "required": true,
    "note": "draw_indexed_base_vertex; GLES 3.0 has no base vertex"
+  },
+  {
+   "name": "multiple window surfaces",
+   "tier": "compatible",
+   "required": false,
+   "note": "secondary window swapchains (editor undocked panels); Vulkan and GL only, WebGPU stays single-window"
   }
  ]
 }

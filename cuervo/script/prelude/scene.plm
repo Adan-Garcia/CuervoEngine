@@ -463,6 +463,8 @@ class Scene {
     // Saves `node` and its (non-transient) descendants. Returns false (and
     // logs why) if the file can't be written.
     @native static fn save(node: Node, path: str) -> bool {}
+    /// Like `save`, but writes the compact binary form instead of text.
+    @native static fn save_binary(node: Node, path: str) -> bool {}
     // Asks the runner to close the game after this tick.
     @native static fn quit() {}
 

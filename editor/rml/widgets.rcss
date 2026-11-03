@@ -1,0 +1,149 @@
+/* Widget kit (markup in editor/rml_widgets.cpp). States: :hover, :active, :focus from pseudo-classes;
+   .selected, .disabled, .mod (stored or modified value), .focus (keyboard row) are explicit classes.
+   Colors are var(--token) only; sizes dp. Row height 22dp, field height 20dp, label column 38%. */
+
+/* ---- row (scene tree, lists) */
+.row { display: flex; flex-direction: row; align-items: center; height: 22dp; margin: 0 6dp; border-radius: 4dp; transition: background-color 0.1s; cursor: pointer; }
+.row:hover { background-color: var(--hover); }
+.row:active { background-color: var(--press); }
+.row.selected { background-color: var(--accent-subtle); }
+.row.focus { border: 1dp var(--focus); }
+.row.disabled { opacity: 0.5; }
+.row.dim .name { color: var(--muted); }
+.row .chev { width: 12dp; height: 12dp; margin-right: 4dp; flex: none; }
+.row .chev img, img.chev { image-color: var(--muted); }
+.row .ic { margin-right: 6dp; flex: none; }
+.row .name { color: var(--text); white-space: nowrap; }
+.row .type { margin-left: 8dp; color: var(--muted); font-size: 12dp; white-space: nowrap; }
+.row.dropinto { border: 1dp var(--accent); background-color: var(--accent-subtle); }
+.row.ghost { opacity: 0.45; }
+
+/* ---- section header */
+.sect { display: flex; flex-direction: row; align-items: center; height: 24dp; margin: 6dp 12dp 0 12dp; font-weight: bold; color: var(--text); cursor: pointer; }
+.sect:hover .st { color: var(--accent); }
+.sect img.chev { width: 12dp; height: 12dp; margin-right: 6dp; }
+.sect .count { margin-left: auto; font-weight: normal; color: var(--muted); font-size: 12dp; }
+
+/* ---- inspector property row: marker, label (38%), control, reset */
+.prop { display: flex; flex-direction: row; align-items: center; min-height: 24dp; padding: 1dp 8dp 1dp 6dp; }
+.prop label { display: flex; flex-direction: row; align-items: center; width: 38%; flex: none; color: var(--text-2); white-space: nowrap; overflow: hidden; }
+.prop .dot { width: 4dp; height: 4dp; margin: 0 4dp 0 2dp; border-radius: 2dp; flex: none; background-color: transparent; }
+.prop.mod .dot { background-color: var(--accent); }
+.prop.mod label { color: var(--text); }
+.prop.dim .ctl { opacity: 0.7; }
+.prop.disabled { opacity: 0.5; }
+.prop .ctl { display: flex; flex-direction: row; align-items: center; flex: 1 1 0; min-width: 0dp; }
+.prop .rst { width: 18dp; height: 18dp; padding: 3dp; margin-left: 4dp; border-radius: 3dp; flex: none; }
+.prop .rst img { width: 12dp; height: 12dp; image-color: var(--muted); }
+.prop .rst:hover { background-color: var(--hover); }
+.prop .rst:hover img { image-color: var(--accent); }
+.prop .rst.none { visibility: hidden; }
+
+/* ---- text field (+ clear button) */
+input { height: 20dp; padding: 0 6dp; border: 1dp var(--border); border-radius: 4dp; background-color: var(--field); color: var(--text); font-family: "JetBrains Mono"; font-size: 13dp; transition: background-color 0.1s, border-color 0.1s; cursor: text; }
+input:hover { background-color: var(--field-hover); border-color: var(--border-strong); }
+input:focus { border-color: var(--focus); }
+input:disabled { opacity: 0.5; }
+input selection { background-color: var(--accent-subtle); }
+.tf { display: flex; flex-direction: row; align-items: center; flex: 1 1 0; position: relative; min-width: 0dp; }
+.tf input { width: 100%; flex: 1 1 0; }
+.tf.ui input { font-family: Figtree; font-size: 14dp; }
+.tf .clear { position: absolute; right: 3dp; top: 3dp; width: 14dp; height: 14dp; padding: 1dp; border-radius: 3dp; }
+.tf .clear img { width: 12dp; height: 12dp; image-color: var(--muted); }
+.tf .clear:hover { background-color: var(--hover); }
+.tf .clear:hover img { image-color: var(--text); }
+.tf .clear.hidden { display: none; }
+
+/* ---- scrub field: drag horizontally, Shift x10, Alt x0.01, click to type */
+.scrub { display: flex; flex-direction: row; align-items: center; flex: 1 1 0; min-width: 0dp; height: 20dp; padding: 0 6dp; border: 1dp var(--border); border-radius: 4dp; background-color: var(--field); font-family: "JetBrains Mono"; font-size: 13dp; cursor: resize; transition: background-color 0.1s, border-color 0.1s; overflow: hidden; }
+.scrub:hover { background-color: var(--field-hover); border-color: var(--border-strong); }
+.scrub.active, .scrub.drag { border-color: var(--focus); }
+.scrub.mod .sv { color: var(--text); }
+.scrub .sv { color: var(--text-2); white-space: nowrap; }
+.scrub.disabled { opacity: 0.5; }
+.scrub input { width: 100%; height: 18dp; border: 0dp; background-color: transparent; padding: 0dp; }
+.scrub + .scrub { margin-left: 4dp; }
+.axis { width: 12dp; height: 12dp; margin-right: 6dp; border-radius: 2dp; text-align: center; font-size: 10dp; line-height: 12dp; font-weight: bold; color: var(--on-accent); flex: none; }
+.ax-x { background-color: var(--danger); }
+.ax-y { background-color: var(--success); }
+.ax-z { background-color: var(--info); }
+.ax-w { background-color: var(--warning); }
+
+/* ---- dropdown */
+.dd { display: flex; flex-direction: row; align-items: center; flex: 1 1 0; min-width: 0dp; height: 20dp; padding: 0 6dp; border: 1dp var(--border); border-radius: 4dp; background-color: var(--field); font-family: "JetBrains Mono"; font-size: 13dp; cursor: pointer; transition: background-color 0.1s, border-color 0.1s; }
+.dd .sv { flex: 1 1 0; white-space: nowrap; overflow: hidden; }
+.dd img.chev { width: 12dp; height: 12dp; image-color: var(--muted); }
+.dd:hover { background-color: var(--field-hover); border-color: var(--border-strong); }
+.dd.open { border-color: var(--focus); }
+.dd.disabled { opacity: 0.5; }
+
+/* ---- toggle */
+.tog { width: 28dp; height: 16dp; border-radius: 8dp; background-color: var(--border); flex: none; cursor: pointer; transition: background-color 0.1s; }
+.tog .knob { width: 12dp; height: 12dp; margin: 2dp 0 0 2dp; border-radius: 6dp; background-color: var(--text); }
+.tog:hover { background-color: var(--border-strong); }
+.tog.on { background-color: var(--accent); }
+.tog.on:hover { background-color: var(--accent-hover); }
+.tog.on .knob { margin-left: 14dp; background-color: var(--on-accent); }
+.tog.disabled { opacity: 0.5; }
+.tog-val { margin-left: 8dp; color: var(--muted); font-size: 12dp; }
+
+/* ---- segmented control (.seg/.segi in editor.rcss) and badges */
+.tag { display: inline-block; padding: 0 5dp; border-radius: 3dp; background-color: var(--card); color: var(--text-2); font-size: 12dp; }
+.tag.warn { color: var(--warning); }
+.tag.err { color: var(--danger); }
+.tag.info { color: var(--info); }
+
+/* ---- tooltip: overlay surface, 1dp border, 400 ms delay (shell), keys in mono */
+#tooltip { position: absolute; display: none; padding: 3dp 8dp; max-width: 280dp; background-color: var(--overlay); border: 1dp var(--border); border-radius: 4dp; color: var(--text); font-size: 13dp; }
+#tooltip .kbd { margin-left: 10dp; font-family: "JetBrains Mono"; }
+
+/* ---- popup menu / dropdown list items (.mi in editor.rcss) */
+.mi .chk { width: 14dp; margin-right: 4dp; flex: none; }
+.mi .chk img { width: 12dp; height: 12dp; image-color: var(--accent); }
+.mi.sel { background-color: var(--accent-subtle); }
+.mi .sub { margin-left: 12dp; color: var(--muted); font-size: 12dp; }
+
+/* ---- tree list: virtualized rows are absolute inside #tree-in; drag ghost and drop line are overlays */
+#tree-in { position: relative; }
+#tree .row input { height: 18dp; flex: 1 1 0; margin-right: 6dp; }
+#dropline { position: absolute; display: none; height: 2dp; background-color: var(--accent); pointer-events: none; }
+#ghost { position: absolute; display: none; flex-direction: row; align-items: center; height: 22dp; padding: 0 8dp; border: 1dp var(--accent); border-radius: 4dp; background-color: var(--overlay); pointer-events: none; }
+#ghost img { margin-right: 6dp; }
+
+/* ---- inspector extras: object header, script row, warnings, swatch, small buttons */
+.srow { display: flex; flex-direction: row; align-items: center; min-height: 22dp; padding: 0 12dp; }
+.srow .muted-t { color: var(--muted); width: 38%; flex: none; }
+.srow .muted-t + .muted-t { width: auto; flex: 1 1 0; }
+.srow .slink { color: var(--accent); flex: 1 1 0; white-space: nowrap; overflow: hidden; }
+.srow .mono { font-family: "JetBrains Mono"; font-size: 12dp; color: var(--muted); flex: 1 1 0; white-space: nowrap; overflow: hidden; }
+.srow .btn { margin-left: 4dp; margin-right: 0dp; }
+.btn.sm { height: 20dp; padding: 0 8dp; font-size: 13dp; }
+.btn.sm img { width: 12dp; height: 12dp; margin-right: 4dp; }
+.warn { display: flex; flex-direction: row; align-items: center; margin: 6dp 12dp; color: var(--warning); }
+.warn img { margin-right: 6dp; image-color: var(--warning); }
+.swatch { width: 20dp; height: 20dp; border-radius: 4dp; border: 1dp var(--border-strong); margin-right: 4dp; flex: none; }
+.obj .tright { margin-left: auto; }
+.obj-text { flex: 1 1 0; }
+.pad .tf { width: 100%; }
+
+/* ---- inspector object header and empty state */
+.obj { display: flex; flex-direction: row; align-items: center; padding: 10dp 12dp 6dp 12dp; }
+.obj > img { width: 20dp; height: 20dp; margin-right: 10dp; image-color: var(--accent); flex: none; }
+.obj-name { font-size: 16dp; font-weight: bold; }
+.obj-type { font-size: 12dp; color: var(--muted); }
+.obj-name, .obj-type { display: block; }
+.prop .lt { overflow: hidden; }
+.empty { margin: 12dp; color: var(--muted); }
+
+/* ---- color picker popup: the SV square is a hue-colored box under two gradient images */
+.cp { display: block; padding: 4dp; }
+.cp-sv { display: block; position: relative; width: 196dp; height: 128dp; border-radius: 3dp; border: 1dp var(--border-strong); cursor: pointer; }
+.cp-sv img { display: block; position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.cp-m, .cp-bm { display: block; position: absolute; width: 10dp; height: 10dp; margin-left: -5dp; margin-top: -5dp; border-radius: 5dp; border: 2dp #ffffff; pointer-events: none; }
+.cp-bar { display: block; position: relative; width: 196dp; height: 12dp; margin-top: 6dp; border-radius: 3dp; border: 1dp var(--border-strong); cursor: pointer; }
+.cp-bar img { display: block; position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.cp-bm { top: 50%; }
+.cp-row { display: flex; flex-direction: row; align-items: center; margin-top: 6dp; }
+.cp-row input { flex: 1 1 0; margin-left: 4dp; height: 22dp; }
+
+.drop { border-color: var(--accent); background-color: var(--accent-subtle); }

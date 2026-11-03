@@ -111,7 +111,9 @@ void pack_instances(const Emitter& emitter, std::size_t begin, std::size_t end, 
 std::size_t draw_emitter(const Emitter& emitter, render::SdfBatcher& batch, float alpha) {
     const std::size_t n = instance_count(emitter);
     if (n == 0) return 0;
+    batch.set_blend(emitter.render().blend);
     pack_instances(emitter, 0, n, alpha, batch.append(n));
+    batch.set_blend(render::SdfBlend::Normal);
     return n;
 }
 
@@ -131,7 +133,15 @@ std::size_t draw_emitters(const ParticleSystem& system, render::SdfBatcher& batc
         }
         total += n;
     }
+    const std::size_t base = batch.size();
     const std::span<render::SdfInstance> out = batch.append(total);
+    // Each emitter's instances are one run with the emitter's blend mode.
+    for (std::uint32_t id = 0, offset = 0; id < system.emitter_count(); ++id) {
+        const Emitter& emitter = system.emitter(id);
+        batch.set_blend_from(base + offset, emitter.render().blend);
+        offset += static_cast<std::uint32_t>(instance_count(emitter));
+    }
+    batch.set_blend_from(base + total, render::SdfBlend::Normal);
     const auto pack = [&](std::size_t k) {
         const Range& r = ranges[k];
         pack_instances(system.emitter(r.emitter), r.begin, r.end, alpha, out.subspan(r.out, r.end - r.begin));

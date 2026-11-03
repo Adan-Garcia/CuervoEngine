@@ -1,4 +1,5 @@
 #include "pluma/lsp.hpp"
+#include "pluma/lint.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -579,6 +580,7 @@ struct Analysis {
     std::vector<PartSlice> slices;
     std::vector<Occurrence> occurrences;
     std::set<std::string> interned_names; // all `#name` literals seen across prelude + workspace
+    std::set<const LocalVar*> var_locals; // locals declared by a `var`/`const` statement
 
     const SourceFile& source() const { return *source_ptr; }
 
@@ -1547,6 +1549,7 @@ private:
             case tir::SK::Var: {
                 const auto* vs = tir::as<tir::VarStmt>(s);
                 if (vs->var != nullptr) {
+                    a_.var_locals.insert(vs->var);
                     add(find_ident_span(a_.source(), vs->var->span, vs->var->name),
                         {TargetKind::Local, vs->var}, vs->var->type, true);
                 }
@@ -1911,6 +1914,8 @@ std::map<std::string, std::string> collect_workspace_files(
     return files;
 }
 
+void add_lint_warnings(Analysis& a);
+
 std::unique_ptr<Analysis> build_analysis(
     const ServerOptions& options,
     const std::map<std::string, std::string>& open_docs,
@@ -2020,6 +2025,7 @@ std::unique_ptr<Analysis> build_analysis(
         for (Diagnostic d : style_sink.all()) {
             const PartSlice* sl = a->slice_at(d.span.begin);
             if (sl != nullptr && !sl->is_prelude) {
+                d.code = "style";
                 a->diags.push_back(std::move(d));
             }
         }
@@ -2027,7 +2033,116 @@ std::unique_ptr<Analysis> build_analysis(
 
     OccurrenceBuilder builder(*a);
     builder.run();
+    if (options.lint_warnings) add_lint_warnings(*a);
     return a;
+}
+
+// Whether `word` appears in `text` as a whole identifier.
+bool contains_word(std::string_view text, std::string_view word) {
+    auto is_id = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; };
+    for (std::size_t pos = text.find(word); pos != std::string_view::npos; pos = text.find(word, pos + 1)) {
+        const bool left = pos == 0 || !is_id(text[pos - 1]);
+        const bool right = pos + word.size() >= text.size() || !is_id(text[pos + word.size()]);
+        if (left && right) return true;
+    }
+    return false;
+}
+
+// Warnings with stable codes (lint.hpp): unreachable code, unused local
+// variables and unused imports, in workspace files only. Deliberately
+// conservative: a variable counts as used by any later mention (read or
+// write), `_`-prefixed names are exempt, and an import is used by any
+// identifier (or string interpolation) that spells its bound name.
+void add_lint_warnings(Analysis& a) {
+    DiagnosticSink sink(*a.source_ptr);
+    lint_unreachable(a.mod, sink);
+
+    // Name resolution is incomplete in a file with errors (the checker drops
+    // the typed body of a failing function), so "unused" would be a guess there.
+    std::set<const PartSlice*> broken;
+    for (const Diagnostic& d : a.diags) {
+        if (d.severity == Severity::Error) broken.insert(a.slice_at(d.span.begin));
+    }
+
+    // Spans of all functions: a declared name still mentioned later in its
+    // function counts as used even when resolution lost the link (a loop body
+    // the checker instantiated twice binds the use to another LocalVar).
+    std::vector<Span> fn_spans;
+    auto collect_fns = [&](auto& self, const Decl* d) -> void {
+        if (d == nullptr) return;
+        if (d->kind == DeclKind::Fn) fn_spans.push_back(d->span);
+        const List<Decl*>* members = nullptr;
+        if (const auto* cd = as<ClassDecl>(d)) members = &cd->members;
+        if (const auto* sd = as<StructDecl>(d)) members = &sd->members;
+        if (const auto* td = as<TraitDecl>(d)) members = &td->members;
+        if (members != nullptr) {
+            for (const Decl* m : *members) self(self, m);
+        }
+    };
+    for (const Decl* d : a.mod.decls) collect_fns(collect_fns, d);
+    const std::string_view all_text = a.source_ptr->text();
+    auto mentioned_later = [&](const Occurrence& occ, std::string_view name) {
+        const Span* best = nullptr;
+        for (const Span& f : fn_spans) {
+            if (f.begin <= occ.span.begin && occ.span.end <= f.end &&
+                (best == nullptr || f.end - f.begin < best->end - best->begin)) {
+                best = &f;
+            }
+        }
+        const std::uint32_t end = best != nullptr ? best->end : static_cast<std::uint32_t>(all_text.size());
+        return occ.span.end < end && contains_word(all_text.substr(occ.span.end, end - occ.span.end), name);
+    };
+
+    std::set<const LocalVar*> referenced;
+    for (const auto& occ : a.occurrences) {
+        if (!occ.is_decl && occ.target.kind == TargetKind::Local) {
+            referenced.insert(static_cast<const LocalVar*>(occ.target.ptr));
+        }
+    }
+    for (const auto& occ : a.occurrences) {
+        if (!occ.is_decl || occ.target.kind != TargetKind::Local) continue;
+        const auto* lv = static_cast<const LocalVar*>(occ.target.ptr);
+        if (broken.contains(a.slice_at(occ.span.begin))) continue;
+        if (lv == nullptr || !a.var_locals.contains(lv) || lv->name.empty() || lv->name[0] == '_' ||
+            lv->name[0] == '<' || referenced.contains(lv) || mentioned_later(occ, lv->name)) {
+            continue;
+        }
+        sink.report(Severity::Warning, occ.span, std::format("unused variable '{}'", lv->name)).code =
+            warn_unused_variable;
+    }
+
+    for (const ImportDecl* imp : a.mod.imports) {
+        if (imp == nullptr) continue;
+        const PartSlice* sl = a.slice_at(imp->span.begin);
+        if (sl == nullptr || sl->is_prelude) continue;
+        std::vector<std::pair<std::string_view, Span>> bound; // bound name, where to report
+        if (imp->has_items) {
+            for (const ImportItem& it : imp->items) {
+                bound.emplace_back(it.alias.empty() ? it.name.name : it.alias.name, it.name.span);
+            }
+        } else {
+            bound.emplace_back(imp->alias.empty() ? imp->package.name : imp->alias.name, imp->span);
+        }
+        // Everything outside the import statements themselves.
+        std::string rest = sl->text;
+        for (const ImportDecl* other : a.mod.imports) {
+            if (other == nullptr || other->span.begin < sl->base || other->span.end > sl->end) continue;
+            for (std::uint32_t i = other->span.begin - sl->base; i < other->span.end - sl->base && i < rest.size(); ++i) {
+                if (rest[i] != '\n') rest[i] = ' ';
+            }
+        }
+        for (const auto& [name, where] : bound) {
+            if (name.empty() || contains_word(rest, name)) continue;
+            sink.report(Severity::Warning, span_empty(where) ? imp->span : where,
+                        std::format("unused import '{}'", name))
+                .code = warn_unused_import;
+        }
+    }
+
+    for (Diagnostic d : sink.all()) {
+        const PartSlice* sl = a.slice_at(d.span.begin);
+        if (sl != nullptr && !sl->is_prelude) a.diags.push_back(std::move(d));
+    }
 }
 
 const Occurrence* find_occurrence_at(const Analysis& a, std::uint32_t offset) {
@@ -2710,6 +2825,7 @@ std::map<std::string, std::vector<DiagnosticItem>> Server::all_diagnostics() {
         item.range = a->span_to_range(*s, d.span);
         item.severity = d.severity;
         item.message = d.message;
+        item.code = d.code;
         if (d.fix.has_value()) {
             item.fix = TextEdit{
                 a->span_to_range(*s, d.fix->span),
@@ -2927,6 +3043,75 @@ std::vector<DocumentSymbol> Server::document_symbols(std::string_view uri) {
         }
     }
     return symbols;
+}
+
+const std::vector<std::string>& semantic_token_types() {
+    static const std::vector<std::string> v{"type", "function", "variable", "parameter",
+                                            "property", "enumMember", "keyword", "constant"};
+    return v;
+}
+const std::vector<std::string>& semantic_token_modifiers() {
+    static const std::vector<std::string> v{"declaration", "readonly"};
+    return v;
+}
+
+std::vector<SemanticToken> Server::semantic_tokens(std::string_view uri) {
+    std::string norm = normalize_uri(uri);
+    auto a = build_analysis(options_, open_docs_);
+    const PartSlice* slice = a->slice_for_uri(norm);
+    if (slice == nullptr) return {};
+    enum : std::uint32_t { T_Type, T_Function, T_Variable, T_Parameter, T_Property, T_EnumMember, T_Keyword, T_Constant };
+    std::vector<SemanticToken> out;
+    for (const Occurrence& occ : a->occurrences) {
+        if (occ.span.begin < slice->base || occ.span.end > slice->end || !occ.target.valid()) continue;
+        std::uint32_t type = T_Variable, mods = occ.is_decl ? 1u : 0u;
+        switch (occ.target.kind) {
+            case TargetKind::Class: case TargetKind::Struct: case TargetKind::Enum:
+            case TargetKind::Trait: case TargetKind::GenericParam: type = T_Type; break;
+            case TargetKind::Function: case TargetKind::Builtin: type = T_Function; break;
+            case TargetKind::Field: type = T_Property; break;
+            case TargetKind::Variant: type = T_EnumMember; mods |= 2u; break;
+            case TargetKind::Param: type = T_Parameter; break;
+            case TargetKind::Local: {
+                const auto* lv = static_cast<const LocalVar*>(occ.target.ptr);
+                type = lv != nullptr && lv->is_param ? T_Parameter : T_Variable;
+                break;
+            }
+            case TargetKind::Global: {
+                const auto* gv = static_cast<const GlobalVar*>(occ.target.ptr);
+                if (gv != nullptr && gv->is_const) { type = T_Constant; mods |= 2u; }
+                break;
+            }
+            case TargetKind::None: break;
+        }
+        Range r = a->span_to_range(*slice, occ.span);
+        if (r.start.line != r.end.line) continue;
+        out.push_back({r.start.line, r.start.character, r.end.character - r.start.character, type, mods});
+    }
+    // Keywords come from the lexer; an identifier occurrence never overlaps one.
+    {
+        std::uint32_t line = 0, line_start = 0;
+        const std::string_view text = slice->text;
+        for (const Token& t : Lexer::tokenize(text)) {
+            if (t.kind != TokenKind::Keyword) continue;
+            while (line_start < t.offset) { // advance to the token's line
+                std::size_t nl = text.find('\n', line_start);
+                if (nl == std::string_view::npos || nl >= t.offset) break;
+                line_start = static_cast<std::uint32_t>(nl + 1);
+                ++line;
+            }
+            out.push_back({line, t.offset - line_start, t.length, T_Keyword, 0});
+        }
+    }
+    std::sort(out.begin(), out.end(), [](const SemanticToken& x, const SemanticToken& y) {
+        return x.line != y.line ? x.line < y.line : x.character < y.character;
+    });
+    out.erase(std::unique(out.begin(), out.end(),
+                          [](const SemanticToken& x, const SemanticToken& y) {
+                              return x.line == y.line && x.character == y.character;
+                          }),
+              out.end());
+    return out;
 }
 
 std::vector<WorkspaceSymbol> Server::workspace_symbols(std::string_view query) {
@@ -3557,6 +3742,7 @@ std::vector<std::string> Server::publish_diagnostics_notifications() {
                 {"source", json::Value::string("pluma")},
                 {"message", json::Value::string(d.message)},
             };
+            if (!d.code.empty()) dobj["code"] = json::Value::string(d.code);
             diag_arr.push_back(json::Value::object(std::move(dobj)));
         }
         out.push_back(json::make_notification(
@@ -3570,6 +3756,12 @@ std::vector<std::string> Server::publish_diagnostics_notifications() {
 }
 
 namespace {
+
+json::Value json_string_array(const std::vector<std::string>& v) {
+    json::Array arr;
+    for (const auto& x : v) arr.push_back(json::Value::string(x));
+    return json::Value::array(std::move(arr));
+}
 
 json::Value doc_symbol_json(const DocumentSymbol& s) {
     json::Array children;
@@ -3646,6 +3838,14 @@ std::vector<std::string> Server::handle_message(std::string_view json_payload) {
             {"hoverProvider", json::Value::boolean(true)},
             {"referencesProvider", json::Value::boolean(true)},
             {"documentSymbolProvider", json::Value::boolean(true)},
+            {"semanticTokensProvider",
+             json::Value::object({
+                 {"legend", json::Value::object({
+                                {"tokenTypes", json_string_array(semantic_token_types())},
+                                {"tokenModifiers", json_string_array(semantic_token_modifiers())},
+                            })},
+                 {"full", json::Value::boolean(true)},
+             })},
             {"workspaceSymbolProvider", json::Value::boolean(true)},
             {"renameProvider", json::Value::object({
                                    {"prepareProvider", json::Value::boolean(true)},
@@ -3657,7 +3857,7 @@ std::vector<std::string> Server::handle_message(std::string_view json_payload) {
             {"capabilities", std::move(caps)},
             {"serverInfo", json::Value::object({
                                {"name", json::Value::string("pluma-lsp")},
-                               {"version", json::Value::string("0.2.2")},
+                               {"version", json::Value::string("0.3.0")},
                            })},
         });
         return {json::make_response(id, std::move(result))};
@@ -3800,6 +4000,21 @@ std::vector<std::string> Server::handle_message(std::string_view json_payload) {
         json::Array arr;
         for (const auto& s : syms) arr.push_back(doc_symbol_json(s));
         return {json::make_response(id, json::Value::array(std::move(arr)))};
+    }
+
+    if (method == "textDocument/semanticTokens/full") {
+        json::Array data; // LSP delta encoding: dLine, dChar, length, type, modifiers
+        std::uint32_t pl = 0, pc = 0;
+        for (const SemanticToken& t : semantic_tokens(doc_uri())) {
+            data.push_back(json::Value::integer(t.line - pl));
+            data.push_back(json::Value::integer(t.line == pl ? t.character - pc : t.character));
+            data.push_back(json::Value::integer(t.length));
+            data.push_back(json::Value::integer(t.type));
+            data.push_back(json::Value::integer(t.modifiers));
+            pl = t.line;
+            pc = t.character;
+        }
+        return {json::make_response(id, json::Value::object({{"data", json::Value::array(std::move(data))}}))};
     }
 
     if (method == "workspace/symbol") {

@@ -52,6 +52,16 @@ inline constexpr ZoneId no_zone = 0xffff;
 using ClockFn = std::uint64_t (*)();
 void set_clock(ClockFn clock);
 
+// The profiler's clock now (the injected one in tests).
+std::uint64_t clock_ns();
+
+// Every closed main-thread zone is also reported to this sink as a span
+// (name, start, end in clock_ns() terms): the trace recorder
+// (cuervo/profile/trace.hpp) hooks in here. nullptr = none. The sink runs on
+// the main thread inside end_zone, so it must be cheap.
+using SpanSink = void (*)(const char* name, std::uint64_t start_ns, std::uint64_t end_ns);
+void set_span_sink(SpanSink sink);
+
 void set_enabled(bool on);
 bool enabled();
 // Forgets every recorded frame (the zones stay registered).

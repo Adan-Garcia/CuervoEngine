@@ -44,6 +44,9 @@ public:
     // a project, a hot reload's new VM): a debugger checks its breakpoints
     // against them here. Always delivered.
     virtual void on_code_loaded(VM& vm) { (void)vm; }
+    // The VM is being destroyed while these hooks are attached: drop every
+    // pointer to it (the hooks may outlive the VM, e.g. a debugger declared first).
+    virtual void on_vm_destroyed(VM& vm) { (void)vm; }
 
     // A panic, before the stack unwinds: the frames and locals are still
     // there to inspect (stack_frames reports the panicking instruction). The

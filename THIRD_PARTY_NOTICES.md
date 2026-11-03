@@ -28,6 +28,11 @@ A full player (`--engine full`) contains all of these; a stripped one only what 
 | emdawnwebgpu | Emscripten's port (emsdk 6.0.12: v20260423.175430) | MIT / University of Illinois NCSA | WebGPU backend, web builds with `CUERVO_WEBGPU` | [emdawnwebgpu.txt](third_party/licenses/emdawnwebgpu.txt) |
 | libtess2 | 8dbd648 | SGI Free Software License B 2.0 | vector path tessellation | [libtess2.txt](third_party/licenses/libtess2.txt) |
 | miniaudio | 0.11.25 | Public domain (Unlicense) or MIT-0 | audio (players of games with sound) | [miniaudio.txt](third_party/licenses/miniaudio.txt) |
+| Mbed TLS | 3.6.5 | Apache-2.0 OR GPL-2.0-or-later (used under Apache-2.0) | `wss://` and `https://` on desktop (`CUERVO_TLS`); web builds use the browser | [MbedTLS.txt](third_party/licenses/MbedTLS.txt) |
+| stb_image | commit 003501f (v2.30) | Public domain (Unlicense) or MIT | raster import: PNG and JPEG decoding (development builds, tools) | [stb.txt](third_party/licenses/stb.txt) |
+| libwebp | 1.5.0 (decoder subset) | BSD-3-Clause | raster import: WebP decoding (`CUERVO_WEBP`) | [libwebp.txt](third_party/licenses/libwebp.txt) |
+| HarfBuzz | 12.3.2 | Old MIT | text shaping (`CUERVO_TEXT_SHAPING`) | [HarfBuzz.txt](third_party/licenses/HarfBuzz.txt) |
+| SheenBidi | 3.0.0 | Apache-2.0 | bidirectional text reordering (`CUERVO_TEXT_SHAPING`) | [SheenBidi.txt](third_party/licenses/SheenBidi.txt) |
 | Box2D | 3.2.0 | MIT | 2D physics simulation (players of games with physics) | [box2d.txt](third_party/licenses/box2d.txt) |
 | FreeType | system, or 2.13.3 if fetched | FreeType License (FTL) | font import (development builds, tools) | [FreeType.txt](third_party/licenses/FreeType.txt) |
 | msdfgen | 1.12 | MIT | font and vector import (MSDF atlases) | [msdfgen.txt](third_party/licenses/msdfgen.txt) |
@@ -48,10 +53,13 @@ compatible-tier games ship without the Vulkan backend.
 
 | Component | Version | License | Used by | License text |
 |---|---|---|---|---|
-| Dear ImGui | 1.92.9b (docking branch) | MIT | the editor (`cuervo-editor`) | [DearImGui.txt](third_party/licenses/DearImGui.txt) |
+| RmlUi | 6.3 | MIT | the editor | [RmlUi.txt](third_party/licenses/RmlUi.txt) |
+| Dear ImGui | 1.92.9b (docking branch) | MIT | the deprecated ImGui editor (`cuervo-editor --imgui`) | [DearImGui.txt](third_party/licenses/DearImGui.txt) |
 | Outfit (font) | 1.1 | SIL Open Font License 1.1 | the editor: display type (splash) | [Outfit.txt](third_party/licenses/Outfit.txt) |
 | Figtree (font) | 2.0.3 | SIL Open Font License 1.1 | the editor: UI type | [Figtree.txt](third_party/licenses/Figtree.txt) |
 | JetBrains Mono (font) | 2.304 | SIL Open Font License 1.1 | the editor: code and console type | [JetBrainsMono.txt](third_party/licenses/JetBrainsMono.txt) |
+| Noto Sans Arabic (font) | 2.x, notofonts commit e2ec4a1 | SIL Open Font License 1.1 | the shaping test suite only | [NotoSansArabic.txt](third_party/licenses/NotoSansArabic.txt) |
+| M+ 1p (font) | google/fonts commit 6c1dbe2 | SIL Open Font License 1.1 | the font fallback and UI localization tests only | [MPLUS1p.txt](third_party/licenses/MPLUS1p.txt) |
 | doctest | 2.4.12 | MIT | the test suites | [doctest.txt](third_party/licenses/doctest.txt) |
 | SPIRV-Cross | vulkan-sdk-1.4.363.0 | Apache-2.0 (some files MIT) | `shader_tool`: GLSL 330 / ES 300 from SPIR-V at build time (not linked into the engine) | [SPIRV-Cross.txt](third_party/licenses/SPIRV-Cross.txt) |
 | Tracy | 0.11.1 | BSD-3-Clause | optional profiler bridge (`CUERVO_TRACY`, off by default) | [Tracy.txt](third_party/licenses/Tracy.txt) |

@@ -1,14 +1,16 @@
 #include "editor/imgui_rhi.hpp"
 
+#include <SDL3/SDL.h>
 #include <imgui.h>
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <cstring>
 
 #include "cuervo/core/log.hpp"
-#include "shaders/imgui_frag.hpp"
-#include "shaders/imgui_vert.hpp"
+#include "shaders/editor_ui_frag.hpp"
+#include "shaders/editor_ui_vert.hpp"
 
 namespace cuervo::editor {
 
@@ -31,6 +33,58 @@ rhi::TextureHandle handle_of(ImTextureID id) { return {static_cast<std::uint32_t
 
 } // namespace
 
+// ImGui's renderer-side viewport callbacks (docking branch). The platform half (SDL3 windows) is
+// the SDL3 backend's; RendererUserData holds the RHI surface id.
+struct ViewportCallbacks {
+    // The SDL3 backend keeps the window's id in PlatformHandle.
+    static SDL_Window* window_of(const ImGuiViewport* vp) {
+        return SDL_GetWindowFromID(static_cast<SDL_WindowID>(reinterpret_cast<std::intptr_t>(vp->PlatformHandle)));
+    }
+    static ImGuiRenderer* self() {
+        return static_cast<ImGuiRenderer*>(ImGui::GetIO().BackendRendererUserData);
+    }
+    static void create_window(ImGuiViewport* vp) {
+        ImGuiRenderer* r = self();
+        SDL_Window* window = window_of(vp);
+        if (r == nullptr || window == nullptr) return;
+        const rhi::SurfaceHandle h = r->device_->create_window_surface(window);
+        vp->RendererUserData = h ? reinterpret_cast<void*>(static_cast<std::uintptr_t>(h.id)) : nullptr;
+    }
+    static void destroy_window(ImGuiViewport* vp) {
+        ImGuiRenderer* r = self();
+        if (r != nullptr && vp->RendererUserData != nullptr) {
+            r->device_->destroy_window_surface({static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(vp->RendererUserData))});
+        }
+        vp->RendererUserData = nullptr;
+    }
+    static void render_window(ImGuiViewport* vp, void*) {
+        ImGuiRenderer* r = self();
+        SDL_Window* window = window_of(vp);
+        if (r == nullptr || window == nullptr || vp->RendererUserData == nullptr) return;
+        int w = 0;
+        int h = 0;
+        SDL_GetWindowSizeInPixels(window, &w, &h);
+        if (w <= 0 || h <= 0) return;
+        r->device_->begin_frame_surface({static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(vp->RendererUserData))},
+                                        {w, h});
+        r->device_->clear({0.08f, 0.08f, 0.1f, 1.0f});
+        r->render(vp->DrawData);
+        r->device_->end_frame_surface();
+    }
+};
+
+bool ImGuiRenderer::enable_viewports() {
+    if (device_ == nullptr || !device_->info().supports(rhi::Feature::MultiSurface)) return false;
+    ImGuiIO& io = ImGui::GetIO();
+    io.BackendRendererUserData = this;
+    io.BackendFlags |= ImGuiBackendFlags_RendererHasViewports;
+    ImGuiPlatformIO& pio = ImGui::GetPlatformIO();
+    pio.Renderer_CreateWindow = ViewportCallbacks::create_window;
+    pio.Renderer_DestroyWindow = ViewportCallbacks::destroy_window;
+    pio.Renderer_RenderWindow = ViewportCallbacks::render_window;
+    return true;
+}
+
 ImGuiRenderer::~ImGuiRenderer() { shutdown(); }
 
 bool ImGuiRenderer::init(rhi::Device& device) {
@@ -44,8 +98,8 @@ bool ImGuiRenderer::init(rhi::Device& device) {
         {sizeof(ImDrawVert), rhi::VertexRate::PerVertex, vertex_attributes},
     }};
     rhi::PipelineDesc desc;
-    desc.vertex = shaders::imgui_vert;
-    desc.fragment = shaders::imgui_frag;
+    desc.vertex = shaders::editor_ui_vert;
+    desc.fragment = shaders::editor_ui_frag;
     desc.streams = streams;
     desc.blend = rhi::BlendMode::Alpha;
     desc.debug_name = "imgui";
@@ -70,7 +124,8 @@ void ImGuiRenderer::shutdown() {
             }
         }
         ImGuiIO& io = ImGui::GetIO();
-        io.BackendFlags &= ~ImGuiBackendFlags_RendererHasTextures;
+        io.BackendFlags &= ~(ImGuiBackendFlags_RendererHasTextures | ImGuiBackendFlags_RendererHasViewports);
+        io.BackendRendererUserData = nullptr;
         io.BackendRendererName = nullptr;
     }
     device_->destroy_pipeline(pipeline_);

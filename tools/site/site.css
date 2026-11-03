@@ -218,6 +218,10 @@ ul:has(> .api-item) { padding-left: 1.5rem; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--on-accent); }
 .sec-h { margin-top: 2.5rem; border-top: 0; padding-top: 0; }
+.demo { text-align: center; margin: 0 0 1rem; }
+.demo figure { margin: 0; }
+.demo img { max-width: 100%; height: auto; border-radius: var(--radius-lg); border: 1px solid var(--border); }
+.demo figcaption { color: var(--text-muted, inherit); font-size: 0.85rem; margin-top: 0.4rem; }
 .split { display: grid; grid-template-columns: 1fr 1.3fr; gap: 2rem; align-items: start; }
 
 /* ---- small screens */

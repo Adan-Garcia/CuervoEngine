@@ -73,6 +73,13 @@ public:
     FontHandle add_font(FontAtlas atlas);
     void remove_font(FontHandle font);
     const FontAtlas* font(FontHandle font) const;
+    // Per-script fallback: text drawn with `primary` takes each character from
+    // the first of primary, then `fallbacks` (in order) that has it, e.g.
+    // Latin -> Arabic -> Japanese. Applies to draw() and draw_layout();
+    // layouts made against the same chain must be drawn with `primary`.
+    void set_fallbacks(FontHandle primary, std::vector<FontHandle> fallbacks);
+    // The chain draw() lays out with: primary first, then its fallbacks.
+    std::vector<FontHandle> font_stack(FontHandle primary) const;
     // The font's atlas texture (invalid before init); e.g. for atlas debug views.
     rhi::TextureHandle texture(FontHandle font) const;
 
@@ -111,6 +118,7 @@ private:
     struct Font {
         FontAtlas atlas;
         rhi::TextureHandle texture;
+        std::vector<FontHandle> fallbacks;
     };
 
     bool ensure_capacity(std::size_t count);

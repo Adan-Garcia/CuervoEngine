@@ -21,7 +21,7 @@
 #include "editor/messages.hpp"
 #include "editor/projects.hpp"
 #include "editor/splash.hpp"
-#include "editor/theme.hpp"
+#include "editor/imgui_theme.hpp"
 #include "editor/ui.hpp"
 
 namespace cuervo::editor {

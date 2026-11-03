@@ -102,7 +102,7 @@ std::optional<scene::SceneDoc> ScriptHost::load_scene(std::string_view path, std
     }
     auto file = vfs.open(rel, error);
     if (!file) return std::nullopt;
-    auto doc = scene::read_binary(file->bytes(), error, info);
+    auto doc = scene::read_any(file->bytes(), error, info);
     if (!doc) error = std::format("{}: {}", vfs.describe(rel), error);
     return doc;
 }
@@ -125,7 +125,7 @@ void ScriptHost::bind_scene_and_ui() {
         if (!r.ok) c.vm.panic(std::format("Scene.load('{}'): {}", nv::str(c, 0), r.panic->message));
         return root; // owned
     });
-    b.add_native("Scene.save", [host](NativeCall& c) {
+    auto save_scene = [host](NativeCall& c, scene::SaveFormat format) {
         std::string rel;
         std::string error;
         if (!resolve_path(nv::str(c, 1), rel, error)) {
@@ -146,12 +146,16 @@ void ScriptHost::bind_scene_and_ui() {
         for (const std::string& w : warnings) LOG_WARN("Scene.save('{}'): {}", nv::str(c, 1), w);
         std::error_code ec;
         if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path(), ec);
-        if (!scene::save_file(path, doc, error)) {
+        if (!scene::save_file(path, doc, error, format)) {
             LOG_ERROR("Scene.save('{}'): {}", nv::str(c, 1), error);
             return Value::boolean(false);
         }
         return Value::boolean(true);
-    });
+    };
+    // Text by default (11.2c: scenes diff and merge in version control);
+    // save_binary is the compact form.
+    b.add_native("Scene.save", [save_scene](NativeCall& c) { return save_scene(c, scene::SaveFormat::Text); });
+    b.add_native("Scene.save_binary", [save_scene](NativeCall& c) { return save_scene(c, scene::SaveFormat::Binary); });
     b.add_native("Scene.quit", [host](NativeCall&) {
         host->quit_requested_ = true;
         return Value{};
@@ -166,7 +170,9 @@ void ScriptHost::bind_scene_and_ui() {
         if (host->options_.font != nullptr) {
             render::TextStyle style;
             style.size = size;
-            vec2 s = render::layout_text(*host->options_.font, text, style).size();
+            std::vector<const render::FontAtlas*> chain{host->options_.font};
+            chain.insert(chain.end(), host->options_.font_fallbacks.begin(), host->options_.font_fallbacks.end());
+            vec2 s = render::layout_text(chain, text, style).size();
             return nv::vec2_result(s.x(), s.y());
         }
         // No font (headless tools): a fixed estimate keeps layout working.
@@ -185,6 +191,50 @@ void ScriptHost::bind_scene_and_ui() {
         }
         return nv::vec2_result(longest * size * 0.55f, lines * size * 1.2f);
     });
+    // Caret geometry in bidirectional text (LineEdit): layout space of a left-aligned line for
+    // left-to-right text, a right-aligned one (origin at the right edge) for right-to-left text.
+    auto caret_layout = [host](std::string_view text, float size) {
+        render::TextStyle style;
+        style.size = size;
+        style.align = render::TextAlign::Start;
+        style.caret_stops = true;
+        std::vector<const render::FontAtlas*> chain{host->options_.font};
+        chain.insert(chain.end(), host->options_.font_fallbacks.begin(), host->options_.font_fallbacks.end());
+        return render::layout_text(chain, text, style);
+    };
+    b.add_native("UI.text_rtl", [host, caret_layout](NativeCall& c) {
+        if (host->options_.font == nullptr) return Value::boolean(false);
+        return Value::boolean(caret_layout(nv::str(c, 0), 16.0f).rtl);
+    });
+    b.add_native("UI.caret_x", [host, caret_layout](NativeCall& c) {
+        const std::string_view text = nv::str(c, 0);
+        const float size = nv::f32(c, 1);
+        const std::int64_t index = nv::integer(c, 2);
+        if (host->options_.font == nullptr) return Value::f32(static_cast<float>(index) * size * 0.55f);
+        const render::TextLayout layout = caret_layout(text, size);
+        const std::size_t i = static_cast<std::size_t>(std::max<std::int64_t>(index, 0));
+        return Value::f32(layout.caret_x.empty() ? 0.0f : layout.caret_x[std::min(i, layout.caret_x.size() - 1)]);
+    });
+    b.add_native("UI.caret_at", [host, caret_layout](NativeCall& c) {
+        const std::string_view text = nv::str(c, 0);
+        const float size = nv::f32(c, 1);
+        const float x = nv::f32(c, 2);
+        if (host->options_.font == nullptr) {
+            return Value::integer(pluma::NumKind::I32, static_cast<std::int64_t>(std::max(x / (size * 0.55f) + 0.5f, 0.0f)));
+        }
+        return Value::integer(pluma::NumKind::I32,
+                              static_cast<std::int64_t>(render::caret_index_at(caret_layout(text, size), x)));
+    });
+    b.add_native("UI.caret_step", [host, caret_layout](NativeCall& c) {
+        const std::string_view text = nv::str(c, 0);
+        const float size = nv::f32(c, 1);
+        const std::int64_t index = nv::integer(c, 2);
+        const std::int64_t dir = nv::integer(c, 3);
+        if (host->options_.font == nullptr) return Value::integer(pluma::NumKind::I32, index + (dir < 0 ? -1 : 1));
+        const std::size_t i = static_cast<std::size_t>(std::max<std::int64_t>(index, 0));
+        return Value::integer(pluma::NumKind::I32,
+                              static_cast<std::int64_t>(render::caret_step_visual(caret_layout(text, size), i, static_cast<int>(dir))));
+    });
 #endif
     b.add_native("Input.pointer", [host](NativeCall&) {
         const InputFrame& f = host->input_.frame();
@@ -196,6 +246,20 @@ void ScriptHost::bind_scene_and_ui() {
         std::string out;
         if (cp != 0) append_utf8(out, cp);
         return nv::str_result(std::move(out));
+    });
+    // IME composition (live, UI-side; empty in replays and headless runs).
+    b.add_native("Input.composition", [host](NativeCall&) { return nv::str_result(host->composition_); });
+    b.add_native("Input.composition_cursor", [host](NativeCall&) {
+        return Value::integer(pluma::NumKind::I32, host->composition_cursor_);
+    });
+    b.add_native("UI.text_area", [host](NativeCall& c) {
+        const float* p = nv::vec(c, 0);
+        const float* s = nv::vec(c, 1);
+        host->text_area_set_ = true;
+        host->text_area_pos_ = {p[0], p[1]};
+        host->text_area_size_ = {s[0], s[1]};
+        host->text_area_caret_ = nv::f32(c, 2);
+        return Value{};
     });
     b.add_native("UI.wants_text", [host](NativeCall& c) {
         host->text_wanted_ = host->text_wanted_ || nv::boolean(c, 0);

@@ -33,10 +33,17 @@ public:
     bool init(rhi::Device& device);
     void shutdown();
 
+    // Multi-viewport support (ImGuiConfigFlags_ViewportsEnable): the renderer half of ImGui's
+    // viewport callbacks. Each OS window ImGui creates for an undocked panel gets an RHI
+    // surface (Feature::MultiSurface) and is drawn with the same pipeline. Call after init(),
+    // on a device that reports the feature; returns false (viewports stay off) otherwise.
+    bool enable_viewports();
+
     // Call between begin_frame and end_frame, after ImGui::Render().
     void render(ImDrawData* draw_data);
 
 private:
+    friend struct ViewportCallbacks;
     void update_texture(ImTextureData* tex);
     void bind_state();
     bool reserve(rhi::BufferHandle& buffer, std::size_t& capacity, std::size_t bytes, rhi::BufferKind kind);

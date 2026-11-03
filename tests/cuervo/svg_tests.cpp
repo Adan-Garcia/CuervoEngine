@@ -1,12 +1,14 @@
 #include <doctest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <string>
 #include <vector>
 
 #include "cuervo/render/mesh_batcher.hpp"
+#include "cuervo/render/post_fx.hpp"
 #include "cuervo/vector/imported_vector.hpp"
 #include "cuervo/vector/mesh.hpp"
 #include "cuervo/vector/svg.hpp"
@@ -515,4 +517,21 @@ TEST_CASE("MeshBatcher: consecutive instances merge into one instanced draw") {
     batcher.clear();
     batcher.draw(a, {}); // destroyed: ignored
     CHECK(batcher.plan().empty());
+}
+
+TEST_CASE("linearize_paint_window converts premultiplied stop colors to linear") {
+    // One gradient block: 4 header rows, 2 stops, 1 offset row.
+    std::vector<std::array<float, 4>> window = {
+        {1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {1.0f, 2.0f, 0, 0},
+        {0.5f * 0.5f, 0.5f * 0.5f, 0.5f * 0.5f, 0.5f}, // sRGB 0.5 gray at alpha 0.5, premultiplied
+        {0.0f, 0.0f, 0.0f, 0.0f},                       // transparent stays untouched
+        {0.0f, 1.0f, 0.0f, 0.0f}};
+    const auto before = window;
+    render::linearize_paint_window(window);
+    const float lin = render::srgb_to_linear({0.5f, 0.5f, 0.5f, 1.0f}).r;
+    CHECK(window[4][0] == doctest::Approx(lin * 0.5f));
+    CHECK(window[4][3] == 0.5f);
+    CHECK(window[5] == before[5]);
+    CHECK(window[0] == before[0]);
+    CHECK(window[6] == before[6]);
 }

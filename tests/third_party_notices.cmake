@@ -7,8 +7,10 @@
 set(known
     SDL3=SDL3 doctest=doctest vulkan_headers=Vulkan-Headers volk=volk vma=VulkanMemoryAllocator
     spirv_cross=SPIRV-Cross libtess2=libtess2 freetype=FreeType msdfgen=msdfgen
-    msdf_atlas_gen=msdf-atlas-gen miniaudio=miniaudio tracy=Tracy imgui=DearImGui
-    outfit=Outfit figtree=Figtree jetbrains_mono=JetBrainsMono box2d=box2d wgpu_native=wgpu-native)
+    msdf_atlas_gen=msdf-atlas-gen miniaudio=miniaudio tracy=Tracy imgui=DearImGui rmlui=RmlUi
+    outfit=Outfit figtree=Figtree jetbrains_mono=JetBrainsMono box2d=box2d wgpu_native=wgpu-native
+    stb_image=stb harfbuzz=HarfBuzz sheenbidi=SheenBidi noto_sans_arabic=NotoSansArabic
+    mplus1p=MPLUS1p libwebp=libwebp mbedtls=MbedTLS)
 
 file(READ "${ROOT}/cmake/Dependencies.cmake" deps)
 file(READ "${ROOT}/THIRD_PARTY_NOTICES.md" notices)

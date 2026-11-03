@@ -10,7 +10,7 @@
 
 #include "editor/app.hpp"
 #include "editor/panels.hpp"
-#include "editor/theme.hpp"
+#include "editor/imgui_theme.hpp"
 #include "editor/ui.hpp"
 
 namespace cuervo::editor {

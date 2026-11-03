@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <format>
 #include <functional>
 #include <memory>
@@ -21,15 +22,22 @@
 #include "cuervo/core/fixed_timestep.hpp"
 #include "cuervo/core/log.hpp"
 #include "cuervo/core/profiler.hpp"
+#include "cuervo/profile/trace.hpp"
+#include "pluma/profiler.hpp"
 #include "cuervo/input/input_map.hpp"
 #include "cuervo/jobs/job_system.hpp"
 #include "cuervo/platform/file_watcher.hpp"
 #include "cuervo/platform/main_loop.hpp"
 #include "cuervo/platform/platform.hpp"
 #include "cuervo/platform/window.hpp"
+#include "cuervo/assets/image.hpp"
 #include "cuervo/render/font_import.hpp"
+#include "cuervo/render/post_fx.hpp"
+#include "cuervo/render/user_shader.hpp"
 #include "cuervo/render/sdf_batcher.hpp"
 #include "cuervo/render/mesh_batcher.hpp"
+#include "cuervo/render/sprite_batcher.hpp"
+#include "cuervo/render/sprite_library.hpp"
 #include "cuervo/render/text_renderer.hpp"
 #include "cuervo/script/vector_cache.hpp"
 #include "cuervo/script/project.hpp"
@@ -135,14 +143,22 @@ public:
     bool init();
     bool frame() override;
     int finish() override;
+    int init_exit_code() const { return init_exit_code_; }
 
 private:
     void hot_reload(double now);
     void render();
     void bench_frame(double now, double frame_ms, double sim_seconds, int ticks);
     void bench_report() const;
+    bool init_net(std::string& error);
+    void net_step(DeviceState& source, vec2 pointer, int ticks);
+    void net_collect();
+    std::uint64_t sim_ticks_limit(const NetContext& net) const;
+    // Ticks simulated and final: the confirmed ones while a network session runs (rollback predicts beyond).
+    std::uint64_t sim_ticks() const;
 
     GameOptions options_;
+    int init_exit_code_ = EXIT_FAILURE;
     GameSession session_;
     Window window_;
     std::unique_ptr<rhi::Device> device_;
@@ -152,15 +168,39 @@ private:
     // Sprites (Canvas.vector): the meshes and the images they come from.
     render::MeshBatcher meshes_;
     VectorCache vectors_{meshes_};
+    // Raster sprites (Canvas.sprite / nine_patch): the images and their batcher.
+    render::SpriteBatcher sprite_batcher_;
+    render::SpriteLibrary sprite_library_;
     render::FontHandle font_;
+    // Post-processing / linear color (DESIGN.md 4.19): the frame is drawn into
+    // `scene_target_` and PostFx::apply writes it to the window.
+    render::PostFx post_;
+    rhi::RenderTargetHandle scene_target_;
+    ivec2 scene_target_size_{0, 0};
+    rhi::TextureHandle lut_;
+    std::unique_ptr<render::UserShader> user_shader_;
+    rhi::PipelineHandle custom_pipeline_;
+    render::PostSettings post_settings_;
+    bool use_post_ = false;
+    bool linear_ = false;
     std::optional<FixedTimestep> timestep_;
     DeviceState devices_;
     bool escape_quits_ = true;
     bool capture_mode_ = false;
+    // Networked play: the delivered frames of every player and the state hash after each confirmed
+    // tick, written as the replay (docs/REPLAYS.md version 4) so the match replays offline.
+    bool net_seen_ = false;
+    bool net_recording_ = false;
+    bool net_collect_failed_ = false;
+    std::uint64_t net_base_ = 0; // sim ticks that ran before the session started (the replay's prefix)
+    unsigned net_owed_ = 0; // ticks the clock owes the session (it stalls while a peer's input is missing)
+    Replay net_replay_;
+    static constexpr unsigned net_max_catch_up = 4; // bounds the burst after a stall (frame pacing)
     double start_ = 0.0;
     double previous_ = 0.0;
     double last_watch_ = 0.0;
     std::uint64_t frames_ = 0;
+    pluma::HeapProfiler heap_profile_; // --profile / --trace: one sample per frame
     double render_cpu_ = 0.0; // seconds of the last render() after begin_frame
 
     // --bench samples, taken after the warmup.
@@ -195,11 +235,16 @@ bool GameLoop::init() {
             window_.poll_events(ignored);
         });
     }
+    if (!options_.trace.empty()) options_.profile = true;
     session_options.profile_scripts = options_.profile;
     if (options_.profile) profiler::set_enabled(true);
+    if (!options_.trace.empty()) profile::start_capture();
     std::string error;
     const double compile_start = now_seconds();
-    if (!session_.init(session_options, error)) return false; // logged
+    if (!session_.init(session_options, error)) {
+        if (session_.compile_failed()) init_exit_code_ = exit_compile_error; // logged
+        return false;
+    }
     const Project& project = session_.project();
     LOG_INFO("Game '{}': {} script file(s) compiled in {:.1f} ms, main {}, {} Hz, seed {}, {} tier", project.name,
              session_.script_count(),
@@ -212,6 +257,7 @@ bool GameLoop::init() {
     // The device is gated to the project's tier, so a Compatible game tested
     // on Vulkan can't use what WebGL2 lacks (rhi::Feature).
     device_options.tier = project.render_tier;
+    device_options.linear_color = project.linear_color;
     device_ = open_device(window_, options_.backend, device_options, project.name, project.virtual_size, options_.gl_es);
     // A Full project must not quietly fall back to GL: it would be refused anyway.
     // The default backend (Vulkan, or WebGPU in a browser) falls back to GL
@@ -225,10 +271,95 @@ bool GameLoop::init() {
     if (!device_) return false;
     if (!check_device_tier(device_->info(), project.render_tier)) return false;
 
-    if (!shapes_.init(*device_, 4096) || !lights_.init(*device_) || !text_.init(*device_) || !meshes_.init(*device_)) {
+    if (!shapes_.init(*device_, 4096) || !lights_.init(*device_) || !text_.init(*device_) || !meshes_.init(*device_) ||
+        !sprite_batcher_.init(*device_)) {
         return false;
     }
-    if (session_.font_atlas() != nullptr) font_ = text_.add_font(*session_.font_atlas());
+    sprite_library_.init(device_.get());
+    // Linear color needs sRGB targets, which the backend may not offer (then the
+    // game blends in sRGB space, as with color_space = "srgb").
+    linear_ = project.linear_color && device_->info().linear_color;
+    if (project.linear_color && !linear_) LOG_WARN("color_space = \"linear\" is unavailable on this device; using sRGB blending");
+    use_post_ = (project.post_enabled || linear_) && device_->info().supports(rhi::Feature::RenderTargets) &&
+                post_.init(*device_);
+    if (project.linear_color || project.post_enabled) {
+        LOG_INFO("Color: {} blending, post-processing {}", linear_ ? "linear" : "sRGB", use_post_ ? "on" : "off");
+    }
+    if (use_post_) {
+        post_settings_ = project.post;
+        // Files come through the VFS (dev directory or pack). Packs hold images as
+        // .ctex and shaders as .cshader (cuervo-tools export imports them).
+        const assets::Vfs& vfs = session_.vfs();
+        const auto swap_ext = [](std::string path, std::string_view ext) {
+            const std::size_t dot = path.rfind('.');
+            return (dot == std::string::npos ? path : path.substr(0, dot)) + std::string(ext);
+        };
+        const auto read_vfs = [&](const std::string& path, std::vector<std::byte>& out) {
+            std::string err;
+            auto file = vfs.open(path, err);
+            if (!file) return false;
+            out.assign(file->bytes().begin(), file->bytes().end());
+            return true;
+        };
+        if (!project.post_lut.empty()) {
+            std::vector<std::byte> raw;
+            std::optional<assets::Image> image;
+            std::string failure = "not found";
+            if (read_vfs(swap_ext(project.post_lut, ".ctex"), raw)) {
+                if (auto tex = assets::decode_ctex(raw)) {
+                    const auto level0 = tex->level(0);
+                    image = assets::Image{tex->width, tex->height, std::vector<std::uint8_t>(level0.begin(), level0.end())};
+                }
+            } else if (read_vfs(project.post_lut, raw)) {
+                assets::DecodeResult decoded = assets::decode_image(raw);
+                image = std::move(decoded.image);
+                failure = decoded.error;
+            }
+            if (image && image->width == image->height * image->height) {
+                rhi::TextureDesc lut;
+                lut.width = image->width;
+                lut.height = image->height;
+                lut.filter = rhi::Filter::Linear;
+                lut.initial_data = image->rgba.data();
+                lut.debug_name = "post_lut";
+                lut_ = device_->create_texture(lut); // LUT values are display-referred bytes: not sRGB-decoded
+                post_settings_.lut = lut_;
+                post_settings_.lut_size = image->height;
+            } else {
+                LOG_WARN("[render.post] lut '{}': {}", project.post_lut, image ? "expected a (N*N x N) strip" : failure);
+            }
+        }
+        if (!project.post_shader.empty()) {
+            std::vector<std::byte> raw;
+            if (!read_vfs(swap_ext(project.post_shader, ".cshader"), raw)) {
+                LOG_WARN("[render.post] shader '{}': no compiled .cshader (run: cuervo-tools shader build <project>)",
+                         project.post_shader);
+            } else if (auto compiled = render::decode_cshader(raw)) {
+                user_shader_ = std::make_unique<render::UserShader>(std::move(*compiled));
+                custom_pipeline_ = post_.create_pass_pipeline(user_shader_->source(), rhi::BlendMode::None, "user_post");
+                post_settings_.custom = custom_pipeline_;
+                post_settings_.custom_params = user_shader_->defaults();
+                for (const auto& [name, values] : project.post_params) {
+                    if (!user_shader_->set(post_settings_.custom_params, name, values)) {
+                        LOG_WARN("[render.post.params] '{}' is not an @export of '{}'", name, project.post_shader);
+                    }
+                }
+            } else {
+                LOG_WARN("[render.post] shader '{}': not a valid .cshader", project.post_shader);
+            }
+        }
+    } else if (project.post_enabled) {
+        LOG_WARN("[render.post] is unavailable on this device");
+    }
+    // Integer scaling means crisp pixels: sprites default to nearest filtering there (DESIGN.md 4.4).
+    sprite_library_.set_default_filter(options_.scale == render::ScaleMode::Integer ? rhi::Filter::Nearest
+                                                                                    : rhi::Filter::Linear);
+    if (session_.font_atlas() != nullptr) {
+        font_ = text_.add_font(*session_.font_atlas());
+        std::vector<render::FontHandle> fallbacks;
+        for (const render::FontAtlas& f : session_.fallback_atlases()) fallbacks.push_back(text_.add_font(f));
+        if (!fallbacks.empty()) text_.set_fallbacks(font_, std::move(fallbacks));
+    }
 
     timestep_.emplace(project.tick_rate);
     capture_mode_ = !options_.screenshot.empty();
@@ -236,6 +367,7 @@ bool GameLoop::init() {
     session_.set_pointer_script(options_.pointers);
     session_.set_typed(options_.typed);
     if (!options_.record.empty()) session_.start_recording();
+    if (!init_net(error)) return false;
     // Escape quits unless the game binds it to an action (e.g. a pause menu,
     // which then quits through Scene.quit()). A browser tab has no "quit".
     escape_quits_ = platform::os != platform::Os::Web;
@@ -261,6 +393,11 @@ void GameLoop::hot_reload(double now) {
 bool GameLoop::frame() {
     // One profiler frame per loop iteration (cuervo/core/profiler.hpp).
     profiler::frame_mark();
+    if (profile::capturing()) {
+        // Frame boundary: draw calls of the frame just rendered, and the Pluma heap.
+        profile::end_frame();
+        profile::add_counter("heap_live", profiler::clock_ns(), static_cast<double>(heap_profile_.sample().live));
+    }
     CUERVO_PROFILE_ZONE("frame");
     const double now = now_seconds();
     bool running = window_.poll_events(devices_);
@@ -279,7 +416,7 @@ bool GameLoop::frame() {
     previous_ = now;
     if (capture_mode_) {
         // Deterministic capture: one tick per frame, independent of timing.
-        step = {host.tick_count() < options_.screenshot_tick ? 1 : 0, 1.0f, false};
+        step = {sim_ticks() < options_.screenshot_tick ? 1 : 0, 1.0f, false};
     }
     // The pointer in virtual coordinates, recorded in the input frame.
     const Project& project = session_.project();
@@ -294,14 +431,39 @@ bool GameLoop::frame() {
     const double sim_start = now_seconds();
     {
         CUERVO_PROFILE_ZONE("simulation");
-        for (int i = 0; i < step.ticks; ++i) session_.tick(session_.sample(source, pointer));
+        if (host.net_context().active()) {
+            net_step(source, pointer, step.ticks);
+        } else {
+            for (int i = 0; i < step.ticks; ++i) {
+                session_.tick(session_.sample(source, pointer));
+                // A game that started a session this tick hands the rest to the session, so every peer's
+                // first networked tick is the same one (the replay's prefix ends here).
+                if (host.net_context().active()) break;
+            }
+        }
     }
     const double sim_seconds = now_seconds() - sim_start;
     if (host.quit_requested()) running = false;
     window_.set_text_input(host.wants_text_input());
+    // IME composition is live display state (never in the input frame, so replays carry only
+    // committed text); capture mode shows none.
+    if (host.wants_text_input() && !capture_mode_) {
+        host.set_composition(devices_.composition, devices_.composition_cursor);
+    } else {
+        host.set_composition({}, -1);
+        devices_.composition.clear();
+        devices_.composition_cursor = -1;
+    }
+    host.clear_text_area();
 
     render();
-    const bool capture = capture_mode_ && host.tick_count() >= options_.screenshot_tick;
+    if (host.has_text_area()) {
+        const vec2 p = host.text_area_position(), sz = host.text_area_size();
+        window_.set_text_input_area({static_cast<int>(p.x()), static_cast<int>(p.y())},
+                                    {static_cast<int>(sz.x()), static_cast<int>(sz.y())},
+                                    static_cast<int>(host.text_area_caret()));
+    }
+    const bool capture = capture_mode_ && sim_ticks() >= options_.screenshot_tick;
     if (capture) device_->capture_frame(options_.screenshot);
     {
         CUERVO_PROFILE_ZONE("end_frame");
@@ -316,8 +478,22 @@ bool GameLoop::frame() {
     // instead of catching up on it.
     if (options_.debugger != nullptr && options_.debugger->stops() != stops_before) previous_ = now_seconds();
     if (capture) {
-        LOG_INFO("Screenshot written to '{}' at tick {} (state hash {:016x})", options_.screenshot, host.tick_count(),
-                 host.state_hash());
+        if (net_seen_) {
+            // The confirmed tick's hashes (rollback's live state may be ahead on predicted input).
+            const std::uint64_t tick = std::min<std::uint64_t>(sim_ticks(), options_.screenshot_tick);
+            const std::uint64_t stick = tick - net_base_; // the session's own numbering
+            const NetContext& net = host.net_context();
+            LOG_INFO("Screenshot written to '{}' at tick {} (state hash {:016x})", options_.screenshot, tick,
+                     net.state_hash_at(static_cast<std::uint32_t>(stick)).value_or(0));
+            LOG_INFO("Snapshot hash {:016x} at tick {}",
+                     net.snapshot_hash_at(static_cast<std::uint32_t>(stick)).value_or(0), tick);
+        } else {
+            LOG_INFO("Screenshot written to '{}' at tick {} (state hash {:016x})", options_.screenshot,
+                     host.tick_count(), host.state_hash());
+            // The stronger hash over all simulation state (ScriptHost::snapshot_hash); the determinism
+            // matrix compares it as well.
+            LOG_INFO("Snapshot hash {:016x} at tick {}", host.snapshot_hash(), host.tick_count());
+        }
         running = false;
     }
     if (options_.quit_after > 0.0 && now - start_ >= options_.quit_after) {
@@ -333,6 +509,107 @@ bool GameLoop::frame() {
     return running;
 }
 
+std::uint64_t GameLoop::sim_ticks() const {
+    const ScriptHost& host = session_.host();
+    return host.net_context().active() ? net_base_ + host.net_context().confirmed_tick() : host.tick_count();
+}
+
+// Starts the session the flags ask for (a game may also call Net.host / Net.join itself).
+bool GameLoop::init_net(std::string& error) {
+    NetContext& net = session_.host().net_context();
+    const bool wanted = options_.net_host >= 0 || !options_.net_join.empty() || !options_.net_relay.empty() || !options_.net_mesh.empty();
+    if (!options_.net_mode.empty()) {
+        net.set_mode(options_.net_mode == "rollback" ? NetContext::Mode::Rollback : NetContext::Mode::Lockstep);
+    }
+    if (!wanted) return true;
+    bool ok = false;
+    if (options_.net_host >= 0) {
+        ok = net.host(static_cast<std::uint16_t>(options_.net_host), error);
+    } else if (!options_.net_mesh.empty()) {
+        ok = net.mesh(options_.net_mesh, options_.net_player, error);
+    } else if (!options_.net_join.empty()) {
+        ok = net.join(options_.net_join, error);
+    } else {
+        ok = net.relay(options_.net_relay, options_.net_room, options_.net_players, error);
+    }
+    if (!ok) {
+        LOG_ERROR("network: {}", error);
+        return false;
+    }
+    // Two peers on a wall clock must not hot-reload scripts under each other.
+    options_.hot_reload = false;
+    return true;
+}
+
+// Drives the session at the fixed step. `ticks` is what the clock owes this frame; a tick the session
+// cannot run yet (a peer's input is missing, or rollback is at its limit) stays owed, so the match
+// advances at the pace of the slowest peer, and the backlog is bounded so a long stall is not
+// followed by a burst of ticks.
+void GameLoop::net_step(DeviceState& source, vec2 pointer, int ticks) {
+    ScriptHost& host = session_.host();
+    if (!net_seen_) {
+        net_seen_ = true;
+        net_base_ = host.tick_count();
+        // A session that starts after tick 0 keeps the ticks played before it as the replay's prefix (the
+        // local input frames and hashes, with the other players idle), so an offline replay runs the whole
+        // run and reaches the session start in the same state. Session ticks are numbered from 1 at the start.
+        const Replay& before = session_.recorded();
+        net_recording_ = !options_.record.empty() && before.frames.size() == net_base_ && before.hashes.size() == net_base_;
+        if (!options_.record.empty() && !net_recording_) {
+            LOG_WARN("--record: the ticks before the network session were not all recorded; this run is not recorded");
+        }
+        const Replay prefix = net_recording_ ? before : Replay{};
+        session_.stop_recording();
+        net_replay_ = net_recording_ ? prefix : session_.replay_header();
+        net_replay_.extra_players.assign(host.net_context().players() - 1, std::vector<InputFrame>(net_base_));
+    }
+    net_owed_ = std::min(net_owed_ + static_cast<unsigned>(std::max(ticks, 0)), net_max_catch_up);
+    while (net_owed_ > 0) {
+        if (capture_mode_ && sim_ticks() >= options_.screenshot_tick) break;
+        if (!host.net_tick(session_.sample(source, pointer))) {
+            // Waiting on a peer: every step re-sends our unacked input, and a loop that spins (VSync off,
+            // a busy machine) would flood the link and starve the relay. A few milliseconds of rest bound it.
+#ifndef __EMSCRIPTEN__
+            if (!capture_mode_ || sim_ticks() < options_.screenshot_tick) SDL_Delay(3);
+#endif
+            break;
+        }
+        --net_owed_;
+        if (!host.net_context().active()) return; // the game left the session
+        net_collect();
+    }
+    net_collect();
+}
+
+std::uint64_t GameLoop::sim_ticks_limit(const NetContext& net) const {
+    const std::uint64_t confirmed = net_base_ + net.confirmed_tick();
+    return capture_mode_ ? std::min<std::uint64_t>(confirmed, options_.screenshot_tick) : confirmed;
+}
+
+// Appends every newly confirmed tick (all players' delivered frames and the state hash after it).
+void GameLoop::net_collect() {
+    if (!net_recording_ || net_collect_failed_) return;
+    const NetContext& net = session_.host().net_context();
+    const std::uint64_t limit = sim_ticks_limit(net);
+    while (net_replay_.frames.size() < limit) {
+        const auto tick = static_cast<std::uint32_t>(net_replay_.frames.size() + 1 - net_base_); // session tick
+        const auto hash = net.state_hash_at(tick);
+        const InputFrame* first = net.confirmed_frame(0, tick);
+        if (!hash || !first) {
+            LOG_WARN("--record: tick {} is no longer retained; the replay ends at tick {}", tick + net_base_,
+                     tick + net_base_ - 1);
+            net_collect_failed_ = true;
+            return;
+        }
+        net_replay_.frames.push_back(*first);
+        for (std::size_t p = 1; p <= net_replay_.extra_players.size(); ++p) {
+            const InputFrame* f = net.confirmed_frame(static_cast<std::uint32_t>(p), tick);
+            net_replay_.extra_players[p - 1].push_back(f != nullptr ? *f : InputFrame{});
+        }
+        net_replay_.hashes.push_back(*hash);
+    }
+}
+
 // Records the latest tick's frame; end_frame (and a capture) is frame()'s.
 void GameLoop::render() {
     const Project& project = session_.project();
@@ -345,12 +622,22 @@ void GameLoop::render() {
     // CPU time from here (begin_frame may block on VSync / frames in flight)
     // to the end of command recording: clears, batch build, upload, draws.
     const double render_start = now_seconds();
+    if (use_post_) {
+        const ivec2 size = device_->framebuffer_size();
+        if (!scene_target_ || scene_target_size_ != size) {
+            if (scene_target_) device_->destroy_render_target(scene_target_);
+            scene_target_ = device_->create_render_target({size.x(), size.y(), rhi::Filter::Linear, "scene"});
+            scene_target_size_ = size;
+        }
+        if (!scene_target_) LOG_ERROR("could not create the {}x{} scene render target", size.x(), size.y());
+        if (scene_target_) device_->set_render_target(scene_target_);
+    }
     const ivec2 fb = device_->framebuffer_size();
     const render::ViewportFit fit = render::fit_viewport(options_.scale, project.virtual_size, fb);
     device_->clear({0.0f, 0.0f, 0.0f, 1.0f});
     device_->set_viewport(fit.viewport);
     device_->set_scissor(fit.viewport);
-    device_->clear(project.clear_color);
+    device_->clear(linear_ ? render::srgb_to_linear(project.clear_color) : project.clear_color);
     shapes_.clear();
     text_.clear();
     const float pixels = std::min(fit.scale.x(), fit.scale.y());
@@ -359,6 +646,7 @@ void GameLoop::render() {
     // overlay below is in screen coordinates.
     const Affine2 world_to_ndc = render::virtual_to_ndc(virtual_extent);
     meshes_.clear();
+    sprite_batcher_.clear();
     {
         CUERVO_PROFILE_ZONE("draw");
         // A capture (--screenshot) shows only its last frame: the frames before
@@ -366,7 +654,8 @@ void GameLoop::render() {
         // 9.7) and slow on software WebGL (the web export's verify run).
         const bool lit = !capture_mode_ || host.tick_count() >= options_.screenshot_tick;
         DrawTargets targets =
-            make_draw_targets(shapes_, text_, font_, &vectors_, world_to_ndc, pixels, true, lit ? &lights_ : nullptr);
+            make_draw_targets(shapes_, text_, font_, &vectors_, world_to_ndc, pixels, true, lit ? &lights_ : nullptr,
+                               &sprite_library_, &sprite_batcher_);
         // Canvas.set_clip: virtual pixels to a scissor in the letterboxed viewport (DESIGN.md 4.17, 9.3).
         rhi::Device* const dev = device_.get();
         targets.clip = [dev, fit](bool on, vec2 pos, vec2 size) {
@@ -403,6 +692,13 @@ void GameLoop::render() {
     CUERVO_PROFILE_ZONE("flush");
     shapes_.flush(world_to_ndc, pixels > 0.0f ? 1.0f / pixels : 1.0f);
     text_.flush(world_to_ndc);
+    // The SDF batcher flushes as one instanced draw; sprites, lights and the
+    // other batchers report through profile::add_draw_calls themselves.
+    profile::add_draw_calls(1 + static_cast<std::uint32_t>(text_.last_draw_calls() + meshes_.last_draw_calls()));
+    if (use_post_ && scene_target_) {
+        device_->set_viewport({0, 0, scene_target_size_.x(), scene_target_size_.y()});
+        post_.apply(scene_target_, scene_target_size_, {}, post_settings_);
+    }
     render_cpu_ = now_seconds() - render_start;
 }
 
@@ -487,25 +783,45 @@ void GameLoop::bench_report() const {
 
 int GameLoop::finish() {
     if (options_.profile && session_.started()) log_profile(session_.host());
+    if (options_.profile && heap_profile_.samples() > 0) LOG_INFO("profile | {}", heap_profile_.report());
+    if (profile::capturing()) {
+        profile::stop_capture();
+        std::string error;
+        if (profile::write_chrome_trace(options_.trace, &error)) {
+            LOG_INFO("profile | trace written to {} ({} events, {} dropped)", options_.trace, profile::events().size(),
+                     profile::dropped_events());
+        } else {
+            LOG_ERROR("profile | {}", error);
+        }
+    }
     if (options_.debugger != nullptr) options_.debugger->detach(); // before the VMs go
     bool failed = false;
-    if (session_.recording()) {
+    if (net_recording_ || session_.recording()) {
         std::string error;
-        if (save_replay(options_.record, session_.recorded(), error)) {
-            LOG_INFO("Replay of {} ticks written to '{}'", session_.recorded().ticks(), options_.record);
+        const Replay& replay = net_recording_ ? net_replay_ : session_.recorded();
+        if (save_replay(options_.record, replay, error)) {
+            LOG_INFO("Replay of {} ticks written to '{}'{}", replay.ticks(), options_.record,
+                     net_recording_ ? std::format(" ({} players)", replay.extra_players.size() + 1) : std::string());
         } else {
             LOG_ERROR("--record: {}", error);
             failed = true;
         }
     }
+    if (scene_target_) device_->destroy_render_target(scene_target_);
+    if (lut_) device_->destroy_texture(lut_);
+    if (custom_pipeline_) device_->destroy_pipeline(custom_pipeline_);
+    post_.shutdown();
     text_.shutdown();
+    sprite_library_.shutdown();
+    sprite_batcher_.shutdown();
     meshes_.shutdown();
     lights_.shutdown();
     shapes_.shutdown();
     device_.reset();
     window_.destroy();
-    // The session (host, audio) goes with the loop; a panic is a failure.
-    return failed || (session_.started() && session_.host().panicked()) ? EXIT_FAILURE : EXIT_SUCCESS;
+    // The session (host, audio) goes with the loop; a panic is exit code 3.
+    if (session_.started() && session_.host().panicked()) return exit_script_panic;
+    return failed ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
 } // namespace
@@ -514,7 +830,7 @@ int run_game(const GameOptions& options) {
     auto loop = std::make_unique<GameLoop>(options);
     if (!loop->init()) {
         loop->finish();
-        return EXIT_FAILURE;
+        return loop->init_exit_code();
     }
     return platform::run_main_loop(std::move(loop), options.vsync);
 }

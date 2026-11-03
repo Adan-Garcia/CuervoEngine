@@ -5,6 +5,7 @@
 #include <format>
 
 #include "pluma/bytecode.hpp"
+#include "pluma/heap.hpp"
 
 namespace pluma {
 
@@ -127,6 +128,36 @@ std::string ScriptProfiler::report(std::size_t top) const {
     }
     if (all.size() > top) out += std::format("  ... {} more\n", all.size() - top);
     return out;
+}
+
+const HeapProfiler::Sample& HeapProfiler::sample() {
+    const HeapStats s = heap_stats();
+    last_ = {s.live, s.manual, s.suspects, s.collected, s.work};
+    if (count_ == 0) first_ = last_;
+    ring_[count_ % history_size] = s.live;
+    ++count_;
+    peak_live_ = std::max(peak_live_, s.live);
+    peak_suspects_ = std::max(peak_suspects_, s.suspects);
+    return last_;
+}
+
+void HeapProfiler::reset() { *this = HeapProfiler{}; }
+
+std::vector<std::size_t> HeapProfiler::live_history() const {
+    std::vector<std::size_t> out;
+    const std::size_t n = std::min(count_, history_size);
+    out.reserve(n);
+    for (std::size_t i = count_ - n; i < count_; ++i) out.push_back(ring_[i % history_size]);
+    return out;
+}
+
+std::string HeapProfiler::report() const {
+    if (count_ == 0) return "heap: no samples\n";
+    return std::format(
+        "heap over {} samples: live {} (peak {}, {:+} since start), manual {}, collector backlog {} (peak {}), "
+        "{} collected, {} work units\n",
+        count_, last_.live, peak_live_, growth(), last_.manual, last_.suspects, peak_suspects_,
+        last_.collected - first_.collected, last_.work - first_.work);
 }
 
 } // namespace pluma

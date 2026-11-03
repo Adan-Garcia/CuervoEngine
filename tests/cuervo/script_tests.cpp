@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 
+#include "cuervo/jobs/job_system.hpp"
 #include "cuervo/math/dmath.hpp"
 #include "cuervo/script/project.hpp"
 #include "cuervo/script/script_host.hpp"
@@ -182,6 +183,40 @@ TEST_CASE("examples/bench: fills to its target, deterministically") {
     CHECK(count >= 45000);
     CHECK(count <= 50100);
     CHECK(run(120).second == hash);
+}
+#endif
+
+#if CUERVO_FEATURE_UI && CUERVO_FEATURE_PARTICLES && CUERVO_FEATURE_COLLISION
+TEST_CASE("examples/bench_collide: colliding bullets fill to the target, deterministically across job counts") {
+    // Milestone 11.8: the colliding-bullet capacity scene. Every bullet is a collidable particle
+    // tested against a hitbox field each tick; the state hash must not depend on the job count.
+    const auto run = [](int ticks, unsigned threads) {
+        std::string error;
+        auto project = script::load_project(fs::path(CUERVO_EXAMPLES_DIR) / "bench_collide", error);
+        REQUIRE_MESSAGE(project.has_value(), error);
+        InputMap map;
+        REQUIRE_MESSAGE(script::apply_input(*project, map, error), error);
+        std::vector<pluma::SourceFile::Part> sources;
+        REQUIRE_MESSAGE(script::read_scripts(*project, sources, nullptr, error), error);
+        script::HostOptions o;
+        o.seed = project->seed;
+        o.tick_rate = project->tick_rate;
+        o.project_dir = project->dir;
+        jobs::JobSystem jobs(threads);
+        script::ScriptHost host(o, map);
+        host.particles().set_jobs(&jobs);
+        REQUIRE_MESSAGE(host.load(sources, project->main_class), host.error());
+        for (int i = 0; i < ticks; ++i) {
+            host.tick(InputFrame{});
+            REQUIRE_MESSAGE(host.running(), host.error());
+        }
+        return std::pair{host.particles().particle_count(), host.state_hash()};
+    };
+    const auto [count, hash] = run(120, 1);
+    CHECK(count >= 45000);
+    CHECK(count <= 50100);
+    CHECK(run(120, 4).second == hash);
+    CHECK(run(120, 8).second == hash);
 }
 #endif
 

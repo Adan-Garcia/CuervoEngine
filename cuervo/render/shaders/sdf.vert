@@ -26,6 +26,15 @@ layout(location = 3) flat out uint v_shape;
 layout(location = 4) flat out vec4 v_color;
 layout(location = 5) flat out vec4 v_outline_color;
 
+// Authored colors are sRGB; with linear color (Globals.row0.w = 1, 4.19) shading
+// and blending happen in linear space, so convert once per instance here.
+vec4 working_color(vec4 c) {
+    if (globals.row0.w > 0.5) {
+        c.rgb = mix(c.rgb / 12.92, pow((c.rgb + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c.rgb));
+    }
+    return c;
+}
+
 void main() {
     // 1.5 px of padding keeps the anti-aliased edge inside the quad.
     // Arc (shape 5) keeps its band half-thickness in half_size.y; its box is square.
@@ -43,6 +52,6 @@ void main() {
     v_half_size = i_half_size;
     v_shape_params = i_params.yz;
     v_shape = i_shape;
-    v_color = i_color;
-    v_outline_color = i_outline_color;
+    v_color = working_color(i_color);
+    v_outline_color = working_color(i_outline_color);
 }

@@ -547,12 +547,11 @@ TEST_CASE("command scripts drive play, record, replay and the input map") {
     std::string error;
     auto replay = load_replay(dir / "replays/run.replay", error);
     REQUIRE_MESSAGE(replay, error);
-    // The input map changed (dash added): older replays are refused, by design.
+    // The input map changed (dash added): the replay still plays, its actions are mapped by stable ID.
     script::SessionOptions base;
     base.font_path = font;
     const script::ReplayCheck changed = script::verify_replay(dir, *replay, base);
-    CHECK_FALSE(changed.ok);
-    CHECK(changed.error.find("input actions") != std::string::npos);
+    CHECK_MESSAGE(changed.ok, changed.error);
     // In the unchanged project it verifies.
     const script::ReplayCheck c = script::verify_replay(examples / "shmup", *replay, base);
     CHECK_MESSAGE(c.ok, c.error);
@@ -568,4 +567,108 @@ TEST_CASE("command scripts drive play, record, replay and the input map") {
     CHECK_FALSE(bad.ok);
     // Without a play controller the verbs are unavailable.
     CHECK(run_command_script("play\n", ed.doc, ed.env).error == "play is not available here");
+}
+
+TEST_CASE("play-in-editor: a backward seek resumes from a snapshot, not from tick 0") {
+    PlayController play;
+    std::string error;
+    REQUIRE(play.start(shmup_play(), error));
+    play.start_recording();
+    DeviceState devices;
+    for (int i = 0; i < 400; ++i) {
+        devices.set_key(Key::Enter, i == 20);
+        devices.set_key(Key::Z, i >= 100 && i < 300);
+        devices.set_key(Key::Right, i >= 120 && i < 180);
+        play.step(devices, {static_cast<float>(i), 200.0f}, 1);
+    }
+    play.stop();
+    const Replay recorded = play.recorded();
+    REQUIRE(recorded.ticks() == 400);
+
+    play.snapshot_interval = 50;
+    REQUIRE_MESSAGE(play.start_replay(shmup_play(), recorded, error), error);
+    CHECK(play.snapshot_count() == 1); // tick 0
+    REQUIRE(play.seek(330, error));
+    CHECK(play.snapshot_count() == 7); // 0, 50, ... 300
+    CHECK(play.state_hash() == recorded.hashes[329]);
+
+    // Back to 170: resumes from the snapshot at 150 and simulates 20 ticks.
+    REQUIRE(play.seek(170, error));
+    CHECK(play.last_seek().from_snapshot);
+    CHECK(play.last_seek().from == 150);
+    CHECK(play.last_seek().simulated == 20);
+    CHECK(play.tick() == 170);
+    CHECK(play.state_hash() == recorded.hashes[169]);
+    CHECK_FALSE(play.first_mismatch());
+    // Landing exactly on a snapshot simulates nothing; tick 0 is a snapshot too.
+    REQUIRE(play.seek(100, error));
+    CHECK(play.last_seek().from == 100);
+    CHECK(play.last_seek().simulated == 0);
+    CHECK(play.state_hash() == recorded.hashes[99]);
+    REQUIRE(play.seek(0, error));
+    CHECK(play.last_seek().from_snapshot);
+    CHECK(play.tick() == 0);
+    // Seeking back and forth ends in the same state as the uninterrupted run, at every tick tried.
+    for (std::uint64_t t : {399u, 7u, 120u, 51u, 250u, 49u, 400u}) {
+        REQUIRE(play.seek(t, error));
+        CHECK(play.tick() == t);
+        if (t > 0) CHECK(play.state_hash() == recorded.hashes[t - 1]);
+    }
+    CHECK_FALSE(play.first_mismatch());
+    // The snapshots can be turned off: seeking back then restarts from tick 0.
+    play.snapshot_interval = 0;
+    REQUIRE(play.start_replay(shmup_play(), recorded, error));
+    REQUIRE(play.seek(200, error));
+    REQUIRE(play.seek(150, error));
+    CHECK_FALSE(play.last_seek().from_snapshot);
+    CHECK(play.last_seek().simulated == 150);
+    CHECK(play.state_hash() == recorded.hashes[149]);
+}
+
+TEST_CASE("play-in-editor: a breakpoint stops the tick, the idle hook drives the debugger, Stop is deferred") {
+    const fs::path dir = temp_dir("breakpoint");
+    write_text(dir / "project.toml", "name = \"P\"\nmain = \"Main\"\n");
+    write_text(dir / "scripts/main.plm",
+               "class Main extends Node2D {\n"
+               "    var hp = 3\n"
+               "    fn update(dt: float) {\n"
+               "        hp += 1\n"           // 4
+               "    }\n"
+               "}\n");
+    PlayController play;
+    play.set_debug_breakpoints({{"scripts/main.plm", {4}}});
+    script::SessionOptions o;
+    o.dir = dir;
+    o.jobs = 1;
+    int slices = 0, stops = 0;
+    std::vector<std::string> seen;
+    play.set_debug_idle([&] {
+        ++slices;
+        DebugSession* ds = play.debug();
+        REQUIRE(ds != nullptr);
+        CHECK(play.debug_blocked());
+        if (ds->stopped() && !ds->frames().empty() && !ds->locals().empty()) {
+            ++stops;
+            seen.push_back(ds->frames()[0].rel + ":" + std::to_string(ds->frames()[0].line));
+            if (stops == 1) {
+                std::string refused;
+                CHECK_FALSE(play.start(o, refused)); // refused while blocked
+                ds->step_over();                // the Step button
+            } else if (stops == 2) {
+                play.stop();                    // deferred: the VM is inside the debugger
+                CHECK(play.session() != nullptr);
+            } else ds->resume();
+        }
+    });
+    std::string error;
+    REQUIRE_MESSAGE(play.start(o, error), error);
+    REQUIRE(play.debug() != nullptr);
+    DeviceState devices;
+    play.update(0.05, devices, {});
+    CHECK(stops == 2);
+    CHECK(seen.size() == 2);
+    CHECK(seen[0] == "scripts/main.plm:4");
+    CHECK_FALSE(play.active()); // the deferred Stop ran when the VM came back
+    CHECK(play.debug() == nullptr);
+    CHECK(slices >= 2);
 }

@@ -193,6 +193,10 @@ public:
     // (pluma/heap.hpp). Call it at a fixed point of the tick, when no
     // script runs. A broken `@acyclic` promise comes back as a panic.
     RunResult collect_cycles(std::uint64_t budget, CollectResult* stats = nullptr);
+    // Collects every pending cycle now, ignoring the budget and the credit. A host calls it before a
+    // tick so that garbage made outside ticks (a draw frame) never reaches the tick's collector, whose
+    // leftover work (and so the snapshot) must depend on the simulation alone.
+    RunResult drain_cycles(CollectResult* stats = nullptr);
     // Frees every object of the frame arena (end of tick) or the scene arena
     // (scene unload), newest first.
     void reset_frame_arena();
@@ -383,6 +387,7 @@ private:
     };
     ManualList manual_[4];
     std::uint64_t rng_state_ = 0; // random_below's PCG32 state
+    RunResult collect_result(const CollectResult& r, CollectResult* stats);
     std::int64_t gc_credit_ = 0; // collect_cycles: work units owed or available
     bool suspended_ = false;        // the last execute() returned because a coroutine suspended
     DebugHooks* hooks_ = nullptr;
@@ -395,6 +400,7 @@ private:
     std::size_t format_limit_ = static_cast<std::size_t>(-1);
 
     friend struct Natives;
+    friend struct SnapshotAccess;
     friend struct AotRuntime;
 };
 

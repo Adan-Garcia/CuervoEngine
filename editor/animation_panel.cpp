@@ -21,7 +21,8 @@
 #include "editor/anim_edit.hpp"
 #include "editor/app.hpp"
 #include "editor/panels.hpp"
-#include "editor/theme.hpp"
+#include "editor/timeline.hpp"
+#include "editor/imgui_theme.hpp"
 
 namespace cuervo::editor {
 
@@ -94,22 +95,7 @@ public:
     }
 
 private:
-    // The selected AnimationPlayer, or the first one among the selected node's children.
-    NodeId find_player(EditorApp& app) const {
-        const EditorDocument& doc = app.doc();
-        const NodeId sel = doc.selection();
-        const ModelNode* n = doc.model().get(sel);
-        if (n == nullptr) return 0;
-        if (is_player(app, n->type)) return sel;
-        for (NodeId c : n->children) {
-            if (const ModelNode* cn = doc.model().get(c); cn != nullptr && is_player(app, cn->type)) return c;
-        }
-        return 0;
-    }
-
-    static bool is_player(EditorApp& app, const std::string& type) {
-        return type == "AnimationPlayer" || app.env().classes().is_a(type, "AnimationPlayer");
-    }
+    NodeId find_player(EditorApp& app) const { return find_animation_player(app.doc(), app.env().classes()); }
 
     bool commit(EditorApp& app, const std::vector<anim::Clip>& clips, bool merge = false) {
         const bool ok = app.doc().set_field(player_, "animations", anim::write(clips), merge);
@@ -407,43 +393,7 @@ private:
         }
     }
 
-    // The value `path` ("Node/Path:field" from the player's root) has in the
-    // document, packed for a key.
-    std::optional<std::array<float, 4>> record(EditorApp& app, const std::string& path) const {
-        std::string node_path, field;
-        if (!anim::split_path(path, node_path, field)) return std::nullopt;
-        const EditorDocument& doc = app.doc();
-        const SceneModel& model = doc.model();
-        const ModelNode* p = model.get(player_);
-        if (p == nullptr) return std::nullopt;
-        // root_path: ".." (the default) is the parent, "." the player itself.
-        const scene::Value root_path = doc.field_value(player_, "root_path");
-        NodeId at = root_path.kind == scene::ValueKind::Str && root_path.text == "." ? player_ : p->parent;
-        std::size_t pos = 0;
-        while (at != 0 && pos < node_path.size()) {
-            std::size_t end = node_path.find('/', pos);
-            if (end == std::string::npos) end = node_path.size();
-            const std::string seg = node_path.substr(pos, end - pos);
-            pos = end + 1;
-            if (seg.empty() || seg == ".") continue;
-            const ModelNode* n = model.get(at);
-            if (seg == "..") {
-                at = n->parent;
-                continue;
-            }
-            NodeId next = 0;
-            for (NodeId c : n->children) {
-                if (model.get(c)->name == seg) {
-                    next = c;
-                    break;
-                }
-            }
-            at = next;
-        }
-        if (at == 0) return std::nullopt;
-        if (doc.field_type(at, field).empty()) return std::nullopt;
-        return anim::pack(doc.field_value(at, field));
-    }
+    std::optional<std::array<float, 4>> record(EditorApp& app, const std::string& path) const { return record_value(app.doc(), player_, path); }
 
     NodeId player_ = 0;
     int clip_ = -1;

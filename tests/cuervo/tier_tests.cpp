@@ -383,3 +383,83 @@ TEST_CASE("Platform helpers") {
     w.reset({}, p.dir / "scripts", ".plm");
     CHECK_FALSE(w.changed());
 }
+
+TEST_CASE("Texture mips: chain length, validation and the tier") {
+    CHECK(rhi::full_mip_chain_length(1, 1) == 1);
+    CHECK(rhi::full_mip_chain_length(64, 64) == 7);
+    CHECK(rhi::full_mip_chain_length(48, 20) == 6);
+    CHECK(rhi::full_mip_chain_length(4096, 1) == 13);
+    CHECK(rhi::feature_tier(rhi::Feature::TextureMips) == rhi::Tier::Compatible);
+    CHECK(rhi::feature_required(rhi::Feature::TextureMips));
+
+    const rhi::DeviceInfo gl = gl_like(rhi::Tier::Compatible);
+    REQUIRE(gl.supports(rhi::Feature::TextureMips));
+    rhi::TextureDesc desc;
+    desc.width = 64;
+    desc.height = 16;
+    CHECK(rhi::detail::texture_levels(gl, desc) == 1); // default: no chain
+    desc.mip_levels = 0;
+    CHECK(rhi::detail::texture_levels(gl, desc) == 7);
+    desc.mip_levels = 7;
+    CHECK(rhi::detail::texture_levels(gl, desc) == 7);
+    desc.mip_levels = 8; // floor(log2(64)) + 1 = 7
+    CHECK(rhi::detail::texture_levels(gl, desc) == 0);
+    desc.mip_levels = 3;
+    desc.srgb = true;
+    desc.format = rhi::TextureFormat::R8; // only RGBA8 can be sRGB
+    CHECK(rhi::detail::texture_levels(gl, desc) == 0);
+    desc.format = rhi::TextureFormat::RGBA8;
+    CHECK(rhi::detail::texture_levels(gl, desc) == 3);
+
+    // Per-level data must match each level's size; extra levels are refused.
+    std::vector<std::byte> l0(64 * 16 * 4), l1(32 * 8 * 4), bad(5);
+    const std::vector<std::span<const std::byte>> good{l0, l1};
+    desc.initial_levels = good;
+    CHECK(rhi::detail::texture_levels(gl, desc) == 3);
+    CHECK(rhi::detail::texture_level_data(desc, 1).size() == l1.size());
+    CHECK(rhi::detail::texture_level_data(desc, 2).empty());
+    const std::vector<std::span<const std::byte>> wrong{l0, bad};
+    desc.initial_levels = wrong;
+    CHECK(rhi::detail::texture_levels(gl, desc) == 0);
+    desc.mip_levels = 1;
+    desc.initial_levels = good;
+    CHECK(rhi::detail::texture_levels(gl, desc) == 0);
+
+    // A device without the capability refuses chains but still serves plain textures.
+    rhi::DeviceInfo old = gl;
+    old.hardware_features.set(rhi::Feature::TextureMips, false);
+    rhi::detail::apply_tier_gate(old, rhi::Tier::Compatible);
+    desc = {};
+    desc.width = desc.height = 8;
+    CHECK(rhi::detail::texture_levels(old, desc) == 1);
+    desc.mip_levels = 0;
+    CHECK(rhi::detail::texture_levels(old, desc) == 0);
+}
+
+TEST_CASE("Render targets: tier, size validation and the blend modes") {
+    CHECK(rhi::feature_tier(rhi::Feature::RenderTargets) == rhi::Tier::Compatible);
+    CHECK(rhi::feature_required(rhi::Feature::RenderTargets));
+    CHECK(rhi::feature_name(rhi::Feature::RenderTargets) == "render targets");
+
+    const rhi::DeviceInfo gl = gl_like(rhi::Tier::Compatible);
+    REQUIRE(gl.supports(rhi::Feature::RenderTargets));
+    rhi::RenderTargetDesc desc;
+    desc.width = 640;
+    desc.height = 360;
+    CHECK(rhi::detail::render_target_allowed(gl, desc));
+    desc.height = 0;
+    CHECK_FALSE(rhi::detail::render_target_allowed(gl, desc));
+    desc.width = desc.height = 8192; // above the Compatible limit (4096)
+    CHECK_FALSE(rhi::detail::render_target_allowed(gl, desc));
+
+    // A device without the capability refuses targets.
+    rhi::DeviceInfo old = gl;
+    old.hardware_features.set(rhi::Feature::RenderTargets, false);
+    rhi::detail::apply_tier_gate(old, rhi::Tier::Compatible);
+    desc.width = desc.height = 64;
+    CHECK_FALSE(rhi::detail::render_target_allowed(old, desc));
+    CHECK(rhi::check_tier(old, rhi::Tier::Compatible).missing_required.size() == 1);
+
+    // Screen follows Additive in the enum (backends index tables by it).
+    CHECK(static_cast<int>(rhi::BlendMode::Screen) == static_cast<int>(rhi::BlendMode::Additive) + 1);
+}

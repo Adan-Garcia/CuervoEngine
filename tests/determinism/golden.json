@@ -11,5 +11,17 @@
     "tictak": "0b1d5dd886e8c072",
     "tutorial": "519ec4a631d8254d",
     "ui_menus": "0b87996debe41e31"
+  },
+  "snapshots": {
+    "anim_character": "829721f3460ebd16",
+    "bench": "32a788057dc62240",
+    "editor_level": "6f1f1ec248994b94",
+    "garden": "f8fd9d03f96a5083",
+    "lantern_cave": "7adfe28a782bccf0",
+    "node_level": "41d498b0691a53cf",
+    "shmup": "1468bdefed2e47d9",
+    "tictak": "db88877dd7be3d2d",
+    "tutorial": "450513d9c3f9b35d",
+    "ui_menus": "405e07334984f982"
   }
 }

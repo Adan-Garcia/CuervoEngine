@@ -111,7 +111,8 @@ FontHandle TextRenderer::add_font(FontAtlas atlas) {
         LOG_ERROR("TextRenderer: font '{}' rejected: {}", atlas.name, invalid);
         return {};
     }
-    Font font{std::move(atlas), {}};
+    atlas.prepare_shaping();
+    Font font{std::move(atlas), {}, {}};
     if (device_) {
         font.texture = device_->create_texture({font.atlas.width, font.atlas.height, rhi::TextureFormat::RGBA8,
                                                 rhi::Filter::Linear, font.atlas.pixels.data(), font.atlas.name});
@@ -146,6 +147,28 @@ rhi::TextureHandle TextRenderer::texture(FontHandle handle) const {
     return it != fonts_.end() ? it->second.texture : rhi::TextureHandle{};
 }
 
+void TextRenderer::set_fallbacks(FontHandle primary, std::vector<FontHandle> fallbacks) {
+    auto it = fonts_.find(primary.id);
+    if (it != fonts_.end()) {
+        it->second.fallbacks = std::move(fallbacks);
+    }
+}
+
+std::vector<FontHandle> TextRenderer::font_stack(FontHandle primary) const {
+    std::vector<FontHandle> stack;
+    auto it = fonts_.find(primary.id);
+    if (it == fonts_.end()) {
+        return stack;
+    }
+    stack.push_back(primary);
+    for (FontHandle f : it->second.fallbacks) {
+        if (fonts_.count(f.id) != 0) {
+            stack.push_back(f);
+        }
+    }
+    return stack;
+}
+
 TextLayout TextRenderer::draw(FontHandle handle, std::string_view text, const Affine2& transform,
                               const TextStyle& style, rhi::Color color) {
     const FontAtlas* atlas = font(handle);
@@ -153,7 +176,12 @@ TextLayout TextRenderer::draw(FontHandle handle, std::string_view text, const Af
         LOG_ERROR("TextRenderer::draw: invalid font handle {}", handle.id);
         return {};
     }
-    TextLayout layout = layout_text(*atlas, text, style);
+    const std::vector<FontHandle> stack = font_stack(handle);
+    std::vector<const FontAtlas*> atlases;
+    for (FontHandle f : stack) {
+        atlases.push_back(font(f));
+    }
+    TextLayout layout = layout_text(atlases, text, style);
     draw_layout(handle, layout, transform, color);
     return layout;
 }
@@ -165,14 +193,17 @@ void TextRenderer::draw_layout(FontHandle handle, const TextLayout& layout, cons
         return;
     }
     const std::uint32_t packed = pack_rgba8(color);
-    // A run already drawn by an earlier flush is never extended.
-    if (runs_.size() == flushed_runs_ || runs_.back().font != handle) {
-        runs_.push_back({handle, static_cast<std::uint32_t>(instances_.size()), 0});
-    }
+    const std::vector<FontHandle> stack = font_stack(handle);
     for (const LaidOutGlyph& glyph : layout.glyphs) {
-        instances_.push_back(make_glyph_instance(glyph, transform, packed, atlas->distance_range));
+        const FontHandle f = glyph.font < stack.size() ? stack[glyph.font] : handle;
+        const FontAtlas* a = font(f);
+        // A run already drawn by an earlier flush is never extended.
+        if (runs_.size() == flushed_runs_ || runs_.back().font != f) {
+            runs_.push_back({f, static_cast<std::uint32_t>(instances_.size()), 0});
+        }
+        instances_.push_back(make_glyph_instance(glyph, transform, packed, a->distance_range));
+        ++runs_.back().instance_count;
     }
-    runs_.back().instance_count += static_cast<std::uint32_t>(layout.glyphs.size());
 }
 
 bool TextRenderer::ensure_capacity(std::size_t count) {
@@ -196,7 +227,7 @@ void TextRenderer::flush(const Affine2& m) {
     if (!device_ || first == instances_.size() || !ensure_capacity(instances_.size())) {
         return;
     }
-    const TextGlobals globals{{m.a, m.c, m.tx, 0.0f}, {m.b, m.d, m.ty, 0.0f}};
+    const TextGlobals globals{{m.a, m.c, m.tx, device_->info().linear_color ? 1.0f : 0.0f}, {m.b, m.d, m.ty, 0.0f}};
     device_->update_buffer(globals_, 0, std::as_bytes(std::span(&globals, 1)));
     // Only this flush's range: draws of earlier flushes keep reading theirs
     // (the RHI gives updates GL ordering semantics on every backend).

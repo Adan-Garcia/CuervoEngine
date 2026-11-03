@@ -13,6 +13,7 @@
 
 #include "cuervo/input/input_map.hpp"
 #include "cuervo/math/vec.hpp"
+#include "cuervo/render/post_fx.hpp"
 #include "cuervo/rhi/rhi.hpp"
 #include "cuervo/script/features.hpp"
 #include "pluma/source.hpp"
@@ -31,13 +32,28 @@
 //   clear_color = "0b0e1a"
 //   render_tier = "compatible"   # or "full" (DESIGN.md 4.4); default compatible
 //   jobs = 4                      # job system threads (DESIGN.md 4.15); 0/absent = auto
+//   [render]
+//   color_space = "srgb"          # or "linear": sRGB targets, linear blending (DESIGN.md 4.19)
+//   [render.post]                 # post-processing on a render target (DESIGN.md 4.19)
+//   bloom = true                  # bloom_threshold, bloom_intensity, bloom_levels
+//   vignette = 0.4                # strength; vignette_radius
+//   crt = false                   # crt_scanlines, crt_curvature, crt_mask
+//   lut = "assets/grade.png"      # a (N*N x N) color-grading strip; lut_strength
+//   shader = "shaders/glow.glsl" # a user shader (precompiled by cuervo-tools shader build)
+//   [render.post.params]          # values of the shader's @export uniforms
+//   strength = 0.5
+//   tint = [1.0, 0.8, 0.6]
 //   [scene]
 //   transform_hierarchy = true    # false: Node2D transforms are world transforms
+//   [text]                        # DESIGN.md 4.19 (milestone 11.3)
+//   fallbacks = ["assets/fonts/arabic.ttf", "assets/fonts/jp.ttf"]  # tried in order after the game font
 //   [features]                    # optional explicit overrides (Milestone 7.5)
 //   audio = false
 //   particles = true
 //   [input.actions]               # DESIGN.md 4.8
 //   shoot = ["Key.Z", "Key.Space", "Pad.South"]
+//   [input.action_ids]            # optional stable IDs (replays survive reordering and renames)
+//   shoot = 7                     # without one an action's ID is a hash of its name
 //   [input.axes]                  # 2D axes: Input.axis(#move) -> vec2
 //   move = ["Keys.Arrows", "Keys.WASD", "Pad.LeftStick"]
 //   [dependencies]                # packages (LANGUAGE.md 9.26, milestone 10.5b)
@@ -74,14 +90,27 @@ struct Project {
     rhi::Color clear_color{0.05f, 0.06f, 0.10f, 1.0f};
     rhi::Tier render_tier = rhi::Tier::Compatible;
     int render_tier_line = 0; // line of `render_tier` in project.toml (0 = not set)
+    // [render] color_space = "linear": scene colors are authored in sRGB but blended
+    // in linear space (DESIGN.md 4.19); false = "srgb" (the default).
+    bool linear_color = false;
+    // [render.post]: effects applied to the finished frame; `post_lut` is a project path.
+    render::PostSettings post;
+    std::string post_lut;
+    std::string post_shader;                                          // project path of the .glsl
+    std::vector<std::pair<std::string, std::vector<float>>> post_params; // @export values
+    bool post_enabled = false; // any [render.post] key was set
     unsigned jobs = 0;        // job system threads; 0 = auto (--jobs and CUERVO_JOBS override)
     // [scene] transform_hierarchy: Node2D transforms are parent-relative
     // (DESIGN.md 4.17, milestone 9.1). Defaults to true; false keeps the
     // world-space behavior of earlier versions.
     bool transform_hierarchy = true;
+    // [text] fallbacks: project-relative font files drawn for glyphs the game font lacks
+    // (Arabic, Japanese). Read through the Vfs; a pack holds the imported `.efont`.
+    std::vector<std::string> font_fallbacks;
     FeatureOverrides features; // [features] in project.toml
     std::vector<std::pair<std::string, std::vector<std::string>>> actions;
     std::vector<std::pair<std::string, std::vector<std::string>>> axes;
+    std::vector<std::pair<std::string, std::uint32_t>> action_ids; // [input.action_ids], by action name
     std::vector<Dependency> dependencies; // [dependencies], in file order
 };
 

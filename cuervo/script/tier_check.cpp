@@ -342,6 +342,18 @@ std::optional<TierCheckReport> check_project_tier(const fs::path& dir, std::opti
             continue;
         }
         if (!has_ext(p, {".vert", ".frag", ".glsl"})) continue;
+        if (has_ext(p, {".glsl"})) {
+            // User shaders (DESIGN.md 4.19) are precompiled by cuervo-tools: there is no
+            // runtime compiler, so a shader given as a string at run time cannot work
+            // on the web (or anywhere else); only the compiled .cshader runs.
+            fs::path compiled = p;
+            compiled.replace_extension(".cshader");
+            if (!fs::exists(compiled)) {
+                out.push_back(issue(Severity::Warning, name, 0, 0,
+                                    "user shader has no compiled .cshader (run 'cuervo-tools shader build <project>'; "
+                                    "export compiles it): the web build has no runtime shader compiler"));
+            }
+        }
         std::string text;
         if (!read_file(p, text)) {
             out.push_back(issue(Severity::Error, name, 0, 0, "can't be read"));

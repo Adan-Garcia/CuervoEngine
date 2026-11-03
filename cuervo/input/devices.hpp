@@ -79,6 +79,13 @@ struct DeviceState {
     // burst (paste, IME commit) is spread over the next ticks.
     std::u32string typed;
 
+    // IME composition (DESIGN.md 4.19 "11.3"): the uncommitted text the user is
+    // building (SDL_EVENT_TEXT_EDITING) and the caret inside it, in characters
+    // (-1: none). Display only: `InputMap::sample` never puts it in the input
+    // frame, so a replay carries committed text (`typed`) and nothing else.
+    std::string composition;
+    int composition_cursor = -1;
+
     bool key(Key k) const {
         const auto i = static_cast<std::size_t>(k);
         return keys[i] || keys_tapped[i];

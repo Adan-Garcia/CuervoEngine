@@ -163,15 +163,8 @@ render::SdfShape shape_for(std::string_view s) {
 
 } // namespace
 
-#if CUERVO_FEATURE_PARTICLES
-struct ScriptHost::EmitterData {
-    ScriptHost* host = nullptr;
-    particles::EmitterId id = 0;
-};
-#endif
-
 ScriptHost::ScriptHost(HostOptions options, const InputMap& input_map)
-    : options_(options), input_(input_map)
+    : options_(options), input_(input_map), input_map_(&input_map)
 #if CUERVO_FEATURE_PARTICLES
       , particles_(options.seed)
 #else
@@ -193,12 +186,27 @@ ScriptHost::ScriptHost(HostOptions options, const InputMap& input_map)
 #if CUERVO_FEATURE_PHYSICS
     physics_ = std::make_unique<physics::PhysicsWorld>();
 #endif
+    save_.configure(options_.game_name, options_.save_store);
     for (pluma::SourceFile::Part& p : joined_preludes()) bindings_.add_prelude(std::move(p.path), std::move(p.text));
     bind();
     if (options_.plugins) options_.plugins->bind(bindings_);
 #if CUERVO_FEATURE_AUDIO
     bind_audio(bindings_, *audio_);
+    save_.audio = audio_;
 #endif
+    bind_save(bindings_, save_);
+    // Locale.load reads project files through the Vfs (so packed builds work too).
+    locale_.read_text = [this](std::string_view path, std::string& text, std::string& error) {
+        std::string rel;
+        if (!assets::Vfs::normalize(path, rel, error)) return false;
+        auto file = options_.vfs->open(rel, error);
+        if (!file) return false;
+        const auto bytes = file->bytes();
+        text.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        return true;
+    };
+    bind_locale(bindings_, locale_);
+    bind_net(bindings_, net_);
 }
 
 void ScriptHost::set_script_profiling(bool on) {
@@ -358,6 +366,25 @@ void ScriptHost::bind() {
                  [host](NativeCall& c) { return Value::boolean(host->input_.pressed(Name(nv::name(c, 0)))); });
     b.add_native("Input.released",
                  [host](NativeCall& c) { return Value::boolean(host->input_.released(Name(nv::name(c, 0)))); });
+    // Per-player queries; player 0 is the same as the plain ones, an unknown player reads as idle.
+    auto player_input = [host](NativeCall& c) -> const Input* {
+        const auto p = nv::integer(c, 0);
+        if (p == 0) return &host->input_;
+        if (p < 0 || static_cast<std::size_t>(p) > host->extra_inputs_.size()) return nullptr;
+        return &host->extra_inputs_[static_cast<std::size_t>(p) - 1];
+    };
+    b.add_native("Input.held_by", [player_input](NativeCall& c) {
+        const Input* in = player_input(c);
+        return Value::boolean(in != nullptr && in->held(Name(nv::name(c, 1))));
+    });
+    b.add_native("Input.pressed_by", [player_input](NativeCall& c) {
+        const Input* in = player_input(c);
+        return Value::boolean(in != nullptr && in->pressed(Name(nv::name(c, 1))));
+    });
+    b.add_native("Input.released_by", [player_input](NativeCall& c) {
+        const Input* in = player_input(c);
+        return Value::boolean(in != nullptr && in->released(Name(nv::name(c, 1))));
+    });
     b.add_native("Input.axis", [host](NativeCall& c) {
         std::string n(nv::name(c, 0));
         float x = host->input_.axis(Name(n + ".x"));
@@ -446,8 +473,10 @@ void ScriptHost::bind() {
         render::TextStyle style;
         style.size = nv::f32(c, 3);
         std::string_view align = nv::name(c, 5);
-        style.align = align == "center" ? render::TextAlign::Center
+        style.align = align == "center"  ? render::TextAlign::Center
                       : align == "right" ? render::TextAlign::Right
+                      : align == "start" ? render::TextAlign::Start
+                      : align == "end"   ? render::TextAlign::End
                                          : render::TextAlign::Left;
         std::string_view base = nv::name(c, 6);
         style.baseline = base == "middle"   ? render::TextBaseline::Middle
@@ -488,7 +517,8 @@ void ScriptHost::bind() {
         const vec2 scale = to_vec2(nv::vec(c, 4));
         const Affine2 m = Affine2::translate(pos) * Affine2::rotate(rotation) * Affine2::scale(scale);
         const float s = std::max(std::abs(scale.x()), std::abs(scale.y()));
-        // Shapes drawn before it stay below it (call order).
+        // Shapes and sprites drawn before it stay below it (call order).
+        if (host->sprites_pending_) host->flush_draw(DrawFlush::Sprites);
         host->flush_draw(DrawFlush::Shapes);
         if (host->targets_->vectors->draw(*host->options_.vfs, nv::str(c, 1), m, nv::boolean(c, 5),
                                           to_color(c.args[6]), host->targets_->pixels_per_unit * host->view_zoom_ * s)) {
@@ -504,6 +534,7 @@ void ScriptHost::bind() {
         const vec2 scale = to_vec2(nv::vec(c, pos_arg + 2));
         const Affine2 m = Affine2::translate(pos) * Affine2::rotate(rotation) * Affine2::scale(scale);
         const float s = std::max(std::abs(scale.x()), std::abs(scale.y()));
+        if (host->sprites_pending_) host->flush_draw(DrawFlush::Sprites);
         host->flush_draw(DrawFlush::Shapes);
         if (host->targets_->vectors->draw_shape(shape, m, host->targets_->pixels_per_unit * host->view_zoom_ * s)) {
             host->meshes_pending_ = true;
@@ -691,6 +722,7 @@ void ScriptHost::bind() {
     bind_scene_and_ui();
     bind_animation();
     bind_lighting();
+    bind_sprites();
 #if CUERVO_FEATURE_PHYSICS
     bind_physics();
 #endif
@@ -985,8 +1017,14 @@ void ScriptHost::clear_error() {
     last_panic_.reset();
 }
 
-void ScriptHost::tick(const InputFrame& frame) {
-    if (!running() || !root_.is_obj()) return;
+void ScriptHost::tick(const InputFrame& frame) { tick_players(std::span<const InputFrame>(&frame, 1)); }
+
+void ScriptHost::tick_players(std::span<const InputFrame> players) {
+    if (!running() || !root_.is_obj() || players.empty()) return;
+    // Extra players only ever grow, so a snapshot taken with more players keeps their history.
+    while (extra_inputs_.size() + 1 < players.size()) extra_inputs_.emplace_back(*input_map_);
+    for (std::size_t i = 1; i < players.size(); ++i) extra_inputs_[i - 1].push(players[i]);
+    const InputFrame& frame = players[0];
     CUERVO_PROFILE_ZONE("scripts");
     tick_scripts(frame);
     CUERVO_PROFILE_ZONE("gc");
@@ -1003,6 +1041,11 @@ void ScriptHost::end_tick() {
 
 void ScriptHost::tick_scripts(const InputFrame& frame) {
     pluma::VM& vm = session_->vm();
+    // Cyclic garbage made since the last tick came from outside the simulation (draw and UI frames, whose
+    // number depends on the machine's speed). Collecting it here keeps it out of the tick's budgeted
+    // collection, so the garbage still pending when the tick ends, and the debt the collector carries,
+    // are functions of the simulation only (the snapshot holds both; DESIGN.md 4.1, 4.8).
+    check(vm.drain_cycles(), "the cycle collector");
     ++tick_;
 #if CUERVO_FEATURE_AUDIO
     // Whatever path the tick leaves by, its audio triggers go out as one batch.
@@ -1134,23 +1177,38 @@ void ScriptHost::draw(render::SdfBatcher& shapes, render::TextRenderer& text, re
 
 DrawTargets make_draw_targets(render::SdfBatcher& shapes, render::TextRenderer& text, render::FontHandle font,
                               VectorCache* vectors, const Affine2& to_ndc, float pixels_per_unit, bool cameras,
-                              render::LightBatcher* lights) {
+                              render::LightBatcher* lights, render::SpriteLibrary* sprites,
+                              render::SpriteBatcher* sprite_batcher) {
     DrawTargets t;
     t.shapes = &shapes;
     t.text = &text;
     t.font = font;
     t.vectors = vectors;
+    t.sprites = sprites;
+    t.sprite_batcher = sprite_batcher;
     t.pixels_per_unit = pixels_per_unit;
     t.cameras = cameras;
     render::SdfBatcher* s = &shapes;
     render::TextRenderer* tx = &text;
-    t.flush = [s, tx, vectors, to_ndc, pixels_per_unit](DrawFlush what, const Affine2& view, float zoom) {
+    t.flush = [s, tx, vectors, sprite_batcher, to_ndc, pixels_per_unit](DrawFlush what, const Affine2& view,
+                                                                         float zoom) {
         const Affine2 m = to_ndc * view;
         const float px = pixels_per_unit * zoom;
+        if (what == DrawFlush::Sprites) {
+            if (sprite_batcher != nullptr) {
+                sprite_batcher->flush(m);
+                sprite_batcher->clear();
+            }
+            return;
+        }
         if (what != DrawFlush::Meshes) s->flush(m, px > 0.0f ? 1.0f / px : 1.0f);
         if (what != DrawFlush::Shapes && vectors != nullptr) {
             vectors->batcher().flush(m);
             vectors->batcher().clear();
+        }
+        if (what == DrawFlush::Layer && sprite_batcher != nullptr) {
+            sprite_batcher->flush(m);
+            sprite_batcher->clear();
         }
         if (what == DrawFlush::Layer) tx->flush(m);
     };
@@ -1175,13 +1233,22 @@ DrawTargets make_draw_targets(render::SdfBatcher& shapes, render::TextRenderer& 
 }
 
 render::SdfBatcher* ScriptHost::shape_target() {
+    if (sprites_pending_) flush_draw(DrawFlush::Sprites);
     if (meshes_pending_) flush_draw(DrawFlush::Meshes);
     return shapes_;
 }
 
+void ScriptHost::settle_for_sprites() {
+    // At most one of shapes, meshes and sprites is queued at a time, so the
+    // order they were drawn in is the order they reach the screen.
+    if (meshes_pending_) flush_draw(DrawFlush::Meshes);
+    flush_draw(DrawFlush::Shapes);
+}
+
 void ScriptHost::flush_draw(DrawFlush what) {
     if (targets_ == nullptr) return;
-    if (what != DrawFlush::Shapes) meshes_pending_ = false;
+    if (what == DrawFlush::Meshes || what == DrawFlush::Layer) meshes_pending_ = false;
+    if (what == DrawFlush::Sprites || what == DrawFlush::Layer) sprites_pending_ = false;
     if (targets_->flush) targets_->flush(what, view_, view_zoom_);
 }
 
@@ -1194,6 +1261,7 @@ void ScriptHost::draw(const DrawTargets& targets) {
     view_ = Affine2{};
     view_zoom_ = 1.0f;
     meshes_pending_ = false;
+    sprites_pending_ = false;
     if (targets.vectors != nullptr) targets.vectors->begin_shapes();
     if (targets.lights != nullptr) targets.lights->clear();
     pluma::VM& vm = session_->vm();

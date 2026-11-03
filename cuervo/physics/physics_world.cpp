@@ -7,6 +7,7 @@
 #include "cuervo/core/log.hpp"
 #include "cuervo/math/dmath.hpp"
 #include "cuervo/physics/physics_internal.hpp"
+#include "pluma/snapshot.hpp"
 #include "pluma/vm.hpp"
 
 namespace cuervo::physics {
@@ -454,6 +455,155 @@ vec2 PhysicsWorld::get_body_constant_linear_velocity(uint32_t handle) const {
     auto it = bodies_.find(handle);
     if (it != bodies_.end()) return it->second.constant_velocity;
     return {0.0f, 0.0f};
+}
+
+// ---------------------------------------------------------------- snapshots
+
+struct PhysicsWorld::State {
+    std::vector<std::uint8_t> image; // b2World_GetSnapshot
+    vec2 gravity{};
+    std::uint64_t step_count = 0;
+    uint32_t next_body = 1, next_shape = 1, next_joint = 1;
+    bool sleep_enabled = false;
+    std::map<uint32_t, BodyRecord> bodies;
+    std::map<uint32_t, ShapeRecord> shapes;
+    std::map<uint32_t, JointRecord> joints;
+    std::vector<PendingSensorExit> pending;
+};
+
+void PhysicsWorld::StateDeleter::operator()(State* s) const { delete s; }
+
+PhysicsWorld::StatePtr PhysicsWorld::save_state(pluma::SnapshotWriter& w) const {
+    const int size = b2World_GetSnapshot(world_id_, nullptr, 0);
+    if (size <= 0) {
+        w.fail("the physics world cannot be saved (mid-step?)");
+        return nullptr;
+    }
+    StatePtr s(new State);
+    s->image.resize(static_cast<std::size_t>(size));
+    if (b2World_GetSnapshot(world_id_, s->image.data(), size) != size) {
+        w.fail("the physics world snapshot failed");
+        return nullptr;
+    }
+    s->gravity = gravity_;
+    s->step_count = step_count_;
+    s->next_body = next_body_handle_;
+    s->next_shape = next_shape_handle_;
+    s->next_joint = next_joint_handle_;
+    s->sleep_enabled = sleep_enabled_;
+    s->bodies = bodies_;
+    s->shapes = shapes_;
+    s->joints = joints_;
+    s->pending = pending_exits_;
+    for (const auto& [h, b] : bodies_) w.value(b.owner);
+    for (const auto& [h, sh] : shapes_) w.value(sh.owner);
+    for (const auto& [h, j] : joints_) w.value(j.owner);
+    for (const PendingSensorExit& e : pending_exits_) w.value(e.visitor);
+    return s;
+}
+
+void PhysicsWorld::drop_owners() {
+    // Releasing an owner can free a node whose finalizer destroys bodies (editing the maps),
+    // so the references are collected first and released after the loops.
+    std::vector<pluma::Value> held;
+    const auto take = [&held](pluma::Value& v) {
+        if (v.is_obj()) held.push_back(v);
+        v = pluma::Value{};
+    };
+    for (auto& [h, b] : bodies_) take(b.owner);
+    for (auto& [h, sh] : shapes_) take(sh.owner);
+    for (auto& [h, j] : joints_) take(j.owner);
+    for (PendingSensorExit& e : pending_exits_) take(e.visitor);
+    for (const pluma::Value& v : held) pluma::release(v);
+}
+
+bool PhysicsWorld::restore_state(const State& s, pluma::SnapshotReader& r) {
+    if (!b2World_RestoreFromSnapshot(world_id_, s.image.data(), static_cast<int>(s.image.size()))) {
+        r.fail("the physics world could not be restored");
+        return false;
+    }
+    gravity_ = s.gravity;
+    step_count_ = s.step_count;
+    next_body_handle_ = s.next_body;
+    next_shape_handle_ = s.next_shape;
+    next_joint_handle_ = s.next_joint;
+    set_sleep_enabled(s.sleep_enabled);
+    bodies_ = s.bodies;
+    shapes_ = s.shapes;
+    joints_ = s.joints;
+    pending_exits_ = s.pending;
+    for (auto& [h, b] : bodies_) b.owner = r.value();
+    for (auto& [h, sh] : shapes_) sh.owner = r.value();
+    for (auto& [h, j] : joints_) j.owner = r.value();
+    for (PendingSensorExit& e : pending_exits_) e.visitor = r.value();
+    // The ids name this world by its slot in Box2D's world table, which differs from the world
+    // the snapshot came from when it is restored into another host.
+    const auto world0 = static_cast<uint16_t>(world_id_.index1 - 1);
+    for (auto& [h, b] : bodies_) b.id.world0 = world0;
+    for (auto& [h, sh] : shapes_) {
+        sh.id.world0 = world0;
+        sh.chain_id.world0 = world0;
+    }
+    for (auto& [h, j] : joints_) j.id.world0 = world0;
+    // Box2D clears user data on restore; the handles are how the queries find our records.
+    const auto tag = [](uint32_t handle) { return reinterpret_cast<void*>(static_cast<uintptr_t>(handle)); };
+    for (const auto& [h, b] : bodies_) b2Body_SetUserData(b.id, tag(h));
+    for (const auto& [h, sh] : shapes_) {
+        if (b2Shape_IsValid(sh.id)) b2Shape_SetUserData(sh.id, tag(h));
+        if (b2Chain_IsValid(sh.chain_id)) {
+            const int n = b2Chain_GetSegmentCount(sh.chain_id);
+            std::vector<b2ShapeId> segs(static_cast<std::size_t>(std::max(n, 0)));
+            if (n > 0) b2Chain_GetSegments(sh.chain_id, segs.data(), n);
+            for (b2ShapeId seg : segs) b2Shape_SetUserData(seg, tag(h));
+        }
+    }
+    for (const auto& [h, j] : joints_) b2Joint_SetUserData(j.id, tag(h));
+    return r.ok();
+}
+
+void PhysicsWorld::hash_deep(StateHasher& h) const {
+    h.value(state_hash());
+    // Box2D's deep state hash (bodies, contacts with their warm-start impulses, joints, islands).
+    // Not the raw snapshot image: that holds array capacities, which differ after a restore.
+    h.value(b2World_GetStateHash(world_id_));
+    h.value(gravity_);
+    h.value(step_count_);
+    h.value(next_body_handle_);
+    h.value(next_shape_handle_);
+    h.value(next_joint_handle_);
+    h.value(sleep_enabled_);
+    for (const auto& [handle, b] : bodies_) {
+        h.value(handle);
+        h.value(static_cast<std::uint8_t>(b.kind));
+        h.value(b.mass);
+        h.value(b.layer);
+        h.value(b.mask);
+        h.value(b.floor_velocity);
+        h.value(b.constant_velocity);
+        h.value(b.up_direction);
+        h.value(b.floor_max_angle);
+        h.value(b.weight_step);
+        h.value(b.floor_cos);
+        h.value(b.on_floor);
+        h.value(b.is_character);
+        h.value(b.transform_synced);
+        h.span(std::span<const uint32_t>(b.shapes));
+    }
+    for (const auto& [handle, sh] : shapes_) {
+        h.value(handle);
+        h.value(sh.body_handle);
+        h.value(sh.disabled);
+    }
+    for (const auto& [handle, j] : joints_) {
+        h.value(handle);
+        h.value(j.body_a);
+        h.value(j.body_b);
+    }
+    h.value(static_cast<std::uint64_t>(pending_exits_.size()));
+    for (const PendingSensorExit& e : pending_exits_) {
+        h.value(e.sensor_shape);
+        h.value(e.visitor_is_area);
+    }
 }
 
 } // namespace cuervo::physics

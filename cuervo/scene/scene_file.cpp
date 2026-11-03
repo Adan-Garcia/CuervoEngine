@@ -939,6 +939,28 @@ std::optional<Value> parse_value(std::string_view text, std::string& error) {
 
 // ------------------------------------------------------------ files
 
+bool is_binary(std::span<const std::byte> data) {
+    return data.size() >= 4 && std::equal(data.begin(), data.begin() + 4, reinterpret_cast<const std::byte*>(magic));
+}
+
+std::optional<SceneDoc> read_any(std::span<const std::byte> data, std::string& error, LoadInfo* info) {
+    if (is_binary(data)) return read_binary(data, error, info);
+    std::string_view text(reinterpret_cast<const char*>(data.data()), data.size());
+    if (text.starts_with("\xEF\xBB\xBF")) text.remove_prefix(3); // editors on Windows add a BOM
+    auto doc = parse_text(text, error);
+    if (!doc) return std::nullopt;
+    if (std::string bad = validate(*doc); !bad.empty()) {
+        error = bad;
+        return std::nullopt;
+    }
+    if (info) {
+        // The header line is informational; text always means "the current version".
+        info->version = format_version;
+        info->schema_hash = schema_hash(*doc);
+    }
+    return doc;
+}
+
 std::optional<SceneDoc> load_file(const std::filesystem::path& path, std::string& error, LoadInfo* info) {
     std::ifstream in(path, std::ios::binary);
     if (!in) {
@@ -946,17 +968,27 @@ std::optional<SceneDoc> load_file(const std::filesystem::path& path, std::string
         return std::nullopt;
     }
     std::vector<char> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    auto doc = read_binary(std::as_bytes(std::span(bytes)), error, info);
+    auto doc = read_any(std::as_bytes(std::span(bytes)), error, info);
     if (!doc) error = std::format("{}: {}", platform::utf8(path), error);
     return doc;
 }
 
-bool save_file(const std::filesystem::path& path, const SceneDoc& doc, std::string& error) {
+bool save_file(const std::filesystem::path& path, const SceneDoc& doc, std::string& error, SaveFormat format) {
     if (std::string bad = validate(doc); !bad.empty()) {
         error = bad;
         return false;
     }
-    std::vector<std::byte> bytes = write_binary(doc);
+    std::vector<std::byte> bytes;
+    if (format == SaveFormat::Binary) {
+        bytes = write_binary(doc);
+    } else {
+        // No schema hash in the header: it changes whenever either side of a
+        // merge adds a field, which would conflict on line 1 for nothing.
+        std::string text = dump_text(doc);
+        text = std::format("scene version {}", format_version) + text.substr(text.find('\n'));
+        bytes.assign(reinterpret_cast<const std::byte*>(text.data()),
+                     reinterpret_cast<const std::byte*>(text.data()) + text.size());
+    }
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     if (!out || !out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()))) {
         error = std::format("can't write '{}'", platform::utf8(path));

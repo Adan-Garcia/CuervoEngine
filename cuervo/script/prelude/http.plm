@@ -1,0 +1,43 @@
+// Engine API: HTTP and HTTPS requests to game services (DESIGN.md 4.19).
+//
+// A request runs outside the simulation (a worker thread on desktop, the browser's fetch on the
+// web). `Http.get` and `Http.post` return a handle at once; poll it with `done`, then read
+// `status` and `body`. There are no callbacks into the game, and a response is never part of the
+// state hash or the replay: a script that lets a response change simulation state must copy it
+// into recorded state itself, and a replay will not reproduce a different answer. Use it for
+// leaderboards, lobbies, patch notes and the like, and for results the game only displays.
+//
+// Usage: `h = Http.get("https://example.com/scores.json")` once, then each frame
+// `if h != 0 and Http.done(h) { if Http.status(h) == 200 { show(Http.body(h)) }; Http.close(h); h = 0 }`.
+// Headers are given as one string of `Name: value` lines separated by `\n`.
+//
+// https:// is verified against the system trust store (desktop) or the browser (web); a private
+// certificate authority is trusted with `Http.set_ca_file` (desktop only). Redirects are followed
+// (at most five on desktop; https is never downgraded to http); a response over 4 MiB or a request
+// over the timeout fails. On the web the browser's rules apply: the server must allow
+// cross-origin requests (CORS).
+class Http {
+    // Starts a GET. Returns a handle (1 or more), or 0 when the URL is not http(s), a header is
+    // malformed or too many requests are open (a warning says which).
+    @native static fn get(url: str, headers: str = "") -> int {}
+    // Starts a POST with `body` (send a `Content-Type` header for anything but raw bytes).
+    @native static fn post(url: str, body: str, headers: str = "") -> int {}
+
+    // True once the request finished, failed, timed out or was cancelled.
+    @native static fn done(handle: int) -> bool {}
+    // The HTTP status (200, 404, ...), or 0 while pending and when the request failed (see `error`).
+    @native static fn status(handle: int) -> int {}
+    // The response body, empty until `done`.
+    @native static fn body(handle: int) -> str {}
+    // Why the request failed, or "" (also set for "too many redirects" and "response too large").
+    @native static fn error(handle: int) -> str {}
+    // One response header by case-insensitive name, or "".
+    @native static fn header(handle: int, name: str) -> str {}
+    // Cancels a pending request and frees the handle. Always close handles you are done with.
+    @native static fn close(handle: int) {}
+
+    // Per-request time budget in milliseconds for later requests (100..120000, default 10000).
+    @native static fn set_timeout(ms: int) {}
+    // Trusts the PEM certificate bundle at `path` instead of the system store (desktop; "" resets).
+    @native static fn set_ca_file(path: str) {}
+}

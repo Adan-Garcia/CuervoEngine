@@ -13,7 +13,7 @@ function(run)
     endif()
     set(RUN_OUT "${_out}" PARENT_SCOPE)
 endfunction()
-run(${PYTHON} -I ${BENCH} record --build-dir ${BUILD} --out ${_json} --workloads 1000 --runs 1 --warmup 1
+run(${PYTHON} -I ${BENCH} record --build-dir ${BUILD} --out ${_json} --workloads 1000 --collide-workloads 1000 --runs 1 --warmup 1
     --duration 1 --no-export --machine-id smoke)
 run(${PYTHON} -I ${BENCH} check ${_json})
 run(${PYTHON} -I ${BENCH} compare ${_json} ${_json} --scale 100)

@@ -29,6 +29,15 @@ layout(location = 6) flat out uint v_mask;
 layout(location = 7) flat out vec4 v_color;
 layout(location = 8) flat out vec4 v_shadow_color;
 
+// Authored colors are sRGB; with linear color (Globals.row0.w = 1, 4.19) shading
+// and blending happen in linear space, so convert once per instance here.
+vec4 working_color(vec4 c) {
+    if (view.row0.w > 0.5) {
+        c.rgb = mix(c.rgb / 12.92, pow((c.rgb + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c.rgb));
+    }
+    return c;
+}
+
 void main() {
     vec2 world_pos = i_center + a_corner * i_half_size;
     vec3 world = vec3(world_pos, 1.0);
@@ -41,6 +50,6 @@ void main() {
     v_energy = i_energy;
     v_flags = i_flags;
     v_mask = i_mask;
-    v_color = i_color;
-    v_shadow_color = i_shadow_color;
+    v_color = working_color(i_color);
+    v_shadow_color = working_color(i_shadow_color);
 }

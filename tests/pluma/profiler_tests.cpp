@@ -143,3 +143,29 @@ TEST_CASE("script profiler: one profiler over several VMs (hot reload) aggregate
     CHECK(late.depth() == 0);
     CHECK(late.snapshot().empty());
 }
+
+TEST_CASE("heap profiler: samples live objects, peak and growth") {
+    pluma::HeapProfiler heap;
+    CHECK(heap.report().find("no samples") != std::string::npos);
+    heap.sample();
+    CHECK(heap.samples() == 1);
+    CHECK(heap.growth() == 0);
+    {
+        pluma::Session session(quiet());
+        REQUIRE(session
+                    .run_script("test.plm", "class Box { var n = 0 }\nclass Keep { static var all: List<Box> = [] }\n"
+                                            "for i in 0..100 { Keep.all.push(Box()) }\n")
+                    .ok);
+        const auto& s = heap.sample();
+        CHECK(s.live >= heap.first().live + 100);
+        CHECK(heap.growth() >= 100);
+        CHECK(heap.peak_live() == s.live);
+    }
+    heap.sample(); // the session is gone: the objects are freed, the peak stays
+    CHECK(heap.peak_live() >= heap.first().live + 100);
+    CHECK(heap.last().live < heap.peak_live());
+    const auto history = heap.live_history();
+    REQUIRE(history.size() == 3);
+    CHECK(history[1] == heap.peak_live());
+    CHECK(heap.report().find("peak") != std::string::npos);
+}

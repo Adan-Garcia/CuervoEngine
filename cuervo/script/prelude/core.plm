@@ -119,6 +119,13 @@ class Input {
     @native static fn pressed(action: name) -> bool {}
     // True only on the tick the action went up.
     @native static fn released(action: name) -> bool {}
+    // `held` for another player's input frame (player 0 is the plain `held`); false for a
+    // player the host has no frame for.
+    @native static fn held_by(player: int, action: name) -> bool {}
+    // `pressed` for another player's input frame.
+    @native static fn pressed_by(player: int, action: name) -> bool {}
+    // `released` for another player's input frame.
+    @native static fn released_by(player: int, action: name) -> bool {}
     // A 2D axis (e.g. `move = ["Keys.Arrows", "Pad.LeftStick"]`), length <= 1.
     @native static fn axis(axis: name) -> vec2 {}
     // True while nothing has been pressed for `seconds` (attract modes).
@@ -128,6 +135,13 @@ class Input {
     // The character typed this tick ("" if none): one Unicode code point, from
     // the input frame, so it replays. Text fields read it (UI.wants_text).
     @native static fn text() -> str {}
+    // The IME composition being built (text typed but not yet committed), or "".
+    // Live window input for drawing only: it is not in the input frame, so it is
+    // always "" in a replay and must not influence game state. The committed
+    // result arrives through text().
+    @native static fn composition() -> str {}
+    // Caret inside the composition, in characters (-1: none).
+    @native static fn composition_cursor() -> int {}
 }
 
 // Canvas-style drawing (DESIGN.md 4.4): `draw(g)` methods get one. World
@@ -155,7 +169,8 @@ class Canvas {
     // `stroke`, both edges are outlined `width` wide.
     @native fn ring(center: vec2, radius: float, thickness: float, fill: Color? = null, stroke: Color? = null,
                     width = 1.0) {}
-    // align: #left, #center, #right; baseline: #top, #middle, #bottom.
+    // align: #left, #center, #right, or #start / #end (the text's reading direction:
+    // Arabic text at #start extends leftwards from `pos`); baseline: #top, #middle, #bottom.
     // `max_width` > 0 wraps lines at that width.
     @native fn text(pos: vec2, text: str, size = 16.0, color: Color = Color {}, align = #left, baseline = #top,
                     max_width = 0.0) {}
@@ -176,6 +191,23 @@ class Canvas {
     // a missing or broken file is logged once and draws nothing.
     @native fn vector(asset: str, pos: vec2, rotation = 0.0, scale = vec2(1.0, 1.0), centered = true,
                       tint: Color = Color {}) {}
+    // A raster image (PNG, JPEG, QOI), an atlas frame (`asset` is an `.atlas`
+    // file, `frame` a name in it) or an SVG rasterized at the zoom it is drawn
+    // at, at `pos` (centered there, or with its top-left corner there), turned
+    // and scaled about `pos`. `size` > 0 overrides the natural size (texels,
+    // SVG document units). `filter` is #default (the project scale mode:
+    // nearest under integer scaling), #nearest or #linear. Batched by texture;
+    // a missing file is logged once and draws nothing. Used by Sprite2D.
+    @native fn sprite(asset: str, pos: vec2, frame = "", rotation = 0.0, scale = vec2(1.0, 1.0), centered = true,
+                      flip_h = false, flip_v = false, tint: Color = Color {}, filter = #default,
+                      size = vec2(0.0, 0.0)) {}
+    // A 9-slice: the image (or atlas frame) stretched over `size` (times
+    // `scale`), its four borders (`margin_*`, in the image's own units) kept
+    // at their natural size. Placed like sprite(); `draw_center` false leaves
+    // the middle empty. Used by NinePatchRect.
+    @native fn nine_patch(asset: str, pos: vec2, size: vec2, frame = "", margin_left = 0.0, margin_top = 0.0,
+                          margin_right = 0.0, margin_bottom = 0.0, rotation = 0.0, scale = vec2(1.0, 1.0),
+                          centered = false, draw_center = true, tint: Color = Color {}, filter = #default) {}
     // Draws what follows through a camera: `center` is the world point shown
     // in the middle of the screen (Camera2D). What was drawn before keeps the
     // previous view and is covered by what follows, like new_layer().

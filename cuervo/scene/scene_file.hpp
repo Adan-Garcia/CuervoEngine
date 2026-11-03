@@ -155,9 +155,20 @@ std::optional<SceneDoc> parse_text(std::string_view text, std::string& error);
 std::string format_value(const Value& v);
 std::optional<Value> parse_value(std::string_view text, std::string& error);
 
-// File helpers.
+// Text scenes (11.2c): a scene file on disk is either binary ("ESCN" magic) or
+// the text view above; every loader accepts both (sniffed by the magic).
+// Text is what `Scene.save` and the editor write by default, so scenes diff
+// and merge as text; `cuervo-tools pack/export` compile them to binary.
+enum class SaveFormat : std::uint8_t { Text, Binary };
+bool is_binary(std::span<const std::byte> data);
+// Decodes binary or text. `info` is filled for binary (and text with a header).
+std::optional<SceneDoc> read_any(std::span<const std::byte> data, std::string& error, LoadInfo* info = nullptr);
+
+// File helpers. load_file reads either format; save_file writes text unless
+// asked for binary.
 std::optional<SceneDoc> load_file(const std::filesystem::path& path, std::string& error, LoadInfo* info = nullptr);
-bool save_file(const std::filesystem::path& path, const SceneDoc& doc, std::string& error);
+bool save_file(const std::filesystem::path& path, const SceneDoc& doc, std::string& error,
+               SaveFormat format = SaveFormat::Text);
 
 std::string_view num_kind_name(NumKind k); // "int", "u8", "float", "f64", ...
 

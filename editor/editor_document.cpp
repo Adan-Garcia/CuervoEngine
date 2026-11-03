@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <fstream>
 #include "editor/editor_document.hpp"
 
 #include <format>
@@ -37,6 +39,7 @@ void EditorDocument::new_scene(std::string root_class, std::string root_name) {
     stack_.mark_saved();
     select(model_.root());
     path_.clear();
+    binary_ = false;
     ++reloads_;
 }
 
@@ -50,6 +53,13 @@ bool EditorDocument::open(const std::filesystem::path& path, std::string& error)
     stack_.mark_saved();
     select(model_.root());
     path_ = path;
+    binary_ = false;
+    {
+        std::ifstream probe(path, std::ios::binary);
+        char head[4] = {};
+        probe.read(head, 4);
+        binary_ = std::equal(head, head + 4, scene::magic);
+    }
     ++reloads_;
     return true;
 }
@@ -61,7 +71,8 @@ bool EditorDocument::save(std::string& error) {
     }
     std::error_code ec;
     if (path_.has_parent_path()) std::filesystem::create_directories(path_.parent_path(), ec);
-    if (!scene::save_file(path_, model_.to_doc(), error)) return false;
+    if (!scene::save_file(path_, model_.to_doc(), error,
+                         binary_ ? scene::SaveFormat::Binary : scene::SaveFormat::Text)) return false;
     stack_.mark_saved();
     return true;
 }

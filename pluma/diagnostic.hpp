@@ -24,6 +24,7 @@ struct Diagnostic {
     std::uint32_t column = 1; // 1-based, in bytes
     Span span;
     std::string message;
+    std::string code; // stable warning code ("unused-variable"); empty for errors
     std::optional<FixIt> fix;
 };
 

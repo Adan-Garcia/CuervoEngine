@@ -29,6 +29,9 @@ class UIExtra {
     var bs_ticks = 0
     // Ticks ui_delete has been held.
     var del_ticks = 0
+    // Mirror container layout and #start text alignment in right-to-left
+    // locales (Locale.is_rtl()). Display state: not hashed, not replayed.
+    var mirror_rtl = true
 }
 
 // Focus, modal state and input handling shared by every UI tree; all static.
@@ -74,9 +77,23 @@ class UI {
     // The natural size of a vector image file in the project (Image), or
     // (0, 0) if it can't be read.
     @native static fn image_size(asset: str) -> vec2 {}
+    // Caret geometry for editable text, in bidirectional order (DESIGN.md 4.19 "11.3"). Positions
+    // are in layout space of a line whose origin is its left edge for left-to-right text and its
+    // right edge for right-to-left text. `index` counts characters.
+    // True when the text's paragraph reads right to left (its first strong character).
+    @native static fn text_rtl(text: str) -> bool {}
+    // The caret's x at character `index`.
+    @native static fn caret_x(text: str, size: float, index: int) -> float {}
+    // The character index whose caret is nearest to `x`.
+    @native static fn caret_at(text: str, size: float, x: float) -> int {}
+    // The index after moving the caret one stop left (dir < 0) or right on screen.
+    @native static fn caret_step(text: str, size: float, index: int, dir: int) -> int {}
     // Called while a text field is being edited, every tick: the window then
     // delivers typed text (and raises an on-screen keyboard where there is one).
     @native static fn wants_text(on: bool) {}
+    // Where the field being edited is (layout space, from a draw): the IME opens its candidate
+    // list there. `caret_x` is the caret's offset inside the rectangle. Display only.
+    @native static fn text_area(pos: vec2, size: vec2, caret_x: float) {}
 
     // True when `n` may take input given UI.modal.
     static fn modal_allows(n: Node) -> bool {

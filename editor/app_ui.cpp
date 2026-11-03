@@ -16,86 +16,19 @@
 #include "cuervo/platform/platform.hpp"
 #include "editor/app.hpp"
 #include "editor/icons.hpp"
-#include "editor/theme.hpp"
+#include "editor/imgui_theme.hpp"
 #include "editor/ui.hpp"
 
 namespace cuervo::editor {
 
 namespace fs = std::filesystem;
 
-const char* tool_name(Tool tool) {
-    switch (tool) {
-        case Tool::Select: return "Select";
-        case Tool::Move: return "Move";
-        case Tool::Rotate: return "Rotate";
-        case Tool::Scale: return "Scale";
-        case Tool::Paint: return "Paint";
-    }
-    return "Move";
-}
-
 // ------------------------------------------------------------ messages
 
-void EditorApp::notify(UserMessage message) { messages_.push(std::move(message), clock_); }
-
-void EditorApp::notify_ok(std::string text) {
-    UserMessage m;
-    m.severity = Severity::Success;
-    m.what = std::move(text);
-    notify(std::move(m));
-}
-
-void EditorApp::report_failure(const std::string& raw) {
-    LOG_WARN("{}", raw);
-    notify(message_edit_rejected(raw));
-}
-
-bool EditorApp::run_action(std::string_view id) {
-    const Action* a = actions_.find(id);
-    if (a == nullptr || !actions_.enabled(*a)) return false;
-    doc_.seal();
-    const bool ok = actions_.run(id);
-    doc_.seal();
-    if (!ok && !doc_.error().empty()) report_failure(doc_.error());
-    return ok;
-}
 
 void EditorApp::open_palette(std::string query) {
     palette_query_ = std::move(query);
     palette_request_ = true;
-}
-
-void EditorApp::request_switch_project(std::string path) {
-    if (doc_.dirty()) {
-        pending_open_ = std::move(path);
-        discard_switch_ = true;
-        dialog_ = Dialog::DiscardChanges;
-        dialog_opened_ = false;
-        return;
-    }
-    switch_target_ = std::move(path);
-    switch_requested_ = true;
-    running_ = false;
-}
-
-void EditorApp::save_current_scene() {
-    if (!doc_.has_path()) {
-        dialog_ = Dialog::SaveAs;
-        dialog_opened_ = false;
-        return;
-    }
-    std::string error;
-    const std::string rel = env_.relative(doc_.path());
-    if (doc_.save(error)) {
-        LOG_INFO("Saved '{}'", rel);
-        assets_.poll();
-        notify_ok(std::format("Saved {}.", rel));
-        settings_.set_last_scene(env_.project_dir(), rel);
-        save_user_state();
-    } else {
-        LOG_ERROR("{}", error);
-        notify(message_save_failed(rel, error));
-    }
 }
 
 // ------------------------------------------------------------ layouts and user state
@@ -145,11 +78,11 @@ void EditorApp::save_layout_as(const std::string& name) {
 }
 
 void EditorApp::restore_user_state() {
-    settings_.load(EditorSettings::user_file());
-    const float init_ui_scale = options_.ui_scale.value_or(settings_.ui_scale());
-    const float init_font_scale = options_.font_scale.value_or(settings_.font_scale());
-    settings_.set_ui_scale(init_ui_scale);
-    settings_.set_font_scale(init_font_scale);
+    ctl_.settings().load(EditorSettings::user_file());
+    const float init_ui_scale = options_.ui_scale.value_or(ctl_.settings().ui_scale());
+    const float init_font_scale = options_.font_scale.value_or(ctl_.settings().font_scale());
+    ctl_.settings().set_ui_scale(init_ui_scale);
+    ctl_.settings().set_font_scale(init_font_scale);
     theme::set_ui_scale(init_ui_scale);
     theme::set_font_scale(init_font_scale);
 
@@ -176,9 +109,9 @@ void EditorApp::save_user_state() {
     std::string error;
     layouts_.set_current(current_layout());
     if (!layouts_.save(LayoutStore::user_file(), error)) LOG_WARN("{}", error);
-    if (env_.has_project()) recents_.add(env_.project_dir());
+    if (ctl_.env().has_project()) recents_.add(ctl_.env().project_dir());
     if (!recents_.save(RecentProjects::user_file(), error)) LOG_WARN("{}", error);
-    if (!settings_.save(EditorSettings::user_file(), error)) LOG_WARN("{}", error);
+    if (!ctl_.settings().save(EditorSettings::user_file(), error)) LOG_WARN("{}", error);
 }
 
 void EditorApp::zoom_in() {
@@ -196,13 +129,13 @@ void EditorApp::reset_zoom() {
 
 void EditorApp::set_ui_scale(float scale) {
     theme::set_ui_scale(scale);
-    settings_.set_ui_scale(scale);
+    ctl_.settings().set_ui_scale(scale);
     save_user_state();
 }
 
 void EditorApp::set_font_scale(float scale) {
     theme::set_font_scale(scale);
-    settings_.set_font_scale(scale);
+    ctl_.settings().set_font_scale(scale);
     save_user_state();
 }
 
@@ -217,10 +150,10 @@ float EditorApp::font_scale() const {
 // ------------------------------------------------------------ actions
 
 void EditorApp::rebuild_actions() {
-    actions_.reset_actions();
-    add_document_actions(actions_, doc_, [this](std::string_view cls) {
+    ctl_.actions().reset_actions();
+    add_document_actions(ctl_.actions(), ctl_.doc(), [this](std::string_view cls) {
         std::vector<scene::Field> fields;
-        const ClassRegistry& reg = env_.classes();
+        const ClassRegistry& reg = ctl_.env().classes();
         // A positioned node appears in the middle of the scene view.
         if (reg.is_a(cls, "Node2D") && !reg.is_a(cls, "Control")) {
             fields.push_back({"position", "vec2",
@@ -234,7 +167,7 @@ void EditorApp::rebuild_actions() {
 void EditorApp::add_app_actions() {
     auto add = [&](std::string id, std::string title, std::string category, std::string shortcut,
                    std::function<bool()> enabled, std::function<bool()> run) {
-        actions_.add({std::move(id), std::move(title), std::move(category), std::move(shortcut), std::move(enabled),
+        ctl_.actions().add({std::move(id), std::move(title), std::move(category), std::move(shortcut), std::move(enabled),
                       std::move(run)});
     };
     auto dialog = [this](Dialog d) {
@@ -244,7 +177,7 @@ void EditorApp::add_app_actions() {
     };
     const bool have_selection = true;
     (void)have_selection;
-    auto idle = [this] { return !play_.active(); };
+    auto idle = [this] { return !ctl_.play().active(); };
     // ---- file and project
     add("file.new", "New Scene...", "File", "Ctrl+N", {}, [=] { return dialog(Dialog::NewScene); });
     add("file.open", "Open Scene...", "File", "Ctrl+O", {}, [=] { return dialog(Dialog::Open); });
@@ -258,7 +191,7 @@ void EditorApp::add_app_actions() {
         return true;
     });
     for (const RecentProject& r : recents_.list()) {
-        if (!r.exists || (env_.has_project() && fs::equivalent(platform::path_from_utf8(r.path), env_.project_dir()))) continue;
+        if (!r.exists || (ctl_.env().has_project() && fs::equivalent(platform::path_from_utf8(r.path), ctl_.env().project_dir()))) continue;
         const std::string path = r.path;
         add("project.recent." + path, "Open Recent: " + r.name, "Project", "", {}, [this, path] {
             request_switch_project(path);
@@ -270,18 +203,18 @@ void EditorApp::add_app_actions() {
         return true;
     });
     add("file.open_code_editor", "Open Project in Code Editor", "File", "", {}, [this] {
-        open_in_external_editor(env_.project_dir());
+        open_in_external_editor(ctl_.env().project_dir());
         return true;
     });
     add("file.open_scripts_editor", "Open Scripts Folder in Code Editor", "File", "", {}, [this] {
-        open_in_external_editor(env_.project_dir() / "scripts");
+        open_in_external_editor(ctl_.env().project_dir() / "scripts");
         return true;
     });
     // ---- play
-    add("play.play", "Play", "Play", "F5", [this] { return !play_.active() || play_.state() == PlayState::Paused; },
+    add("play.play", "Play", "Play", "F5", [this] { return !ctl_.play().active() || ctl_.play().state() == PlayState::Paused; },
         [this] {
-            if (play_.active()) {
-                play_.resume();
+            if (ctl_.play().active()) {
+                ctl_.play().resume();
             } else {
                 start_play(false);
             }
@@ -295,21 +228,21 @@ void EditorApp::add_app_actions() {
         start_play(false, true);
         return true;
     });
-    add("play.pause", "Pause", "Play", "F7", [this] { return play_.state() == PlayState::Playing; }, [this] {
-        play_.pause();
+    add("play.pause", "Pause", "Play", "F7", [this] { return ctl_.play().state() == PlayState::Playing; }, [this] {
+        ctl_.play().pause();
         return true;
     });
-    add("play.step", "Step One Tick", "Play", "F10", [this] { return play_.active(); }, [this] {
-        play_.pause();
-        play_.step(devices_, last_pointer_, 1);
+    add("play.step", "Step One Tick", "Play", "F10", [this] { return ctl_.play().active(); }, [this] {
+        ctl_.play().pause();
+        ctl_.play().step(devices_, last_pointer_, 1);
         return true;
     });
-    add("play.stop", "Stop", "Play", "Shift+F5", [this] { return play_.active(); }, [this] {
+    add("play.stop", "Stop", "Play", "Shift+F5", [this] { return ctl_.play().active(); }, [this] {
         stop_play();
         return true;
     });
-    add("play.reload", "Reload Scripts", "Play", "", [this] { return play_.active(); }, [this] {
-        play_.reload(true);
+    add("play.reload", "Reload Scripts", "Play", "", [this] { return ctl_.play().active(); }, [this] {
+        ctl_.play().reload(true);
         return true;
     });
     // ---- view and tools
@@ -342,21 +275,25 @@ void EditorApp::add_app_actions() {
         return true;
     });
     add("view.snap", "Toggle Snapping", "View", "", {}, [this] {
-        snap_ = !snap_;
+        ctl_.set_snap(!ctl_.snap());
         return true;
     });
     add("view.collision_shapes", "Toggle Collision Shapes", "View", "F3", {}, [this] {
-        collision_shapes_ = !collision_shapes_;
+        ctl_.set_collision_shapes(!ctl_.collision_shapes());
 #if CUERVO_FEATURE_PHYSICS
-        env_.host().physics_world().set_editor_debug_shapes(collision_shapes_);
-        if (play_.active() && play_.session()) {
-            play_.session()->host().physics_world().set_debug_shapes(collision_shapes_);
+        ctl_.env().host().physics_world().set_editor_debug_shapes(ctl_.collision_shapes());
+        if (ctl_.play().active() && ctl_.play().session()) {
+            ctl_.play().session()->host().physics_world().set_debug_shapes(ctl_.collision_shapes());
         }
 #endif
         return true;
     });
     add("view.lighting", "Toggle Lighting Preview", "View", "", {}, [this] {
-        preview_lighting_ = !preview_lighting_;
+        ctl_.set_preview_lighting(!ctl_.preview_lighting());
+        return true;
+    });
+    add("view.ready_preview", "Toggle Scene Preview (run ready())", "View", "", {}, [this] {
+        toggle_ready_preview();
         return true;
     });
     const std::pair<Tool, const char*> tools[] = {
@@ -364,7 +301,7 @@ void EditorApp::add_app_actions() {
     for (const auto& [tool, key] : tools) {
         const Tool t = tool;
         add(std::string("tool.") + tool_name(t), std::string(tool_name(t)) + " Tool", "Tool", key, {}, [this, t] {
-            tool_ = t;
+            ctl_.set_tool(t);
             return true;
         });
     }
@@ -385,7 +322,7 @@ void EditorApp::add_app_actions() {
     add("layout.save", "Save Layout As...", "View", "", {}, [=] { return dialog(Dialog::SaveLayout); });
     // ---- scene
     add("edit.add_child", "Add Child Node...", "Edit", "Ctrl+A", {}, [this] {
-        request_add_child(doc_.selection() != 0 ? doc_.selection() : doc_.model().root());
+        request_add_child(ctl_.doc().selection() != 0 ? ctl_.doc().selection() : ctl_.doc().model().root());
         return true;
     });
     add("help.license", "License", "Help", "", {}, [this] {
@@ -408,10 +345,10 @@ void EditorApp::handle_shortcuts() {
     }
     if (ImGui::Shortcut(ImGuiKey_F6, global)) run_action("play.scene");
     if (ImGui::Shortcut(ImGuiKey_F7, global)) {
-        if (play_.state() == PlayState::Playing) {
-            play_.pause();
+        if (ctl_.play().state() == PlayState::Playing) {
+            ctl_.play().pause();
         } else {
-            play_.resume();
+            ctl_.play().resume();
         }
     }
     if (ImGui::Shortcut(ImGuiKey_F10, global)) run_action("play.step");
@@ -447,11 +384,11 @@ void EditorApp::handle_shortcuts() {
     // Delete, tool keys and framing only when no text field has the keyboard.
     if (ImGui::IsKeyPressed(ImGuiKey_Delete, false)) run_action("edit.delete");
     if (!io.KeyCtrl && !io.KeyAlt && !io.KeyShift) {
-        if (ImGui::IsKeyPressed(ImGuiKey_Q, false)) tool_ = Tool::Select;
-        if (ImGui::IsKeyPressed(ImGuiKey_W, false)) tool_ = Tool::Move;
-        if (ImGui::IsKeyPressed(ImGuiKey_E, false)) tool_ = Tool::Rotate;
-        if (ImGui::IsKeyPressed(ImGuiKey_R, false)) tool_ = Tool::Scale;
-        if (ImGui::IsKeyPressed(ImGuiKey_B, false)) tool_ = Tool::Paint;
+        if (ImGui::IsKeyPressed(ImGuiKey_Q, false)) ctl_.set_tool(Tool::Select);
+        if (ImGui::IsKeyPressed(ImGuiKey_W, false)) ctl_.set_tool(Tool::Move);
+        if (ImGui::IsKeyPressed(ImGuiKey_E, false)) ctl_.set_tool(Tool::Rotate);
+        if (ImGui::IsKeyPressed(ImGuiKey_R, false)) ctl_.set_tool(Tool::Scale);
+        if (ImGui::IsKeyPressed(ImGuiKey_B, false)) ctl_.set_tool(Tool::Paint);
         if (ImGui::IsKeyPressed(ImGuiKey_F, false)) frame_scene();
     }
 }
@@ -461,9 +398,9 @@ void EditorApp::handle_shortcuts() {
 void EditorApp::draw_menu_bar() {
     if (!ImGui::BeginMainMenuBar()) return;
     auto item = [&](const char* label, const char* id) {
-        const Action* a = actions_.find(id);
+        const Action* a = ctl_.actions().find(id);
         if (a == nullptr) return;
-        if (ImGui::MenuItem(label, a->shortcut.empty() ? nullptr : a->shortcut.c_str(), false, actions_.enabled(*a))) {
+        if (ImGui::MenuItem(label, a->shortcut.empty() ? nullptr : a->shortcut.c_str(), false, ctl_.actions().enabled(*a))) {
             run_action(id);
         }
     };
@@ -489,10 +426,10 @@ void EditorApp::draw_menu_bar() {
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Edit")) {
-        const std::string undo = doc_.stack().can_undo() ? "Undo " + doc_.stack().undo_label() : std::string("Undo");
-        const std::string redo = doc_.stack().can_redo() ? "Redo " + doc_.stack().redo_label() : std::string("Redo");
-        if (ImGui::MenuItem(undo.c_str(), "Ctrl+Z", false, doc_.stack().can_undo())) run_action("edit.undo");
-        if (ImGui::MenuItem(redo.c_str(), "Ctrl+Shift+Z", false, doc_.stack().can_redo())) run_action("edit.redo");
+        const std::string undo = ctl_.doc().stack().can_undo() ? "Undo " + ctl_.doc().stack().undo_label() : std::string("Undo");
+        const std::string redo = ctl_.doc().stack().can_redo() ? "Redo " + ctl_.doc().stack().redo_label() : std::string("Redo");
+        if (ImGui::MenuItem(undo.c_str(), "Ctrl+Z", false, ctl_.doc().stack().can_undo())) run_action("edit.undo");
+        if (ImGui::MenuItem(redo.c_str(), "Ctrl+Shift+Z", false, ctl_.doc().stack().can_redo())) run_action("edit.redo");
         ImGui::Separator();
         item("Add Child Node...", "edit.add_child");
         item("Duplicate", "edit.duplicate");
@@ -526,17 +463,18 @@ void EditorApp::draw_menu_bar() {
     if (ImGui::BeginMenu("View")) {
         item("Frame Scene", "view.frame");
         item("Zoom to 100%", "view.zoom100");
-        if (ImGui::MenuItem("Snapping", nullptr, snap_)) snap_ = !snap_;
-        if (ImGui::MenuItem("Collision Shapes", "F3", collision_shapes_)) {
-            collision_shapes_ = !collision_shapes_;
+        if (ImGui::MenuItem("Snapping", nullptr, ctl_.snap())) ctl_.set_snap(!ctl_.snap());
+        if (ImGui::MenuItem("Collision Shapes", "F3", ctl_.collision_shapes())) {
+            ctl_.set_collision_shapes(!ctl_.collision_shapes());
 #if CUERVO_FEATURE_PHYSICS
-            env_.host().physics_world().set_editor_debug_shapes(collision_shapes_);
-            if (play_.active() && play_.session()) {
-                play_.session()->host().physics_world().set_debug_shapes(collision_shapes_);
+            ctl_.env().host().physics_world().set_editor_debug_shapes(ctl_.collision_shapes());
+            if (ctl_.play().active() && ctl_.play().session()) {
+                ctl_.play().session()->host().physics_world().set_debug_shapes(ctl_.collision_shapes());
             }
 #endif
         }
-        if (ImGui::MenuItem("Lighting Preview", nullptr, preview_lighting_)) preview_lighting_ = !preview_lighting_;
+        if (ImGui::MenuItem("Lighting Preview", nullptr, ctl_.preview_lighting())) ctl_.set_preview_lighting(!ctl_.preview_lighting());
+        if (ImGui::MenuItem("Scene Preview (run ready())", nullptr, ctl_.ready_preview_on())) toggle_ready_preview();
         ImGui::Separator();
         // The brand's light (Bone) and dark (Raven) themes (DESIGN.md 4.16).
         if (ImGui::BeginMenu("Theme")) {
@@ -599,9 +537,9 @@ void EditorApp::draw_menu_bar() {
         item("License Agreement", "help.license");
         ImGui::EndMenu();
     }
-    ImGui::TextDisabled("  %s  |  %s", env_.project().name.c_str(),
-                        doc_.has_path() ? env_.relative(doc_.path()).c_str() : "(new scene)");
-    if (doc_.dirty()) ImGui::TextColored(theme::im(theme::colors().warning), "(modified)");
+    ImGui::TextDisabled("  %s  |  %s", ctl_.env().project().name.c_str(),
+                        ctl_.doc().has_path() ? ctl_.env().relative(ctl_.doc().path()).c_str() : "(new scene)");
+    if (ctl_.doc().dirty()) ImGui::TextColored(theme::im(theme::colors().warning), "(modified)");
     ImGui::EndMainMenuBar();
 }
 
@@ -621,8 +559,8 @@ void EditorApp::draw_toolbar() {
     if (ImGui::Begin("##toolbar", nullptr, flags)) {
         auto same = [] { ImGui::SameLine(0.0f, 2.0f); };
         auto action_button = [&](const char* icon, const char* id, const char* tip, bool selected = false) {
-            const Action* a = actions_.find(id);
-            const bool enabled = a != nullptr && actions_.enabled(*a);
+            const Action* a = ctl_.actions().find(id);
+            const bool enabled = a != nullptr && ctl_.actions().enabled(*a);
             const std::string text = a != nullptr && !a->shortcut.empty() ? std::format("{} ({})", tip, a->shortcut) : tip;
             if (ui::icon_button(id, icon, text.c_str(), selected, enabled)) run_action(id);
             same();
@@ -636,23 +574,23 @@ void EditorApp::draw_toolbar() {
         action_button("redo", "edit.redo", "Redo");
         ui::toolbar_separator();
         same();
-        action_button("select", "tool.Select", "Select tool", tool_ == Tool::Select);
-        action_button("move", "tool.Move", "Move tool", tool_ == Tool::Move);
-        action_button("rotate", "tool.Rotate", "Rotate tool", tool_ == Tool::Rotate);
-        action_button("scale", "tool.Scale", "Scale tool", tool_ == Tool::Scale);
-        action_button("paint", "tool.Paint", "Paint tool", tool_ == Tool::Paint);
+        action_button("select", "tool.Select", "Select tool", ctl_.tool() == Tool::Select);
+        action_button("move", "tool.Move", "Move tool", ctl_.tool() == Tool::Move);
+        action_button("rotate", "tool.Rotate", "Rotate tool", ctl_.tool() == Tool::Rotate);
+        action_button("scale", "tool.Scale", "Scale tool", ctl_.tool() == Tool::Scale);
+        action_button("paint", "tool.Paint", "Paint tool", ctl_.tool() == Tool::Paint);
         if (ui::icon_button("snap", "grid", "Snap to the grid, 15 degrees and steps of 0.1 (Ctrl while dragging inverts)",
-                            snap_)) {
-            snap_ = !snap_;
+                            ctl_.snap())) {
+            ctl_.set_snap(!ctl_.snap());
         }
         same();
         action_button("frame", "view.frame", "Frame the game screen");
         ui::toolbar_separator();
         same();
-        const bool active = play_.active();
-        const bool paused = play_.state() == PlayState::Paused;
+        const bool active = ctl_.play().active();
+        const bool paused = ctl_.play().state() == PlayState::Paused;
         if (ui::icon_button("play", "play", paused ? "Resume (F5)" : "Play the project (F5)", false,
-                            !active || (paused && !play_.panic()))) {
+                            !active || (paused && !ctl_.play().panic()))) {
             run_action("play.play");
         }
         same();
@@ -660,23 +598,23 @@ void EditorApp::draw_toolbar() {
         action_button("pause", "play.pause", "Pause");
         action_button("step", "play.step", "Step one tick");
         action_button("stop", "play.stop", "Stop");
-        bool rec = play_.recording();
-        if (ui::icon_button("rec", "record", "Record the inputs (a replay)", rec, active && play_.mode() == PlayMode::Live)) {
+        bool rec = ctl_.play().recording();
+        if (ui::icon_button("rec", "record", "Record the inputs (a replay)", rec, active && ctl_.play().mode() == PlayMode::Live)) {
             if (rec) {
-                play_.stop_recording();
+                ctl_.play().stop_recording();
             } else {
-                play_.start_recording();
+                ctl_.play().start_recording();
             }
         }
         same();
         ImGui::SameLine(0.0f, theme::space_3);
         ImGui::AlignTextToFramePadding();
         if (active) {
-            const rhi::Color c = play_.panic() ? t.danger : play_.state() == PlayState::Playing ? t.success : t.warning;
-            ImGui::TextColored(theme::im(c), "%s%s  tick %llu  %.3f ms/tick%s", play_.mode() == PlayMode::Replay ? "replay " : "",
-                               play_.panic() ? "PANIC" : std::string(play_.state_name()).c_str(),
-                               static_cast<unsigned long long>(play_.tick()), play_.average_tick_ms(),
-                               play_.recording() ? "  REC" : "");
+            const rhi::Color c = ctl_.play().panic() ? t.danger : ctl_.play().state() == PlayState::Playing ? t.success : t.warning;
+            ImGui::TextColored(theme::im(c), "%s%s  tick %llu  %.3f ms/tick%s", ctl_.play().mode() == PlayMode::Replay ? "replay " : "",
+                               ctl_.play().panic() ? "PANIC" : std::string(ctl_.play().state_name()).c_str(),
+                               static_cast<unsigned long long>(ctl_.play().tick()), ctl_.play().average_tick_ms(),
+                               ctl_.play().recording() ? "  REC" : "");
         } else {
             ImGui::TextDisabled("editing");
         }
@@ -738,6 +676,12 @@ void EditorApp::draw_docks() {
     // A new layout applied last frame (View > Layout, --layout): ImGui's ini text, or
     // the default arrangement built from the fractions. Done here, between frames' windows.
     if (!pending_dock_.empty()) {
+        // Windows saved on a monitor that is gone are pulled onto one that is there (11.7b).
+        std::vector<ScreenRect> monitors;
+        for (const ImGuiPlatformMonitor& m : ImGui::GetPlatformIO().Monitors) {
+            monitors.push_back({m.MainPos.x, m.MainPos.y, m.MainSize.x, m.MainSize.y});
+        }
+        if (viewports_on_) pending_dock_ = clamp_dock_viewports(pending_dock_, monitors);
         ImGui::LoadIniSettingsFromMemory(pending_dock_.c_str(), pending_dock_.size());
         pending_dock_.clear();
         dock_built_ = true;
@@ -786,6 +730,17 @@ void EditorApp::draw_docks() {
                 }
             }
         }
+        // A script's `undock`: out of its dock, as a window at a screen position (its own OS
+        // window when that is outside the editor window and the device can open one).
+        if (const auto it = undock_requests_.find(p->title()); it != undock_requests_.end()) {
+            ImGui::SetNextWindowDockID(0, ImGuiCond_Always);
+            ImGui::SetNextWindowPos({it->second.first, it->second.second}, ImGuiCond_Always);
+            ImGui::SetNextWindowSize({420.0f, 320.0f}, ImGuiCond_Always);
+            // An unknown viewport id: the window leaves the main viewport and gets a new one
+            // unless it fits inside the editor window (then it merges back as a floating panel).
+            ImGui::SetNextWindowViewport(ImHashStr(p->title(), 0, 0x756e646f));
+            undock_requests_.erase(it);
+        }
         ImGui::SetNextWindowSizeConstraints({120.0f, 60.0f}, {FLT_MAX, FLT_MAX});
         // Each tab has its own close button; the dock node's extra one would only repeat it.
         ImGuiWindowClass window_class;
@@ -830,7 +785,7 @@ void EditorApp::draw_palette() {
     const std::string before = palette_query_;
     ImGui::InputTextWithHint("##query", "Type a command, e.g. \"dup sel\" or \"add node label\"", &palette_query_);
     if (palette_query_ != before) palette_index_ = 0;
-    const std::vector<ActionRegistry::Hit> hits = actions_.search(palette_query_);
+    const std::vector<ActionRegistry::Hit> hits = ctl_.actions().search(palette_query_);
     const int count = static_cast<int>(hits.size());
     bool scroll_to_selected = appearing;
     if (ImGui::IsKeyPressed(ImGuiKey_DownArrow) && count > 0) {
@@ -917,8 +872,8 @@ void EditorApp::draw_palette() {
 // ------------------------------------------------------------ messages
 
 void EditorApp::draw_messages() {
-    messages_.update(clock_);
-    if (messages_.empty()) return;
+    ctl_.messages().update(clock_);
+    if (ctl_.messages().empty()) return;
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     const float width = std::min(640.0f, vp->WorkSize.x - 40.0f);
     ImGui::SetNextWindowPos({vp->WorkPos.x + (vp->WorkSize.x - width) * 0.5f, vp->WorkPos.y + theme::toolbar_height + 8.0f});
@@ -929,7 +884,7 @@ void EditorApp::draw_messages() {
                                    ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoFocusOnAppearing |
                                    ImGuiWindowFlags_NoNav | ImGuiWindowFlags_AlwaysAutoResize;
     if (ImGui::Begin("##messages", nullptr, flags)) {
-        for (MessageCenter::Item& item : messages_.items()) {
+        for (MessageCenter::Item& item : ctl_.messages().items()) {
             if (ui::message_row(item, width)) item.dismissed = true;
         }
     }

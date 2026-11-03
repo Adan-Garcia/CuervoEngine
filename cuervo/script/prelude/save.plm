@@ -1,0 +1,92 @@
+// Engine API: save data and player settings (DESIGN.md 7.2 "Save data").
+//
+// A save slot is a named bag of typed values stored in the per-user directory
+// (~/.local/share/Cuervo/<game>/saves on Linux, %APPDATA%/Cuervo/<game>/saves
+// on Windows, IndexedDB on the web). Slot names use letters, digits, `_` and `-`.
+//
+// Saving is outside the simulation: it is never hashed or replayed. Read a
+// slot into your own state during startup or from a UI action, not from code
+// whose result a replay must reproduce unless the loaded values are also in
+// the recorded state.
+//
+// Usage: `Save.set_int("slot1", "level", 3); Save.commit("slot1", 2)` then
+// later `if Save.load("slot1") { let level = Save.get_int("slot1", "level", 1) }`.
+// Every slot file carries a version (the argument of `commit`, default 1);
+// `Save.version(slot)` tells what a loaded file had so the script can migrate
+// older data itself before committing it again at the new version. The
+// loaded copy and later `set_*` calls live in memory until `commit`.
+class Save {
+    // Reads a slot from disk into memory. False if it is missing or corrupt.
+    @native static fn load(slot: str) -> bool {}
+    // Writes the in-memory slot to disk with the given format version. False on failure.
+    @native static fn commit(slot: str, version: int = 1) -> bool {}
+    // True if a saved file exists for the slot.
+    @native static fn exists(slot: str) -> bool {}
+    // The version stored in the slot's file as last loaded or committed (0 if neither).
+    @native static fn version(slot: str) -> int {}
+    // Deletes the slot's file and its in-memory copy.
+    @native static fn delete(slot: str) -> bool {}
+    // Forgets the in-memory copy without touching the file.
+    @native static fn discard(slot: str) {}
+    // True if the in-memory slot has `key`.
+    @native static fn has(slot: str, key: str) -> bool {}
+    // Removes `key` from the in-memory slot.
+    @native static fn remove_key(slot: str, key: str) {}
+
+    // Stores a typed value under the key in the in-memory slot.
+    @native static fn set_int(slot: str, key: str, value: int) {}
+    // Stores a float (kept as f64 on disk).
+    @native static fn set_float(slot: str, key: str, value: float) {}
+    // Stores a bool.
+    @native static fn set_bool(slot: str, key: str, value: bool) {}
+    // Stores a string.
+    @native static fn set_str(slot: str, key: str, value: str) {}
+    // Getters return `fallback` when the key is missing or holds another type.
+    @native static fn get_int(slot: str, key: str, fallback: int = 0) -> int {}
+    // The float stored under the key.
+    @native static fn get_float(slot: str, key: str, fallback: float = 0.0) -> float {}
+    // The bool stored under the key.
+    @native static fn get_bool(slot: str, key: str, fallback: bool = false) -> bool {}
+    // The string stored under the key.
+    @native static fn get_str(slot: str, key: str, fallback: str = "") -> str {}
+}
+
+// Player settings: graphics, audio and input choices kept in the save slot
+// "settings". `apply` pushes them to the window, the mixer and the input map;
+// `Settings.set_*` change the in-memory values and apply them right away.
+// Buses are #master, #music, #sfx, #ui and #voice.
+class Settings {
+    // Loads the saved settings (defaults if none) and applies them.
+    @native static fn load() -> bool {}
+    // Writes the current settings to disk.
+    @native static fn save() -> bool {}
+    // Applies the current values again.
+    @native static fn apply() {}
+    // Back to defaults (applied, not saved).
+    @native static fn reset() {}
+
+    // Whether the window should be fullscreen.
+    @native static fn fullscreen() -> bool {}
+    // Sets and applies fullscreen.
+    @native static fn set_fullscreen(on: bool) {}
+    // Whether presentation waits for the display refresh.
+    @native static fn vsync() -> bool {}
+    // Sets and applies vsync.
+    @native static fn set_vsync(on: bool) {}
+    // UI scale factor, 0.5 to 3.
+    @native static fn ui_scale() -> float {}
+    // Sets and applies the UI scale (clamped).
+    @native static fn set_ui_scale(scale: float) {}
+    // Linear gain of a bus, 0 to 1.
+    @native static fn volume(bus: name) -> float {}
+    // Sets and applies a bus gain (clamped to 0..1).
+    @native static fn set_volume(bus: name, volume: float) {}
+    // Whether master is muted.
+    @native static fn muted() -> bool {}
+    // Mutes or unmutes master and applies it.
+    @native static fn set_muted(on: bool) {}
+    // Replaces an action's bindings with `binding` text (for example "key:Space"); false if refused.
+    @native static fn set_binding(action: name, binding: str) -> bool {}
+    // The replacement binding saved for `action`, or "".
+    @native static fn binding(action: name) -> str {}
+}

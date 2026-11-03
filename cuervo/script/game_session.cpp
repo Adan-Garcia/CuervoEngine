@@ -1,6 +1,7 @@
 #include "cuervo/script/game_session.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <format>
 
 #include "cuervo/assets/manifest.hpp"
@@ -143,6 +144,30 @@ bool GameSession::init(const SessionOptions& options, std::string& error) {
         }
         if (!font_atlas_) LOG_WARN("No font ('{}'): Canvas.text draws nothing", assets::default_font_entry);
     }
+    // [text] fallbacks come through the Vfs, so a pack's imported `.efont` is found
+    // when the source TTF/OTF was converted at export (DESIGN.md 4.19).
+    if (font_atlas_) {
+        fallback_atlases_.reserve(project_->font_fallbacks.size());
+        for (const std::string& path : project_->font_fallbacks) {
+            std::string entry = path;
+            if (!vfs_->exists(entry)) {
+                const std::size_t dot = entry.rfind('.');
+                entry = (dot == std::string::npos ? entry : entry.substr(0, dot)) + ".efont";
+            }
+            std::string font_error;
+            std::optional<render::FontAtlas> atlas;
+            if (vfs_->exists(entry)) {
+                if (auto file = vfs_->open(entry, font_error)) {
+                    atlas = render::load_font_data(file->bytes(), vfs_->describe(entry));
+                }
+            }
+            if (atlas) {
+                fallback_atlases_.push_back(std::move(*atlas));
+            } else {
+                LOG_WARN("[text] fallbacks: can't load '{}'", path);
+            }
+        }
+    }
     host_options_.project_dir = project_->dir;
     host_options_.debug_hooks = options_.debug_hooks;
     host_options_.on_active_vm = options_.on_active_vm;
@@ -150,6 +175,8 @@ bool GameSession::init(const SessionOptions& options, std::string& error) {
     host_options_.main_scene = options_.scene ? options_.scene_label : project_->main_scene;
     host_options_.main_scene_doc = options_.scene;
     host_options_.font = font_atlas_ ? &*font_atlas_ : nullptr;
+    for (const render::FontAtlas& f : fallback_atlases_) host_options_.font_fallbacks.push_back(&f);
+    host_options_.game_name = project_->name;
     host_options_.seed = options_.seed.value_or(project_->seed);
     host_options_.tick_rate = project_->tick_rate;
     host_options_.transform_hierarchy = project_->transform_hierarchy;
@@ -175,6 +202,7 @@ bool GameSession::make_host(std::string& error) {
             return false;
         }
     } else if (!host->load(sources_, project_->main_class)) {
+        compile_failed_ = true;
         error = host->error(); // the host logged the diagnostics
         return false;
     }
@@ -184,15 +212,40 @@ bool GameSession::make_host(std::string& error) {
 
 void GameSession::set_presses(std::string_view presses) {
     presses_.clear();
+    axis_presses_.clear();
+    // "60-300:move=1,0" has a comma of its own: a token that is only a number
+    // is the y value of the axis press before it.
+    std::vector<std::string> items;
     for (std::size_t pos = 0; pos < presses.size();) {
         std::size_t end = presses.find(',', pos);
         if (end == std::string_view::npos) end = presses.size();
-        const std::string item(presses.substr(pos, end - pos));
+        std::string item(presses.substr(pos, end - pos));
         pos = end + 1;
+        const bool number = !item.empty() && item.find_first_not_of("+-.0123456789") == std::string::npos;
+        if (number && !items.empty() && items.back().find('=') != std::string::npos &&
+            items.back().find(',') == std::string::npos) {
+            items.back() += "," + item;
+        } else {
+            items.push_back(std::move(item));
+        }
+    }
+    for (const std::string& item : items) {
         const std::size_t colon = item.find(':');
-        auto action = colon == std::string::npos ? std::nullopt : input_map_.action_index(Name(item.substr(colon + 1)));
-        if (!action) {
-            LOG_WARN("--press: ignoring '{}' (expected tick:action with a project action)", item);
+        const std::size_t equals = item.find('=');
+        const bool is_axis = colon != std::string::npos && equals != std::string::npos && equals > colon;
+        std::optional<std::size_t> action;
+        std::optional<std::size_t> axis_x;
+        std::optional<std::size_t> axis_y;
+        if (is_axis) {
+            const std::string axis = item.substr(colon + 1, equals - colon - 1);
+            axis_x = input_map_.axis_index(Name(axis + ".x"));
+            axis_y = input_map_.axis_index(Name(axis + ".y"));
+        } else if (colon != std::string::npos) {
+            action = input_map_.action_index(Name(item.substr(colon + 1)));
+        }
+        const std::size_t comma = is_axis ? item.find(',', equals) : std::string::npos;
+        if (is_axis ? !(axis_x && axis_y && comma != std::string::npos) : !action) {
+            LOG_WARN("--press: ignoring '{}' (expected range:action or range:axis=x,y with a project action or axis)", item);
             continue;
         }
         const std::uint64_t first = std::strtoull(item.c_str(), nullptr, 10);
@@ -200,7 +253,15 @@ void GameSession::set_presses(std::string_view presses) {
         if (const std::size_t dash = item.find('-'); dash != std::string::npos && dash < colon) {
             last = std::strtoull(item.c_str() + dash + 1, nullptr, 10);
         }
-        presses_.push_back({first, std::max(first, last), *action});
+        if (!is_axis) {
+            presses_.push_back({first, std::max(first, last), *action});
+            continue;
+        }
+        auto quantize = [](const char* text) {
+            return static_cast<std::int16_t>(std::lround(std::clamp(std::strtof(text, nullptr), -1.0f, 1.0f) * 32767.0f));
+        };
+        axis_presses_.push_back({first, std::max(first, last), *axis_x, *axis_y, quantize(item.c_str() + equals + 1),
+                                 quantize(item.c_str() + comma + 1)});
     }
 }
 
@@ -251,6 +312,12 @@ InputFrame GameSession::sample(DeviceState& devices, vec2 pointer) {
     for (const Press& p : presses_) {
         if (tick >= p.first && tick <= p.last) input.held |= std::uint64_t{1} << p.action;
     }
+    for (const AxisPress& p : axis_presses_) {
+        if (tick >= p.first && tick <= p.last) {
+            input.axes[p.axis_x] = p.x;
+            input.axes[p.axis_y] = p.y;
+        }
+    }
     for (const PointerStep& s : pointer_script_) {
         if (s.tick <= tick) pointer = s.at;
     }
@@ -267,6 +334,23 @@ void GameSession::tick(const InputFrame& frame) {
     host_->tick(frame);
     if (recording_) {
         replay_.frames.push_back(frame);
+        replay_.hashes.push_back(host_->state_hash());
+    }
+}
+
+void GameSession::tick_players(std::span<const InputFrame> players) {
+    CUERVO_PROFILE_ZONE("tick");
+    if (players.empty()) return;
+    host_->tick_players(players);
+    if (recording_) {
+        // The extra players join the replay the first tick they appear; earlier ticks ran without them.
+        while (replay_.extra_players.size() + 1 < players.size()) {
+            replay_.extra_players.emplace_back(replay_.frames.size());
+        }
+        replay_.frames.push_back(players[0]);
+        for (std::size_t p = 1; p <= replay_.extra_players.size(); ++p) {
+            replay_.extra_players[p - 1].push_back(p < players.size() ? players[p] : InputFrame{});
+        }
         replay_.hashes.push_back(host_->state_hash());
     }
 }
@@ -312,6 +396,7 @@ Replay GameSession::replay_header() const {
     r.seed = host_options_.seed;
     r.tick_rate = project_->tick_rate;
     r.actions = input_map_.action_names();
+    r.action_ids = input_map_.action_ids();
     r.axes = input_map_.axis_names();
     if (options_.scene) {
         r.start_scene = options_.scene_label.empty() ? std::string("(scene)") : options_.scene_label;
@@ -349,17 +434,22 @@ ReplayCheck verify_replay(const fs::path& dir, const Replay& replay, const Sessi
     if (!session_options_for(replay, options, check.error)) return check;
     GameSession session;
     if (!session.init(options, check.error)) return check;
-    if (session.input_map().action_names() != replay.actions || session.input_map().axis_names() != replay.axes) {
-        check.error = "the project's input actions or axes changed since the replay was recorded";
-        return check;
-    }
+    // Actions added, removed or reordered since the recording are mapped by their stable IDs.
+    Replay adapted = replay;
+    if (!adapt_replay_input(adapted, session.input_map(), check.error)) return check;
     if (session.project().tick_rate != replay.tick_rate) {
         check.error = std::format("the project's tick rate ({}) differs from the replay's ({})",
                                   session.project().tick_rate, replay.tick_rate);
         return check;
     }
-    for (std::size_t i = 0; i < replay.frames.size(); ++i) {
-        session.tick(replay.frames[i]);
+    for (std::size_t i = 0; i < adapted.frames.size(); ++i) {
+        if (adapted.extra_players.empty()) {
+            session.tick(adapted.frames[i]);
+        } else {
+            std::vector<InputFrame> players{adapted.frames[i]};
+            for (const auto& extra : adapted.extra_players) players.push_back(extra[i]);
+            session.tick_players(players);
+        }
         ++check.ticks;
         if (i >= replay.hashes.size()) continue;
         ++check.compared;

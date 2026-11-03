@@ -13,7 +13,7 @@
 
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { extname, join, resolve } from 'node:path';
 
@@ -64,8 +64,24 @@ await new Promise((ok) => server.listen(port, '127.0.0.1', ok));
 
 const profile = mkdtempSync(join(tmpdir(), 'cuervo-ff-smoke-'));
 const debugPort = port + 1000;
+// Headless Firefox on a GPU-less runner has no WebGL by default, so the engine's
+// SDL_GL_CreateContext fails ("Closed before resume completed" until the timeout). Force WebGL on with
+// software rendering (llvmpipe through Mesa); WebRender's software backend covers the compositor.
+writeFileSync(join(profile, 'user.js'), [
+    'user_pref("webgl.disabled", false);',
+    'user_pref("webgl.force-enabled", true);',
+    'user_pref("webgl.enable-webgl2", true);',
+    'user_pref("webgl.forbid-software", false);',
+    'user_pref("layers.acceleration.force-enabled", true);',
+    'user_pref("gfx.webrender.software", true);',
+    'user_pref("gfx.blocklist.all", 0);',
+    'user_pref("media.hardware-video-decoding.enabled", false);',
+    ''].join('\n'));
 const browser = spawn(browserPath, ['--headless', '--no-remote', '--profile', profile,
-    `--remote-debugging-port=${debugPort}`, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    `--remote-debugging-port=${debugPort}`, 'about:blank'], {
+    stdio: ['ignore', 'ignore', 'pipe'],
+    env: { ...process.env, MOZ_HEADLESS: '1', LIBGL_ALWAYS_SOFTWARE: process.env.LIBGL_ALWAYS_SOFTWARE ?? '1' },
+});
 
 let passed = false;
 let failed = false;
@@ -110,6 +126,11 @@ ws.onmessage = (event) => {
         const text = p.text ?? '';
         console.log(text);
         if (p.level === 'error' && !/^\[(info|warn)/.test(text) && /^\[error\]|Aborted|RuntimeError/.test(text)) failed = true;
+        if (text.includes('SDL_GL_CreateContext failed')) {
+            // Fail fast instead of idling to the timeout.
+            console.error('firefox_smoke: Firefox gave no WebGL2 context (no GPU or Mesa software GL on this host)');
+            finish(1);
+        }
         if (text.includes(expect)) passed = true;
         if (text.includes('[web] engine exited')) finish(passed && !failed ? 0 : 1);
     }

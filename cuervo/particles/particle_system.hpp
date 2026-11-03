@@ -123,6 +123,21 @@ public:
     // emitter's state, the tick count (DESIGN.md 4.1 replay comparison).
     std::uint64_t state_hash() const;
 
+    // Everything a tick changes, for simulation snapshots (DESIGN.md 4.8, milestone 11.7a): the
+    // emitters (pools, spawner and RNG state, configs), their generations, the shared RNG and the
+    // tick count. The collision world and the hit list are rebuilt by every tick and not part of it.
+    struct State {
+        Pcg32 rng;
+        std::uint64_t ticks = 0;
+        std::vector<std::uint32_t> generations;
+        std::vector<Emitter> emitters;
+    };
+    State save_state() const;
+    // Emitter objects keep their addresses where the index exists in both.
+    void restore_state(const State& state);
+    // A stronger fingerprint than state_hash(): also the configs, dead flags, slot generations and events.
+    void hash_deep(StateHasher& h) const;
+
 private:
     Pcg32 stream_for(EmitterId id) const;
     // Runs fn(k) for k in [0, count) on the job system (or inline).

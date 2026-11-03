@@ -214,4 +214,36 @@ std::uint64_t ParticleSystem::state_hash() const {
     return h.digest();
 }
 
+ParticleSystem::State ParticleSystem::save_state() const {
+    State s;
+    s.rng = rng_;
+    s.ticks = ticks_;
+    s.generations = generations_;
+    s.emitters.reserve(emitters_.size());
+    for (const auto& e : emitters_) s.emitters.push_back(*e);
+    return s;
+}
+
+void ParticleSystem::restore_state(const State& s) {
+    rng_ = s.rng;
+    ticks_ = s.ticks;
+    generations_ = s.generations;
+    for (std::size_t i = 0; i < s.emitters.size(); ++i) {
+        if (i < emitters_.size()) {
+            *emitters_[i] = s.emitters[i];
+        } else {
+            emitters_.push_back(std::make_unique<Emitter>(s.emitters[i]));
+        }
+    }
+    emitters_.resize(s.emitters.size());
+    hits_.clear();
+}
+
+void ParticleSystem::hash_deep(StateHasher& h) const {
+    h.value(state_hash());
+    h.value(static_cast<std::uint64_t>(generations_.size()));
+    for (std::uint32_t g : generations_) h.value(g);
+    for (const auto& e : emitters_) e->hash_deep(h);
+}
+
 } // namespace cuervo::particles

@@ -4,10 +4,15 @@
 //                 [--script-commands <file>] [--screenshot <file.ppm>]
 //                 [--quit-after <seconds>] [--size <w>x<h>] [--font <file.ttf>] [--view <x>,<y>,<zoom>]
 //                 [--jobs <n>] [--no-audio] [--tabs <Panel,...>] [--profile]
-//                 [--theme light|dark] [--splash|--no-splash] [--layout <name>]
+//                 [--theme light|dark] [--splash|--no-splash] [--no-viewports] [--layout <name>]
 //                 [--screen welcome] [--tool select|move|rotate|scale] [--select </a,/b>] [--palette [query]]
+//                 [--ui-scale <float>] [--ui-events <steps>] [--imgui]
 //   cuervo-editor --project <dir> --replay-verify <file.replay> [--jobs <n>]
 //   cuervo-editor --new-project <dir> [--template empty|walker] [--name <name>]
+//
+// The RmlUi editor is the default. --imgui starts the deprecated ImGui editor (compiled in with
+// CUERVO_EDITOR_IMGUI, default ON for now); --rml-ui is accepted and ignored. --font-scale and
+// --no-viewports only mean something to the ImGui editor.
 //
 // --new-project makes a project the way the welcome screen's "New project" does and exits;
 // --template defaults to empty and --name to the folder's name.
@@ -26,7 +31,11 @@
 #include "cuervo/core/profiler.hpp"
 #include "cuervo/jobs/job_system.hpp"
 #include "cuervo/platform/platform.hpp"
+#ifdef CUERVO_EDITOR_IMGUI
 #include "editor/app.hpp"
+#endif
+#include "editor/editor_options.hpp"
+#include "editor/rml/rml_ui.hpp"
 #include "editor/projects.hpp"
 
 namespace {
@@ -49,9 +58,9 @@ int usage() {
     LOG_ERROR("usage: cuervo-editor --project <dir> [--scene <path>] [--backend gl|vulkan] [--gl-es] "
               "[--script-commands <file>] [--screenshot <file.ppm>] [--quit-after <seconds>] [--size <w>x<h>] "
               "[--font <file.ttf>] [--view <x>,<y>,<zoom>] [--jobs <n>] [--no-audio] [--tabs <Panel,...>] [--replay-verify <file.replay>] [--profile] "
-              "[--theme light|dark] [--splash|--no-splash] [--layout <name>] [--screen welcome] "
+              "[--theme light|dark] [--splash|--no-splash] [--no-viewports] [--layout <name>] [--screen welcome] "
               "[--tool select|move|rotate|scale] [--select </a,/b>] [--palette [query]] "
-              "[--ui-scale <float>] [--font-scale <float>]\n"
+              "[--ui-scale <float>] [--ui-events <steps>] [--imgui (deprecated ImGui editor)]\n"
               "       cuervo-editor --new-project <dir> [--template empty|walker] [--name <name>]");
     return EXIT_FAILURE;
 }
@@ -70,6 +79,7 @@ int main(int argc, char** argv) {
     o.audio = !has_flag(argc, argv, "--no-audio");
     o.screen = std::string(arg_value(argc, argv, "--screen"));
     o.layout = std::string(arg_value(argc, argv, "--layout"));
+    o.ui_events = std::string(arg_value(argc, argv, "--ui-events"));
     if (o.screen != "" && o.screen != "welcome") {
         LOG_ERROR("Unknown --screen '{}' (expected welcome)", o.screen);
         return EXIT_FAILURE;
@@ -201,9 +211,21 @@ int main(int argc, char** argv) {
     }
     if (has_flag(argc, argv, "--splash")) o.splash = editor::SplashMode::On;
     if (has_flag(argc, argv, "--no-splash")) o.splash = editor::SplashMode::Off;
+    o.no_viewports = has_flag(argc, argv, "--no-viewports");
     o.font_path = std::string(arg_value(argc, argv, "--font"));
     if (o.font_path.empty()) {
         o.font_path = platform::utf8(platform::find_asset("fonts/LiberationSans-Regular.ttf", CUERVO_DEFAULT_FONT));
     }
-    return editor::run_editor(o);
+    // The RmlUi editor is the default (DESIGN.md 4.13); --rml-ui stays accepted as a no-op alias so
+    // saved scripts keep working. --imgui selects the deprecated ImGui editor, if this build has it.
+    if (has_flag(argc, argv, "--imgui")) {
+#ifdef CUERVO_EDITOR_IMGUI
+        LOG_WARN("the ImGui editor is deprecated and will be removed");
+        return editor::run_editor(o);
+#else
+        LOG_ERROR("this build has no ImGui editor (configured with CUERVO_EDITOR_IMGUI=OFF); the default RmlUi editor is the only one");
+        return EXIT_FAILURE;
+#endif
+    }
+    return editor::run_rml_ui(o, has_flag(argc, argv, "--rml-continuous"));
 }

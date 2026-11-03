@@ -409,6 +409,8 @@ private:
         error_expected("newline or ';' after statement");
     }
 
+    bool peek_is_get() const { return cur().is_keyword("get"); }
+
     Ident expect_ident(std::string_view what) {
         if (at(K::Identifier)) return ident_of(advance());
         error_expected(what);
@@ -710,7 +712,10 @@ private:
     FnDecl* fn_decl(DeclContext ctx) {
         const Token start = advance(); // fn
         auto* f = make<FnDecl>(sp(start));
-        f->name = expect_ident("function name");
+        // `get` is a keyword only for property accessors; a method may be named `get` (`Http.get`,
+        // like `map.get(k)` at call sites).
+        if (at(K::Keyword) && peek_is_get()) f->name = ident_of(advance());
+        else f->name = expect_ident("function name");
         if (panic_) return f;
         f->generics = generic_params();
         if (panic_) return f;

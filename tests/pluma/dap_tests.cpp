@@ -5,6 +5,7 @@
 #include <doctest.h>
 
 #include <deque>
+#include <functional>
 #include <format>
 #include <optional>
 #include <string>
@@ -280,4 +281,182 @@ TEST_CASE("dap: pause, refused launch, and sources outside the project") {
     REQUIRE(src.size() == 1);
     CHECK(body(src[0]).str_or("content").starts_with("fn helper()") ==
           (source->str_or("name") == "lib.plm"));
+}
+
+// ---- LocalTransport: an in-process client on another thread ----
+
+#include <thread>
+
+namespace {
+
+// A client thread over LocalTransport: sends a request, collects events and
+// returns the response body. Results go to plain members; doctest assertions
+// stay on the main thread.
+struct LocalClient {
+    pluma::dap::LocalTransport& t;
+    std::vector<Value> events;
+    bool timed_out = false;
+
+    std::optional<Value> take(const std::function<bool(const Value&)>& want) {
+        for (int i = 0; i < 500; ++i) { // 5 s
+            auto m = t.client_receive(std::chrono::milliseconds(10));
+            if (!m) continue;
+            auto v = pluma::json::Parser(*m).parse();
+            if (!v) continue;
+            if (want(*v)) return v;
+            if (v->str_or("type") == "event") events.push_back(*v);
+        }
+        timed_out = true;
+        return std::nullopt;
+    }
+    Value call(std::string_view cmd, std::string_view args = "{}") {
+        const std::int64_t seq = t.client_request(cmd, args);
+        auto r = take([&](const Value& v) { return v.str_or("type") == "response" && v.int_or("request_seq") == seq; });
+        return r ? *r : Value::object();
+    }
+    std::optional<Value> wait_event(std::string_view name) {
+        return take([&](const Value& v) { return v.str_or("type") == "event" && v.str_or("event") == name; });
+    }
+};
+
+} // namespace
+
+TEST_CASE("dap: LocalTransport drives a scripted session from another thread") {
+    pluma::dap::LocalTransport transport;
+    pluma::dap::Debugger dbg(transport);
+    dbg.set_source_root("/game");
+
+    std::vector<std::int64_t> stop_lines;
+    std::vector<std::string> stop_reasons, local_names, local_values;
+    std::int64_t frame_count = 0, first_frames = 0;
+    bool timed_out = false;
+
+    std::thread client_thread([&] {
+        LocalClient c{transport, {}, false};
+        c.call("initialize", R"({"adapterID":"pluma"})");
+        c.call("launch", R"({"project":"/game"})");
+        c.call("setBreakpoints", R"({"source":{"path":"/game/test.plm"},"breakpoints":[{"line":3}]})");
+        c.call("configurationDone");
+        auto top_line = [&] {
+            auto st = c.call("stackTrace", R"({"threadId":1})");
+            const auto& frames = st.get("body")->get("stackFrames")->a;
+            frame_count = static_cast<std::int64_t>(frames.size());
+            stop_lines.push_back(frames.empty() ? -1 : frames[0].int_or("line"));
+        };
+        if (auto e = c.wait_event("stopped")) {
+            stop_reasons.emplace_back(e->get("body")->str_or("reason"));
+            top_line();
+            first_frames = frame_count;
+            auto scopes = c.call("scopes", R"({"frameId":1})");
+            const std::int64_t ref = scopes.get("body")->get("scopes")->a[0].int_or("variablesReference");
+            auto vars = c.call("variables", std::format(R"({{"variablesReference":{}}})", ref));
+            for (const Value& v : vars.get("body")->get("variables")->a) {
+                local_names.emplace_back(v.str_or("name"));
+                local_values.emplace_back(v.str_or("value"));
+            }
+            c.call("next", R"({"threadId":1})");
+            if (auto es = c.wait_event("stopped")) {
+                stop_reasons.emplace_back(es->get("body")->str_or("reason"));
+                top_line();
+            }
+            // Set a breakpoint on line 7 while paused, then continue to it.
+            c.call("setBreakpoints",
+                   R"({"source":{"path":"/game/test.plm"},"breakpoints":[{"line":7}]})");
+            c.call("continue", R"({"threadId":1})");
+            if (auto e2 = c.wait_event("stopped")) {
+                stop_reasons.emplace_back(e2->get("body")->str_or("reason"));
+                top_line();
+                c.call("continue", R"({"threadId":1})");
+            }
+        }
+        timed_out = c.timed_out;
+        c.wait_event("exited"); // the run ended (or time out)
+        transport.close();
+    });
+
+    auto args = dbg.wait_for_start({});
+    REQUIRE(args.has_value());
+    std::string out;
+    pluma::VmOptions options;
+    options.out = [&out](std::string_view s) { out += s; };
+    pluma::Session session(options);
+    dbg.attach(session.vm());
+    const pluma::SessionResult r = session.run_script("test.plm", adder);
+    REQUIRE_MESSAGE(r.ok, r.rendered);
+    dbg.exited(0);
+    client_thread.join();
+
+    CHECK_FALSE(timed_out);
+    CHECK(out == "6\n");
+    REQUIRE(stop_lines.size() == 3);
+    CHECK(stop_lines[0] == 3);
+    CHECK(stop_lines[1] != 3); // stepped
+    CHECK(first_frames == 2);
+    CHECK(frame_count == 1); // line 7 is top level
+    CHECK(stop_lines[2] == 7);
+    CHECK(stop_reasons == std::vector<std::string>{"breakpoint", "step", "breakpoint"});
+    REQUIRE(local_names.size() == 3);
+    CHECK(local_names[2] == "c");
+    CHECK(local_values[2] == "1");
+}
+
+TEST_CASE("dap: breakpoints sent while the program runs apply at the next poll") {
+    pluma::dap::LocalTransport transport;
+    pluma::dap::Debugger dbg(transport);
+    dbg.set_source_root("/game");
+    transport.client_request("initialize", R"({"adapterID":"pluma"})");
+    transport.client_request("launch", R"({"project":"/game"})");
+    transport.client_request("configurationDone");
+    REQUIRE(dbg.wait_for_start({}).has_value());
+
+    // Running now: the request waits in the queue until the host polls.
+    transport.client_request("setBreakpoints", R"({"source":{"path":"/game/test.plm"},"breakpoints":[{"line":2}]})");
+    dbg.poll();
+
+    std::vector<std::int64_t> hits;
+    std::thread client_thread([&] {
+        LocalClient c{transport, {}, false};
+        while (auto e = c.wait_event("stopped")) {
+            auto st = c.call("stackTrace", R"({"threadId":1})");
+            hits.push_back(st.get("body")->get("stackFrames")->a[0].int_or("line"));
+            if (hits.size() == 1) {
+                // Remove the breakpoint while paused; the rest of the loop runs free.
+                c.call("setBreakpoints", R"({"source":{"path":"/game/test.plm"},"breakpoints":[]})");
+            }
+            c.call("continue", R"({"threadId":1})");
+            if (hits.size() >= 1) break;
+        }
+        transport.close();
+    });
+    pluma::Session session{pluma::VmOptions{}};
+    dbg.attach(session.vm());
+    const pluma::SessionResult r = session.run_script("test.plm", adder);
+    client_thread.join();
+    REQUIRE_MESSAGE(r.ok, r.rendered);
+    REQUIRE(hits.size() == 1);
+    CHECK(hits[0] == 2);
+}
+
+// Regression: CI crashed (SIGSEGV on MSVC/MinGW) because a Debugger declared
+// before its Session dereferenced the already destroyed VM in ~Debugger.
+TEST_CASE("dap: a VM destroyed before its debugger notifies the hooks") {
+    struct Probe : pluma::DebugHooks {
+        pluma::VM* destroyed = nullptr;
+        std::uint32_t events() const override { return 0; }
+        void on_vm_destroyed(pluma::VM& vm) override { destroyed = &vm; }
+    } probe;
+    pluma::VM* addr = nullptr;
+    {
+        pluma::Session session{pluma::VmOptions{}};
+        addr = &session.vm();
+        session.vm().set_debug_hooks(&probe);
+    }
+    CHECK(probe.destroyed == addr);
+
+    ScriptedClient client;
+    pluma::dap::Debugger dbg(client);
+    {
+        pluma::Session session{pluma::VmOptions{}};
+        dbg.attach(session.vm());
+    } // the session dies first; ~Debugger must not touch its VM (ASan: heap-use-after-free)
 }

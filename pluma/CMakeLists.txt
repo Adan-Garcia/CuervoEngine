@@ -15,12 +15,14 @@ add_library(pluma STATIC
     lexer.cpp
     lsp.cpp
     dap.cpp
+    lint.cpp
     parser.cpp
     printer.cpp
     profiler.cpp
     reload.cpp
     sema.cpp
     session.cpp
+    snapshot.cpp
     source.cpp
     stdlib.cpp
     testing.cpp

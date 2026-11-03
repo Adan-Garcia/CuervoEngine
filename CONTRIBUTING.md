@@ -58,7 +58,7 @@ The repository is organized into distinct, modular subsystems:
 | `cuervo/script/prelude/` | **Engine Prelude** | Node hierarchy, UI widgets (`ui.plm`), and animation routines (`animation.plm`). Written in Pluma. **Best place to add high-level features without touching C++.** |
 | `cuervo/rhi/` | **Render Hardware Interface** | Low-level abstraction with dual backends: Vulkan 1.3 (`cuervo/rhi/vulkan/`) and OpenGL 3.3/WebGL2 (`cuervo/rhi/gl/`). |
 | `cuervo/render/` | **2D Rendering** | GPU-instanced 2D SDF batching, MSDF font atlas rendering, and vector path tessellation. |
-| `editor/` | **Desktop Editor** | Standalone Dear ImGui application (`cuervo-editor`) providing the scene tree, inspector, and live play-in-editor. |
+| `editor/` | **Desktop Editor** | Standalone RmlUi application (`cuervo-editor`; the deprecated Dear ImGui editor is behind `--imgui`) providing the scene tree, inspector, and live play-in-editor. |
 | `tools/` | **Developer Tooling** | `cuervo-tools` (exporting, asset packing, docs generation), `bench.py`, static site builder, and the VS Code extension (`tools/vscode-pluma/`). |
 | `docs/` | **Documentation** | Architectural decision records (`DESIGN.md`), language guide (`PLUMA_GUIDE.md`), and engine reference. |
 

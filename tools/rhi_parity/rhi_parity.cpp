@@ -20,6 +20,8 @@
 // GL runs headless with SDL_VIDEO_DRIVER=offscreen; Vulkan needs a display
 // (README: NVIDIA lacks VK_EXT_headless_surface).
 
+#include <SDL3/SDL.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -36,10 +38,20 @@
 #include <vector>
 
 #include "cuervo/core/log.hpp"
+#include "cuervo/assets/atlas.hpp"
+#include "cuervo/assets/image.hpp"
+#include "cuervo/assets/svg_raster.hpp"
 #include "cuervo/platform/window.hpp"
 #include "cuervo/render/camera.hpp"
 #include "cuervo/render/light_batcher.hpp"
+#include "cuervo/render/mesh_batcher.hpp"
+#include "cuervo/vector/mesh.hpp"
+#include "cuervo/vector/svg.hpp"
+#include "cuervo/render/font_import.hpp"
+#include "cuervo/render/post_fx.hpp"
+#include "cuervo/vector/imported_vector.hpp"
 #include "cuervo/render/sdf_batcher.hpp"
+#include "cuervo/render/sprite_batcher.hpp"
 #include "cuervo/rhi/gl/gl_device.hpp"
 #include "cuervo/rhi/rhi.hpp"
 #include "cuervo/rhi/webgpu/webgpu_device.hpp"
@@ -213,7 +225,7 @@ public:
             desc.debug_name = name;
             return d_.create_pipeline(desc);
         };
-        for (int b = 0; b < 4; ++b) {
+        for (int b = 0; b < 5; ++b) {
             blend_[b] = color_pipeline(static_cast<rhi::BlendMode>(b), rhi::Topology::TriangleList, "parity_blend");
         }
         strip_ = color_pipeline(rhi::BlendMode::None, rhi::Topology::TriangleStrip, "parity_strip");
@@ -246,6 +258,9 @@ public:
         tex.blend = rhi::BlendMode::Alpha;
         tex.debug_name = "parity_textured";
         textured_ = d_.create_pipeline(tex);
+        tex.blend = rhi::BlendMode::Additive;
+        tex.debug_name = "parity_textured_additive";
+        textured_additive_ = d_.create_pipeline(tex);
 
         // Uniforms: slot k of `params_` holds Params k, at the device's alignment.
         align_ = std::max<std::size_t>(d_.info().uniform_offset_alignment, sizeof(Params));
@@ -253,6 +268,16 @@ public:
         set_params(0, Params{});
         const float palette[16] = {1, 1, 1, 1, 1, 0.3f, 0.3f, 1, 0.3f, 1, 0.3f, 1, 0.3f, 0.5f, 1, 1};
         palette_ = d_.create_buffer({rhi::BufferKind::Uniform, rhi::BufferUsage::Static, sizeof(palette), palette});
+
+        // A warm grading cube for the post scenes: blue pulled down, red lifted
+        // (created here: a texture destroyed in the frame it was created is never uploaded).
+        std::vector<std::uint8_t> lut_bytes = render::make_identity_lut(16);
+        for (std::size_t i = 0; i < lut_bytes.size(); i += 4) {
+            lut_bytes[i] = static_cast<std::uint8_t>(std::min(255, lut_bytes[i] + 24));
+            lut_bytes[i + 2] = static_cast<std::uint8_t>(lut_bytes[i + 2] * 3 / 5);
+        }
+        lut_ = d_.create_texture({.width = 256, .height = 16, .format = rhi::TextureFormat::RGBA8,
+                                  .filter = rhi::Filter::Linear, .initial_data = lut_bytes.data(), .debug_name = "parity_lut"});
 
         // A unit quad, as triangles and as a strip.
         const std::vector<ColorVertex> quad = {cv(0, 0, 0xffffffff), cv(1, 0, 0xffffffff), cv(1, 1, 0xffffffff),
@@ -262,6 +287,11 @@ public:
         const std::vector<UvVertex> uv_quad = {{0, 0, 0, 0}, {1, 0, 1, 0}, {1, 1, 1, 1},
                                                {0, 0, 0, 0}, {1, 1, 1, 1}, {0, 1, 0, 1}};
         uv_quad_ = make_buffer(rhi::BufferKind::Vertex, rhi::BufferUsage::Static, bytes(uv_quad));
+        // The same quad for sampling a render target: GL stores target rows bottom-up.
+        const std::vector<UvVertex> target_quad = {{0, 0, 0, 1}, {1, 0, 1, 1}, {1, 1, 1, 0},
+                                                   {0, 0, 0, 1}, {1, 1, 1, 0}, {0, 1, 0, 0}};
+        const std::vector<UvVertex>& sampled = d_.info().render_target_flip_v ? target_quad : uv_quad;
+        target_quad_ = make_buffer(rhi::BufferKind::Vertex, rhi::BufferUsage::Static, bytes(sampled));
 
         // Textures: a 4x4 RGBA8 checker (magnified: nearest vs linear) and an R8 ramp.
         std::vector<std::uint8_t> checker(4 * 4 * 4);
@@ -285,24 +315,62 @@ public:
         mask_ = d_.create_texture({8, 8, rhi::TextureFormat::R8, rhi::Filter::Nearest, ramp.data(), "parity_mask"});
         blank_ = d_.create_texture({2, 2, rhi::TextureFormat::RGBA8, rhi::Filter::Nearest, nullptr, "parity_blank"});
 
-        // 2D lighting (milestone 9.7): SDF shadows must match across backends.
-        const bool lit = lights_.init(d_) && lit_shapes_.init(d_);
+        // Mip chains (11.2a): 64x64, one flat color per level so that a minified draw
+        // shows which level the sampler picked, on every backend.
+        {
+            constexpr std::uint8_t level_colors[7][3] = {{230, 40, 40},  {40, 230, 40},  {40, 40, 230}, {230, 230, 40},
+                                                         {40, 230, 230}, {230, 40, 230}, {230, 230, 230}};
+            std::vector<std::vector<std::byte>> levels(7);
+            std::vector<std::span<const std::byte>> spans;
+            for (std::uint32_t l = 0; l < 7; ++l) {
+                const std::size_t n = std::size_t{64u >> l} * std::size_t{64u >> l};
+                levels[l].resize(n * 4);
+                for (std::size_t i = 0; i < n; ++i) {
+                    for (std::size_t c = 0; c < 3; ++c) levels[l][i * 4 + c] = std::byte{level_colors[l][c]};
+                    levels[l][i * 4 + 3] = std::byte{255};
+                }
+                spans.emplace_back(levels[l]);
+            }
+            for (int f = 0; f < 2; ++f) {
+                rhi::TextureDesc td{64, 64, rhi::TextureFormat::RGBA8,
+                                    f == 0 ? rhi::Filter::Nearest : rhi::Filter::Linear, nullptr, "parity_mips"};
+                td.mip_levels = 0; // the full chain: 7 levels
+                td.initial_levels = spans;
+                mips_[f] = d_.create_texture(td);
+            }
+            // sRGB: four gray texels decoded to linear before the (nearest) fetch.
+            const std::uint8_t grays[4 * 4] = {32, 32, 32, 255, 96, 96, 96, 255, 160, 160, 160, 255, 224, 224, 224, 255};
+            rhi::TextureDesc sd{4, 1, rhi::TextureFormat::RGBA8, rhi::Filter::Nearest, grays, "parity_srgb"};
+            sd.srgb = true;
+            srgb_ = d_.create_texture(sd);
+        }
 
-        return lit && blend_[0] && blend_[3] && strip_ && points_ && lines_ && line_strip_ && instanced_ && textured_ &&
-               params_ && palette_ && quad_ && uv_quad_ && checker_[0] && checker_[1] && mask_ && blank_;
+        // Sprites (11.2a): procedural sprites packed by the slice 1 atlas packer, uploaded
+        // with their mip chain, drawn by the sprite batcher.
+        const bool sprites_ok = init_sprites();
+
+        // 2D lighting (milestone 9.7): SDF shadows must match across backends.
+        const bool lit = lights_.init(d_) && lit_shapes_.init(d_) && post_.init(d_) && init_mesh_gradient();
+
+        return lit && sprites_ok && blend_[0] && blend_[4] && textured_additive_ && target_quad_ && strip_ && points_ && lines_ && line_strip_ && instanced_ && textured_ &&
+               params_ && palette_ && quad_ && uv_quad_ && checker_[0] && checker_[1] && mask_ && blank_ && mips_[0] && mips_[1] && srgb_ && lut_;
     }
 
     void shutdown() {
+        meshes_.shutdown();
+        post_.shutdown();
+        sprite_batcher_.shutdown();
+        for (rhi::TextureHandle t : sprite_atlas_) d_.destroy_texture(t);
         lights_.shutdown();
         lit_shapes_.shutdown();
-        for (rhi::PipelineHandle p : {blend_[0], blend_[1], blend_[2], blend_[3], strip_, points_, lines_, line_strip_,
+        for (rhi::PipelineHandle p : {blend_[0], blend_[1], blend_[2], blend_[3], blend_[4], textured_additive_, strip_, points_, lines_, line_strip_,
                                       instanced_, textured_}) {
             d_.destroy_pipeline(p);
         }
         for (rhi::BufferHandle b : owned_buffers_) d_.destroy_buffer(b);
         d_.destroy_buffer(params_);
         d_.destroy_buffer(palette_);
-        for (rhi::TextureHandle t : {checker_[0], checker_[1], mask_, blank_}) d_.destroy_texture(t);
+        for (rhi::TextureHandle t : {checker_[0], checker_[1], mask_, blank_, mips_[0], mips_[1], srgb_, lut_}) d_.destroy_texture(t);
     }
 
     // Every scene: name + draw function (state is reset by begin_frame).
@@ -313,9 +381,16 @@ public:
             {"indexed_16_32", [this] { indexed(); }},
             {"instanced_first_instance", [this] { instanced(); }},
             {"blend_modes", [this] { blend_modes(); }},
+            {"render_targets", [this] { render_targets(); }},
+            {"additive_glow", [this] { additive_glow(); }},
+            {"post_bloom_vignette", [this] { post_scene(false); }},
+            {"post_lut_crt", [this] { post_scene(true); }},
             {"points_lines", [this] { points_lines(); }},
             {"uniform_offsets", [this] { uniform_offsets(); }},
             {"textures", [this] { textures(); }},
+            {"mips", [this] { mips(); }},
+            {"sprites", [this] { sprites(); }},
+            {"mesh_gradient", [this] { mesh_gradient(); }},
             {"buffer_update_order", [this] { buffer_updates(); }},
             {"stream_large", [this] { stream_large(); }},
             {"base_vertex", [this] { base_vertex(true); }},
@@ -357,6 +432,30 @@ private:
     // A lit room (DESIGN.md 4.17, 9.7): a box, a circle and a rotated capsule
     // cast soft and hard shadows from a point light and a spot light. Additive
     // lights alone, or composited over an ambient darkness.
+    // Mesh gradient paints (11.2b): stops interpolate in linear space under --linear.
+    bool init_mesh_gradient() {
+        const vector::SvgResult svg = vector::parse_svg(
+            R"x(<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><defs>
+<linearGradient id="a" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff2020"/><stop offset="0.5" stop-color="#20ff20"/><stop offset="1" stop-color="#2020ff"/></linearGradient>
+<radialGradient id="b"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#802000" stop-opacity="0.6"/></radialGradient></defs>
+<rect x="0" y="0" width="100" height="40" fill="url(#a)"/><circle cx="50" cy="72" r="26" fill="url(#b)"/><rect x="2" y="42" width="20" height="10" fill="#808080"/></svg>)x",
+            "parity_gradient");
+        if (!svg.ok || !meshes_.init(d_)) return false;
+        vector::VectorMesh mesh;
+        vector::DocumentTessellator().build(svg.document, 0, mesh);
+        gradient_mesh_ = meshes_.create_mesh(mesh);
+        return static_cast<bool>(gradient_mesh_);
+    }
+
+    void mesh_gradient() {
+        const float s = static_cast<float>(target_size);
+        meshes_.clear();
+        meshes_.draw(gradient_mesh_, Affine2::translate({8.0f, 8.0f}) * Affine2::scale({2.2f, 2.2f}));
+        meshes_.draw(gradient_mesh_, Affine2::translate({140.0f, 140.0f}) * Affine2::scale({1.0f, 1.0f}),
+                     {1.0f, 1.0f, 1.0f, 0.7f});
+        meshes_.flush(render::virtual_to_ndc({s, s}));
+    }
+
     void lighting(bool ambient) {
         const float s = static_cast<float>(target_size);
         const Affine2 to_ndc = render::virtual_to_ndc({s, s});
@@ -485,9 +584,111 @@ private:
         colored_quad(0, blend_[0], 0, 0, 256, 128, {0.0f, 0.0f, 0.0f, 1.0f});
         colored_quad(1, blend_[0], 0, 128, 256, 128, {1.0f, 1.0f, 1.0f, 1.0f});
         const std::array<float, 4> color = {0.9f, 0.4f, 0.1f, 0.5f};
-        for (std::size_t b = 0; b < 4; ++b) {
-            colored_quad(2 + b, blend_[b], 12.0f + static_cast<float>(b) * 60.0f, 40, 48, 176, color);
+        for (std::size_t b = 0; b < 5; ++b) { // None, Alpha, Premultiplied, Additive, Screen
+            colored_quad(2 + b, blend_[b], 8.0f + static_cast<float>(b) * 50.0f, 40, 42, 176, color);
         }
+    }
+
+    // 11.2b: a pass into an offscreen target (MSAA edges, a transparent clear),
+    // a second pass that downsamples it into a smaller target, and the window
+    // drawn before and after the detour (its contents must survive it). The
+    // result is composited with alpha blending and additively.
+    void render_targets() {
+        d_.clear({0.1f, 0.1f, 0.14f, 1.0f});
+        colored_quad(0, blend_[0], 0, 0, 256, 20, {0.9f, 0.8f, 0.2f, 1.0f});
+        const rhi::RenderTargetHandle a = d_.create_render_target({128, 128, rhi::Filter::Linear, "parity_a"});
+        const rhi::RenderTargetHandle b = d_.create_render_target({64, 64, rhi::Filter::Linear, "parity_b"});
+        if (!a || !b) return;
+        d_.set_render_target(a);
+        d_.clear({0.0f, 0.0f, 0.0f, 0.0f});
+        colored_quad(1, blend_[1], 16, 16, 112, 112, {0.9f, 0.2f, 0.2f, 1.0f});
+        colored_quad(2, blend_[1], 112, 112, 128, 128, {0.2f, 0.8f, 0.3f, 0.6f});
+        {
+            const std::vector<ColorVertex> tri = {cv(128, 20, 0x4060ffff), cv(236, 110, 0x4060ffff), cv(60, 90, 0xffe040ff)};
+            const rhi::BufferHandle tb = make_buffer(rhi::BufferKind::Vertex, rhi::BufferUsage::Static, bytes(tri));
+            d_.bind_pipeline(blend_[1]);
+            d_.bind_vertex_buffer(0, tb);
+            use_params(3, 0, 0, 1, 1);
+            d_.draw(3);
+        }
+        d_.set_render_target(b);
+        d_.bind_pipeline(textured_);
+        d_.bind_vertex_buffer(0, target_quad_);
+        d_.bind_texture(0, d_.render_target_texture(a));
+        d_.bind_texture(1, mask_);
+        use_params(4, 0, 0, 256, 256, {1, 1, 1, 0}); // half-size copy: 2x2 box average
+        d_.draw(6);
+        d_.set_render_target({}); // back to the window, which still holds the strip
+        colored_quad(5, blend_[1], 0, 10, 256, 10, {0.2f, 0.7f, 0.9f, 0.5f});
+        d_.bind_pipeline(textured_);
+        d_.bind_vertex_buffer(0, target_quad_);
+        d_.bind_texture(0, d_.render_target_texture(a));
+        d_.bind_texture(1, mask_);
+        use_params(6, 0, 32, 128, 128, {1, 1, 1, 0});
+        d_.draw(6);
+        d_.bind_texture(0, d_.render_target_texture(b));
+        use_params(7, 140, 32, 112, 112, {1, 1, 1, 0}); // magnified, linear
+        d_.draw(6);
+        d_.bind_pipeline(textured_additive_);
+        use_params(8, 8, 176, 64, 64, {1, 1, 1, 0});
+        d_.draw(6);
+        d_.bind_texture(0, d_.render_target_texture(a));
+        use_params(9, 80, 176, 64, 64, {1, 1, 1, 0});
+        d_.draw(6);
+        d_.destroy_render_target(a);
+        d_.destroy_render_target(b);
+    }
+
+    // 11.2b: instanced SDF shapes composited normally, additively (sums, can
+    // exceed white) and with Screen (never exceeds white), in one flush.
+    void additive_glow() {
+        d_.clear({0.05f, 0.05f, 0.1f, 1.0f});
+        const float s = static_cast<float>(target_size);
+        const Affine2 to_ndc = render::virtual_to_ndc({s, s});
+        lit_shapes_.clear();
+        lit_shapes_.circle({70.0f, 60.0f}, 40.0f, {0.9f, 0.3f, 0.1f, 0.8f});
+        lit_shapes_.circle({100.0f, 60.0f}, 40.0f, {0.1f, 0.4f, 0.9f, 0.8f});
+        lit_shapes_.set_blend(render::SdfBlend::Additive);
+        lit_shapes_.circle({70.0f, 140.0f}, 40.0f, {0.9f, 0.3f, 0.1f, 0.8f});
+        lit_shapes_.circle({100.0f, 140.0f}, 40.0f, {0.1f, 0.4f, 0.9f, 0.8f});
+        lit_shapes_.circle({85.0f, 160.0f}, 40.0f, {0.2f, 0.9f, 0.2f, 0.8f});
+        lit_shapes_.set_blend(render::SdfBlend::Screen);
+        lit_shapes_.circle({190.0f, 140.0f}, 40.0f, {0.9f, 0.3f, 0.1f, 0.8f});
+        lit_shapes_.circle({220.0f, 140.0f}, 40.0f, {0.1f, 0.4f, 0.9f, 0.8f});
+        lit_shapes_.circle({205.0f, 160.0f}, 40.0f, {0.2f, 0.9f, 0.2f, 0.8f});
+        lit_shapes_.set_blend(render::SdfBlend::Normal);
+        lit_shapes_.circle({190.0f, 60.0f}, 30.0f, {0.9f, 0.9f, 0.2f, 0.5f});
+        lit_shapes_.flush(to_ndc, 1.0f);
+    }
+
+    // 11.2b post-processing: the frame is drawn into a render target and run
+    // through PostFx into the window. `grade`: LUT + CRT; otherwise bloom + vignette.
+    void post_scene(bool grade) {
+        const rhi::RenderTargetHandle scene = d_.create_render_target({target_size, target_size, rhi::Filter::Linear, "parity_scene"});
+        if (!scene) return;
+        d_.set_render_target(scene);
+        d_.clear({0.04f, 0.05f, 0.12f, 1.0f});
+        const float s = static_cast<float>(target_size);
+        lit_shapes_.clear();
+        lit_shapes_.circle({80.0f, 90.0f}, 34.0f, {1.0f, 0.95f, 0.7f, 1.0f});
+        lit_shapes_.ring({180.0f, 80.0f}, 28.0f, 8.0f, {0.4f, 0.9f, 1.0f, 1.0f});
+        lit_shapes_.rounded_rect({70.0f, 190.0f}, {40.0f, 20.0f}, 6.0f, 0.3f, {1.0f, 0.4f, 0.3f, 1.0f});
+        lit_shapes_.circle({190.0f, 190.0f}, 22.0f, {0.3f, 0.3f, 0.35f, 1.0f});
+        lit_shapes_.flush(render::virtual_to_ndc({s, s}), 1.0f);
+
+        render::PostSettings settings;
+        if (grade) {
+            settings.lut = lut_;
+            settings.lut_strength = 0.9f;
+            settings.crt = true;
+        } else {
+            settings.bloom = true;
+            settings.bloom_threshold = 0.55f;
+            settings.bloom_intensity = 1.0f;
+            settings.vignette = 0.6f;
+        }
+        post_.apply(scene, {target_size, target_size}, {}, settings);
+        d_.destroy_render_target(scene);
     }
 
     void points_lines() {
@@ -555,6 +756,162 @@ private:
         d_.bind_texture(0, blank_); // created without data: transparent black on both
         use_params(3, 132, 132, 116, 116, {1.0f, 1.0f, 1.0f, 0.5f});
         d_.draw(6);
+    }
+
+    // 11.2a: a 64x64 chain minified by powers of two lands exactly on one level
+    // (sizes on pixel edges), 24 px blends two levels (trilinear / nearest level),
+    // and an sRGB texture is decoded before sampling.
+    void mips() {
+        d_.bind_pipeline(textured_);
+        d_.bind_vertex_buffer(0, uv_quad_);
+        d_.bind_texture(1, mask_);
+        const float sizes[] = {64, 32, 16, 8, 4, 24, 12};
+        std::size_t slot = 0;
+        for (int f = 1; f >= 0; --f) { // linear row first
+            d_.bind_texture(0, mips_[f]);
+            float x = 8;
+            const float y = f == 1 ? 8.0f : 84.0f;
+            for (float size : sizes) {
+                use_params(slot++, x, y, size, size, {1, 1, 1, 0});
+                d_.draw(6);
+                x += size + 8;
+            }
+        }
+        d_.bind_texture(0, srgb_);
+        use_params(slot, 8, 160, 128, 32, {1, 1, 1, 0});
+        d_.draw(6);
+    }
+
+    // Deterministic 16x16 sprites (asymmetric, so flips show) plus a 48x48 one and
+    // a soft round one with partial alpha.
+    static assets::Image make_sprite_image(int k, int size) {
+        assets::Image img;
+        img.width = img.height = size;
+        img.rgba.resize(static_cast<std::size_t>(size) * static_cast<std::size_t>(size) * 4);
+        for (int y = 0; y < size; ++y) {
+            for (int x = 0; x < size; ++x) {
+                std::uint8_t* t = &img.rgba[static_cast<std::size_t>((y * size + x) * 4)];
+                const int u = x * 255 / (size - 1), v = y * 255 / (size - 1);
+                t[0] = static_cast<std::uint8_t>((u + k * 60) & 255);
+                t[1] = static_cast<std::uint8_t>(v);
+                t[2] = ((x / 2 + y / 2) & 1) ? 200 : 40;
+                t[3] = 255;
+                if (x < size / 4 && y < size / 4) t[0] = t[1] = t[2] = 255; // top-left mark
+                if (k == 3) { // round, soft edge
+                    const float dx = static_cast<float>(x) - static_cast<float>(size - 1) * 0.5f;
+                    const float dy = static_cast<float>(y) - static_cast<float>(size - 1) * 0.5f;
+                    const float r = std::sqrt(dx * dx + dy * dy) / (static_cast<float>(size) * 0.5f);
+                    t[3] = static_cast<std::uint8_t>(std::clamp(255.0f * (1.4f - 1.4f * r), 0.0f, 255.0f));
+                }
+            }
+        }
+        return img;
+    }
+
+    // A 9-slice source: a 6 texel border (darker, with a stripe) around a light middle.
+    static assets::Image make_panel_image(int size) {
+        assets::Image img;
+        img.width = img.height = size;
+        img.rgba.resize(static_cast<std::size_t>(size) * static_cast<std::size_t>(size) * 4);
+        for (int y = 0; y < size; ++y) {
+            for (int x = 0; x < size; ++x) {
+                std::uint8_t* t = &img.rgba[static_cast<std::size_t>((y * size + x) * 4)];
+                const bool border = x < 6 || y < 6 || x >= size - 6 || y >= size - 6;
+                const bool corner = (x < 6 || x >= size - 6) && (y < 6 || y >= size - 6);
+                t[0] = border ? (corner ? 230 : 40) : 190;
+                t[1] = border ? (corner ? 120 : 60) : 215;
+                t[2] = border ? (corner ? 40 : 150) : 235;
+                t[3] = 255;
+                if (border && !corner && ((x + y) & 3) == 0) t[0] = t[1] = t[2] = 120; // stretch shows
+            }
+        }
+        return img;
+    }
+
+    bool init_sprites() {
+        std::vector<assets::AtlasInput> inputs;
+        inputs.push_back({"a", make_sprite_image(0, 16)});
+        inputs.push_back({"b", make_sprite_image(1, 16)});
+        inputs.push_back({"c", make_sprite_image(2, 16)});
+        inputs.push_back({"round", make_sprite_image(3, 16)});
+        inputs.push_back({"big", make_sprite_image(4, 48)});
+        inputs.push_back({"panel", make_panel_image(24)});
+        // SVG raster fallback (11.2a): rasterized by the engine's own rasterizer at 2 px per unit.
+        const assets::SvgRasterResult svg = assets::rasterize_svg(
+            R"x(<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffd23f"/><stop offset="1" stop-color="#ee4266"/></linearGradient></defs><circle cx="8" cy="8" r="6.5" fill="url(#g)" stroke="#1b1b3a" stroke-width="1.5"/><rect x="5" y="7" width="6" height="2" fill="#ffffff"/></svg>)x",
+            2.0f, "parity");
+        if (!svg.raster) return false;
+        inputs.push_back({"svg", svg.raster->image});
+        assets::AtlasResult packed = assets::pack_atlas(inputs);
+        if (!packed.atlas || packed.atlas->pages.size() != 1) {
+            LOG_ERROR("rhi_parity: sprite atlas failed: {}", packed.error);
+            return false;
+        }
+        atlas_ = std::move(*packed.atlas);
+        // build_texture(srgb = true) averages mips in linear light; the GPU still samples the
+        // stored bytes as display-referred (create_sprite_texture).
+        const assets::TextureData tex = assets::build_texture(atlas_.pages[0], true);
+        atlas_w_ = tex.width;
+        atlas_h_ = tex.height;
+        sprite_atlas_[0] = render::create_sprite_texture(d_, tex, rhi::Filter::Nearest, "parity_atlas_nearest");
+        sprite_atlas_[1] = render::create_sprite_texture(d_, tex, rhi::Filter::Linear, "parity_atlas_linear");
+        return sprite_atlas_[0] && sprite_atlas_[1] && sprite_batcher_.init(d_, 64);
+    }
+
+    render::SpriteUv frame_uv(const char* name, bool fx = false, bool fy = false) const {
+        const assets::AtlasFrame* f = atlas_.find(name);
+        return f ? render::sprite_uv(*f, atlas_w_, atlas_h_, fx, fy) : render::SpriteUv{};
+    }
+
+    void sprites() {
+        const Affine2 to_ndc = render::virtual_to_ndc({256.0f, 256.0f});
+        lit_shapes_.clear();
+        lit_shapes_.rounded_rect({128.0f, 128.0f}, {124.0f, 124.0f}, 6.0f, 0.0f, {0.18f, 0.2f, 0.28f, 1.0f});
+        lit_shapes_.flush(to_ndc, 1.0f);
+
+        sprite_batcher_.clear();
+        const rhi::Color white{1, 1, 1, 1};
+        // Rows 1 and 2: the same frames with the nearest and the linear texture, 16 -> 32 px.
+        const char* names[] = {"a", "b", "c", "a"};
+        for (int row = 0; row < 2; ++row) {
+            for (int i = 0; i < 4; ++i) {
+                const bool fx = i == 2, fy = i == 3;
+                rhi::Color tint = white;
+                if (row == 1 && i == 1) tint = {1.0f, 0.4f, 0.4f, 1.0f};
+                if (row == 1 && i == 2) tint = {0.4f, 1.0f, 0.6f, 0.6f};
+                sprite_batcher_.add(sprite_atlas_[row], {24.0f + 56.0f * static_cast<float>(i), 24.0f + 40.0f * static_cast<float>(row)},
+                                    {32, 32}, 0.0f, frame_uv(names[i], fx, fy), tint);
+            }
+        }
+        // Row 3: the 48 px sprite minified 4:1 (mip level 2), a source sub-rect magnified,
+        // a soft-edged round sprite over the backdrop, and a rotated one.
+        if (const assets::AtlasFrame* big = atlas_.find("big")) {
+            sprite_batcher_.add(sprite_atlas_[1], {24, 104}, {12, 12}, 0.0f, frame_uv("big"));
+            sprite_batcher_.add(sprite_atlas_[1], {64, 104}, {24, 24}, 0.0f, frame_uv("big"));
+            sprite_batcher_.add(sprite_atlas_[0], {120, 104}, {32, 32}, 0.0f,
+                                render::sprite_uv(atlas_w_, atlas_h_, big->x + 8, big->y + 8, 8, 8));
+        }
+        sprite_batcher_.add(sprite_atlas_[1], {176, 104}, {40, 40}, 0.0f, frame_uv("round"));
+        sprite_batcher_.add(sprite_atlas_[1], {224, 104}, {32, 32}, 0.0f, frame_uv("round"), {1.0f, 0.8f, 0.2f, 1.0f});
+        // Row 4: many instances of one texture are one draw; rotated sprites.
+        for (int i = 0; i < 5; ++i) {
+            sprite_batcher_.add(sprite_atlas_[0], {24.0f + 28.0f * static_cast<float>(i), 160.0f}, {16, 16}, 0.0f,
+                                frame_uv(names[i % 3], (i & 1) != 0, false));
+        }
+        // 9-slice (nearest and linear, one rotated) of the 24 px panel: 6 texel borders kept, the
+        // middle stretched; and the SVG raster fallback sprite.
+        if (const assets::AtlasFrame* panel = atlas_.find("panel")) {
+            const render::SpriteUv puv = render::sprite_uv(*panel, atlas_w_, atlas_h_);
+            const render::NinePatchMargins margins{6, 6, 6, 6};
+            render::add_nine_patch(sprite_batcher_, sprite_atlas_[0], puv, 24, 24, margins, {188, 152}, {88, 32}, 0.0f);
+            render::add_nine_patch(sprite_batcher_, sprite_atlas_[1], puv, 24, 24, margins, {232, 190}, {40, 44}, 0.0f,
+                                   {1, 1, 1, 1}, false);
+            render::add_nine_patch(sprite_batcher_, sprite_atlas_[1], puv, 24, 24, margins, {228, 232}, {40, 20}, 0.3f);
+        }
+        sprite_batcher_.add(sprite_atlas_[1], {112, 190}, {32, 32}, 0.0f, frame_uv("svg"));
+        sprite_batcher_.add(sprite_atlas_[1], {64, 216}, {48, 48}, 0.5f, frame_uv("b"));
+        sprite_batcher_.add(sprite_atlas_[1], {160, 216}, {48, 24}, -0.3f, frame_uv("a"), {1, 1, 1, 0.8f});
+        sprite_batcher_.flush(to_ndc);
     }
 
     void buffer_updates() {
@@ -656,12 +1013,22 @@ private:
 
     rhi::Device& d_;
     render::LightBatcher lights_;
+    render::MeshBatcher meshes_;
+    render::MeshHandle gradient_mesh_;
+    render::PostFx post_;
     render::SdfBatcher lit_shapes_;
-    std::array<rhi::PipelineHandle, 4> blend_{};
+    std::array<rhi::PipelineHandle, 5> blend_{};
+    rhi::PipelineHandle textured_additive_;
+    rhi::BufferHandle target_quad_;
     rhi::PipelineHandle strip_, points_, lines_, line_strip_, instanced_, textured_;
     rhi::BufferHandle params_, palette_, quad_, uv_quad_, dynamic_, stream_, big_stream_, bv_vertices_, bv_indices_;
     std::array<rhi::TextureHandle, 2> checker_{};
-    rhi::TextureHandle mask_, blank_;
+    rhi::TextureHandle mask_, blank_, srgb_, lut_;
+    rhi::TextureHandle sprite_atlas_[2]; // nearest, linear
+    assets::Atlas atlas_;
+    std::int32_t atlas_w_ = 0, atlas_h_ = 0;
+    render::SpriteBatcher sprite_batcher_;
+    rhi::TextureHandle mips_[2]; // nearest, linear
     std::vector<rhi::BufferHandle> owned_buffers_;
     std::size_t align_ = 256;
 };
@@ -670,6 +1037,7 @@ struct DeviceArgs {
     rhi::Backend backend = rhi::Backend::OpenGL;
     bool gl_es = false;
     rhi::Tier tier = rhi::Tier::Compatible;
+    bool linear = false; // --linear: DeviceOptions::linear_color (4.19)
 };
 
 bool parse_device_args(int argc, char** argv, DeviceArgs& out) {
@@ -678,6 +1046,7 @@ bool parse_device_args(int argc, char** argv, DeviceArgs& out) {
         return false;
     }
     out.gl_es = has_flag(argc, argv, "--gl-es");
+    out.linear = has_flag(argc, argv, "--linear");
     if (const std::string_view tier = arg_value(argc, argv, "--tier"); !tier.empty() && !rhi::parse_tier(tier, out.tier)) {
         LOG_ERROR("--tier must be compatible or full");
         return false;
@@ -701,6 +1070,7 @@ std::unique_ptr<rhi::Device> open(Window& window, const DeviceArgs& args) {
     rhi::DeviceOptions options;
     options.vsync = false;
     options.tier = args.tier;
+    options.linear_color = args.linear;
     return rhi::create_device(args.backend, window, options);
 }
 
@@ -757,7 +1127,26 @@ int render_scenes(int argc, char** argv) {
         return 1;
     }
     int failures = 0;
+    // --linear renders like a linear-color game (game_runner): the scene goes to a
+    // render target, PostFx's composite pass encodes it for the window. Only scenes
+    // that draw straight to the window take part (the render-target scenes manage
+    // their own targets).
+    const bool linear = device->info().linear_color;
+    render::PostFx composite;
+    rhi::RenderTargetHandle scene_target;
+    if (linear) {
+        if (!composite.init(*device)) {
+            LOG_ERROR("--linear: the composite pass is unavailable");
+            return 1;
+        }
+        scene_target = device->create_render_target({target_size, target_size, rhi::Filter::Linear, "parity_scene"});
+    }
+    static constexpr std::string_view linear_scenes[] = {"mesh_gradient", "lighting_shadows", "lighting_ambient",
+                                                         "sprites", "blend_modes", "textures"};
     for (auto& [name, draw] : scenes.list()) {
+        if (linear && std::find(std::begin(linear_scenes), std::end(linear_scenes), name) == std::end(linear_scenes)) {
+            continue;
+        }
         const fs::path file = out / (name + ".ppm");
         fs::remove(file, ec);
         // A few attempts: a Vulkan swapchain may need a frame or two to settle.
@@ -765,8 +1154,15 @@ int render_scenes(int argc, char** argv) {
             DeviceState devices;
             window.poll_events(devices);
             device->begin_frame(window.pixel_size());
-            device->clear({0.08f, 0.09f, 0.12f, 1.0f});
+            const rhi::Color clear{0.08f, 0.09f, 0.12f, 1.0f};
+            if (linear) {
+                device->set_render_target(scene_target);
+                device->clear(render::srgb_to_linear(clear));
+            } else {
+                device->clear(clear);
+            }
             draw();
+            if (linear) composite.apply(scene_target, {target_size, target_size}, {}, {});
             device->capture_frame(file.string());
             device->end_frame();
         }
@@ -776,7 +1172,7 @@ int render_scenes(int argc, char** argv) {
         }
     }
     // Base vertex: on a device that may use it, it must equal the reference.
-    if (device->info().supports(rhi::Feature::BaseVertexDraws)) {
+    if (!linear && device->info().supports(rhi::Feature::BaseVertexDraws)) {
         const auto a = read_ppm(out / "base_vertex.ppm");
         const auto b = read_ppm(out / "base_vertex_reference.ppm");
         const Diff d = a && b ? diff_images(*a, *b, 0) : Diff{};
@@ -788,6 +1184,8 @@ int render_scenes(int argc, char** argv) {
         }
     }
     scenes.shutdown();
+    composite.shutdown();
+    if (scene_target) device->destroy_render_target(scene_target);
     device.reset();
     window.destroy();
     LOG_INFO("Rendered {} scenes to '{}' ({}{}, {} tier)", scenes.list().size(), out.string(),
@@ -801,6 +1199,7 @@ int compare(int argc, char** argv) {
     const fs::path b(argv[3]);
     const std::string_view tol = arg_value(argc, argv, "--tolerance");
     const std::string_view frac = arg_value(argc, argv, "--max-fraction");
+    const bool expect_different = has_flag(argc, argv, "--expect-different");
     const int tolerance = tol.empty() ? 2 : std::atoi(std::string(tol).c_str());
     const double max_fraction = frac.empty() ? 0.0 : std::atof(std::string(frac).c_str());
     std::vector<std::pair<fs::path, fs::path>> pairs;
@@ -835,7 +1234,7 @@ int compare(int argc, char** argv) {
             continue;
         }
         const double fraction = static_cast<double>(d.interior) / static_cast<double>(std::max<std::size_t>(d.pixels, 1));
-        const bool ok = fraction <= max_fraction;
+        const bool ok = expect_different ? d.differing > 0 : fraction <= max_fraction;
         std::printf("%s %-28s max diff %3d | %6zu px > %d: %6zu on edges, %6zu interior (%.4f%%)\n",
                     ok ? "ok  " : "FAIL", pa.filename().string().c_str(), d.max_channel, d.differing, tolerance,
                     d.differing - d.interior, d.interior, fraction * 100.0);
@@ -916,10 +1315,99 @@ int frames(int argc, char** argv) {
     return failures == 0 ? 0 : 1;
 }
 
+// Renders scenes to the main window and to a second window's surface
+// (Feature::MultiSurface) on one device, interleaved, and requires the two
+// captures to be identical: shared resources, per-surface swapchain / context.
+int surfaces(int argc, char** argv) {
+    DeviceArgs args;
+    if (!parse_device_args(argc, argv, args)) return 2;
+    const fs::path out(arg_value(argc, argv, "--out"));
+    if (out.empty()) {
+        LOG_ERROR("--out <dir> is required");
+        return 2;
+    }
+    std::error_code ec;
+    fs::create_directories(out, ec);
+    Window window;
+    auto device = open(window, args);
+    if (!device) return 1;
+    if (!device->info().supports(rhi::Feature::MultiSurface)) {
+        LOG_INFO("{} has no multi-surface support: skipped", rhi::backend_name(args.backend));
+        device.reset();
+        return 0;
+    }
+    SDL_Window* second = rhi::create_surface_window(args.backend, "rhi_parity second", target_size, target_size, false);
+    if (!second) return 1;
+    const rhi::SurfaceHandle surface = device->create_window_surface(second);
+    if (!surface) return 1;
+    Scenes scenes(*device);
+    if (!scenes.init()) return 1;
+    int failures = 0;
+    constexpr int warmup = 4; // a Vulkan swapchain may need a frame or two to settle
+    for (auto& [name, draw] : scenes.list()) {
+        if (name != "triangles_and_strip" && name != "textures" && name != "blend_modes" && name != "sprites") continue;
+        const fs::path main_file = out / (name + "_main.ppm");
+        const fs::path second_file = out / (name + "_second.ppm");
+        fs::remove(main_file, ec);
+        fs::remove(second_file, ec);
+        for (int frame = 0; frame < warmup + 2; ++frame) {
+            const bool last = frame >= warmup;
+            device->begin_frame(window.pixel_size());
+            device->clear({0.08f, 0.09f, 0.12f, 1.0f});
+            draw();
+            if (last) device->capture_frame(main_file.string());
+            device->end_frame();
+            int w = 0, h = 0;
+            SDL_GetWindowSizeInPixels(second, &w, &h);
+            device->begin_frame_surface(surface, {w, h});
+            device->clear({0.08f, 0.09f, 0.12f, 1.0f});
+            draw();
+            if (last) device->capture_frame(second_file.string());
+            device->end_frame_surface();
+        }
+        const auto a = read_ppm(main_file);
+        const auto b = read_ppm(second_file);
+        const Diff d = a && b ? diff_images(*a, *b, 0) : Diff{};
+        if (!a || !b || !d.same_size || d.differing != 0) {
+            LOG_ERROR("{}: the second surface differs from the main window ({} pixels)", name, d.differing);
+            ++failures;
+        } else {
+            LOG_INFO("{}: second surface identical to the main window", name);
+        }
+    }
+    scenes.shutdown();
+    device->destroy_window_surface(surface);
+    SDL_DestroyWindow(second);
+    device.reset();
+    window.destroy();
+    return failures == 0 ? 0 : 1;
+}
+
+// Imports a TTF/OTF as a shaping-enabled Latin + Arabic .efont. The runtime's own
+// --font import has no range options, so the web smoke project (tools/web/render_game)
+// builds its default font here; the web build only reads .efont files.
+int font_command(const char* ttf, const char* out) {
+    std::vector<std::byte> data;
+    if (!vector::read_file(ttf, data)) {
+        LOG_ERROR("cannot read '{}'", ttf);
+        return 1;
+    }
+    render::FontImportOptions options;
+    options.ranges = {{0x20, 0x7E}, {0x600, 0x6FF}, {0xFB50, 0xFDFF}, {0xFE70, 0xFEFF}};
+    options.em_size = 32.0f;
+    options.shaping = true;
+    const auto font = render::import_font(data, "web_smoke_font", options);
+    if (!font || !vector::write_file(out, render::serialize_font_atlas(*font))) return 1;
+    LOG_INFO("Imported '{}' -> '{}' ({} glyphs)", ttf, out, font->glyphs.size());
+    return 0;
+}
+
 int usage() {
     std::fputs("usage:\n"
+               "  rhi_parity font <font.ttf> <out.efont>   (Latin + Arabic, shaping data kept)\n"
                "  rhi_parity render --backend gl|vulkan|webgpu [--gl-es] [--tier compatible|full] --out <dir>\n"
                "  rhi_parity frames --backend gl|vulkan|webgpu [--gl-es] [--count <n>] --out <dir>\n"
+               "  rhi_parity surfaces --backend gl|vulkan|webgpu [--gl-es] --out <dir>\n"
                "  rhi_parity compare <a.ppm|dirA> <b.ppm|dirB> [--tolerance <0-255>] [--max-fraction <f>]\n"
                "  rhi_parity features --backend gl|vulkan|webgpu [--gl-es]\n",
                stderr);
@@ -933,7 +1421,9 @@ int main(int argc, char** argv) {
     const std::string_view cmd = argv[1];
     if (cmd == "render") return render_scenes(argc, argv);
     if (cmd == "frames") return frames(argc, argv);
+    if (cmd == "surfaces") return surfaces(argc, argv);
     if (cmd == "compare") return argc >= 4 ? compare(argc, argv) : usage();
     if (cmd == "features") return features(argc, argv);
+    if (cmd == "font") return argc >= 4 ? font_command(argv[2], argv[3]) : usage();
     return usage();
 }

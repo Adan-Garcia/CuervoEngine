@@ -35,6 +35,7 @@ struct State {
     std::atomic<bool> enabled{false};
     std::atomic<std::thread::id> main_thread{};
     std::atomic<ClockFn> clock{&steady_ns};
+    std::atomic<SpanSink> sink{nullptr};
 
     // Registry: written under `registry_mutex` (any thread), names published
     // by the release store of `zone_count`.
@@ -78,6 +79,10 @@ void each_frame(const State& s, Fn&& fn) {
 } // namespace
 
 void set_clock(ClockFn clock) { state().clock.store(clock != nullptr ? clock : &steady_ns); }
+
+std::uint64_t clock_ns() { return now(state()); }
+
+void set_span_sink(SpanSink sink) { state().sink.store(sink); }
 
 void set_enabled(bool on) {
     State& s = state();
@@ -137,6 +142,7 @@ void end_zone(ZoneId id) {
     const std::uint64_t t = now(s);
     s.current.ms[id] += static_cast<float>(static_cast<double>(t - open.start) / 1e6);
     ++s.current.calls[id];
+    if (const SpanSink sink = s.sink.load(std::memory_order_relaxed)) sink(s.names[id], open.start, t);
 }
 
 #if CUERVO_PROFILING

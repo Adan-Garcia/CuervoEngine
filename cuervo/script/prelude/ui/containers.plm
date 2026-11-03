@@ -4,7 +4,32 @@
 // GridContainer, FlowContainer, SplitContainer, AspectRatioContainer, ScrollContainer.
 
 // A control that arranges its children; the base of VBox, HBox, Margin, Panel and Center.
-class Container extends Control {}
+//
+// Right-to-left locales (DESIGN.md 4.19 "11.3"): when `Locale.is_rtl()` and
+// `UI.x.mirror_rtl` are both true, Box, Margin, Grid, Flow and AspectRatio
+// containers lay their children out mirrored left to right (an HBox stacks
+// right to left, a Margin's left margin sits at the right). Set `mirror` to
+// false on a container whose order is not text-like (a numeric keypad, a
+// timeline). A horizontal SplitContainer puts its first child on the right
+// (the bar still follows the pointer and the arrow keys physically), and a
+// ScrollContainer draws its vertical bar on the left and starts horizontal
+// scrolling at the right edge.
+class Container extends Control {
+    // False keeps this container's children in left-to-right order in right-to-left locales.
+    @export var mirror = true
+    // True when this container's layout is mirrored: a right-to-left locale, UI.x.mirror_rtl and `mirror` all on.
+    fn is_mirrored() -> bool {
+        return mirror && UI.x.mirror_rtl && Locale.is_rtl()
+    }
+    // Places a child like set_rect, mirrored inside this container's rect when the locale reads right to left.
+    fn place_child(k: Control, pos: vec2, sz: vec2) {
+        if is_mirrored() {
+            k.set_rect(vec2(position.x + size.x - (pos.x - position.x) - sz.x, pos.y), sz)
+        } else {
+            k.set_rect(pos, sz)
+        }
+    }
+}
 
 // Stacks visible children (VBox: top to bottom, HBox: left to right) at
 // their minimum size along the stack, filling the other direction. Space
@@ -69,9 +94,9 @@ class BoxContainer extends Container {
                     len += extra / (expanders as float)
                 }
                 if vertical() {
-                    k.set_rect(position + vec2(0.0, cursor), vec2(size.x, len))
+                    place_child(k, position + vec2(0.0, cursor), vec2(size.x, len))
                 } else {
-                    k.set_rect(position + vec2(cursor, 0.0), vec2(len, size.y))
+                    place_child(k, position + vec2(cursor, 0.0), vec2(len, size.y))
                 }
                 cursor += len
             }
@@ -114,7 +139,7 @@ class Margin extends Container {
         var i = inset()
         for c in children {
             if c is Control k && !k.floating() {
-                k.set_rect(position + vec2(i.x, i.y), (size - vec2(i.x + i.z, i.y + i.w)).max(vec2(0.0, 0.0)))
+                place_child(k, position + vec2(i.x, i.y), (size - vec2(i.x + i.z, i.y + i.w)).max(vec2(0.0, 0.0)))
             }
         }
     }
@@ -282,7 +307,7 @@ class GridContainer extends Container {
         for i in 0..list.len() {
             var cx = i % cols
             var ry = i / cols
-            list[i].set_rect(position + vec2(xs[cx], ys[ry]), vec2(w[cx], h[ry]))
+            place_child(list[i], position + vec2(xs[cx], ys[ry]), vec2(w[cx], h[ry]))
         }
     }
 }
@@ -330,7 +355,7 @@ class FlowContainer extends Container {
                     first = true
                 }
                 if place {
-                    k.set_rect(position + (vertical ? vec2(line, a) : vec2(a, line)), m)
+                    place_child(k, position + (vertical ? vec2(line, a) : vec2(a, line)), m)
                 }
                 a += len + along_gap
                 used_along = max(used_along, a - along_gap)
@@ -418,9 +443,16 @@ class SplitContainer extends Container {
             emit split_changed(x)
         }
     }
+    // True when the first child is on the right: a horizontal split in a right-to-left locale.
+    fn flipped() -> bool {
+        return !vertical && is_mirrored()
+    }
     // Top-left corner of the bar.
     fn bar_rect_pos() -> vec2 {
         var f = first_length()
+        if flipped() {
+            return position + vec2(size.x - f - bar_size, 0.0)
+        }
         return vertical ? position + vec2(0.0, f) : position + vec2(f, 0.0)
     }
     // Size of the bar.
@@ -458,6 +490,10 @@ class SplitContainer extends Container {
         if d == 0.0 || disabled {
             return false
         }
+        // The bar moves the way the key points: toward the first child's side shrinks the second.
+        if flipped() {
+            d = 0.0 - d
+        }
         set_split(split + d * handle_step / available())
         return true
     }
@@ -469,7 +505,11 @@ class SplitContainer extends Container {
     fn pointer_drag(p: vec2) {
         if !disabled {
             var origin = vertical ? position.y : position.x
-            set_split((along(p) - origin - bar_size * 0.5) / available())
+            var d = along(p) - origin - bar_size * 0.5
+            if flipped() {
+                d = (position.x + size.x - p.x) - bar_size * 0.5
+            }
+            set_split(d / available())
         }
     }
     // The bar plus the first two children's minimum sizes along the split, and the larger across.
@@ -499,8 +539,8 @@ class SplitContainer extends Container {
             p[0].set_rect(position, vec2(size.x, f))
             p[1].set_rect(position + vec2(0.0, f + bar_size), vec2(size.x, max(size.y - f - bar_size, 0.0)))
         } else {
-            p[0].set_rect(position, vec2(f, size.y))
-            p[1].set_rect(position + vec2(f + bar_size, 0.0), vec2(max(size.x - f - bar_size, 0.0), size.y))
+            place_child(p[0], position, vec2(f, size.y))
+            place_child(p[1], position + vec2(f + bar_size, 0.0), vec2(max(size.x - f - bar_size, 0.0), size.y))
         }
     }
     // Draws the bar with a grip line, highlighted while focused.
@@ -557,7 +597,7 @@ class AspectRatioContainer extends Container {
         var at = position + (size - cs) * align
         for c in children {
             if c is Control k && k.in_layout() {
-                k.set_rect(at, cs)
+                place_child(k, at, cs)
             }
         }
     }
@@ -609,6 +649,7 @@ class ScrollContainer extends Container {
     var _drag_from = vec2(0.0, 0.0)
     var _drag_scroll = vec2(0.0, 0.0)
     var _bar_vertical = true
+    var _lead = 0.0                // width the vertical bar takes on the left (right-to-left locales)
 
     // Always clips: the content outside the view is hidden.
     fn clips_children() -> bool {
@@ -704,7 +745,12 @@ class ScrollContainer extends Container {
         return null
     }
     // Scrolls so the rectangle (relative to the content's top-left) is inside the view.
-    fn reveal(rel_pos: vec2, rel_size: vec2) {
+    fn reveal(rel_pos0: vec2, rel_size: vec2) {
+        var rel_pos = rel_pos0
+        if is_mirrored() {
+            // Offsets count from the right edge there.
+            rel_pos = vec2(_content.x - rel_pos0.x - rel_size.x, rel_pos0.y)
+        }
         var s = scroll
         if rel_pos.y < s.y {
             s.y = rel_pos.y
@@ -740,6 +786,7 @@ class ScrollContainer extends Container {
         }
         var cs = vec2(horizontal ? max(need.x, view.x) : view.x, vertical ? max(need.y, view.y) : view.y)
         _view = view.max(vec2(0.0, 0.0))
+        _lead = is_mirrored() && view.x < size.x ? size.x - view.x : 0.0
         _content = cs
         // The content still sits where the last layout put it: a newly
         // focused control's offset in it is what to scroll into view.
@@ -749,7 +796,12 @@ class ScrollContainer extends Container {
         }
         _seen_focus = UI.focused
         set_scroll(scroll)
-        c.set_rect(position - scroll, cs)
+        if is_mirrored() {
+            // Horizontal scrolling starts at the right edge: scroll.x moves the content to the right.
+            c.set_rect(vec2(position.x + _lead + _view.x - cs.x + scroll.x, position.y - scroll.y), cs)
+        } else {
+            c.set_rect(position - scroll, cs)
+        }
     }
     // Starts a drag: on a scroll bar it jumps the thumb to the pointer, elsewhere it drags the content.
     fn pointer_down(p: vec2) {
@@ -757,7 +809,8 @@ class ScrollContainer extends Container {
         _drag_scroll = scroll
         _drag = 2
         var bw = bar_width()
-        if needs_vertical_bar() && p.x >= position.x + size.x - bw {
+        var on_vbar = is_mirrored() ? p.x < position.x + bw : p.x >= position.x + size.x - bw
+        if needs_vertical_bar() && on_vbar {
             _drag = 1
             _bar_vertical = true
         } else if needs_horizontal_bar() && p.y >= position.y + size.y - bw {
@@ -772,7 +825,8 @@ class ScrollContainer extends Container {
                 set_scroll(vec2(scroll.x, (p.y - position.y - thumb_length(true) * 0.5) / track * ms.y))
             } else {
                 var track = max(_view.x - thumb_length(false), 1.0)
-                set_scroll(vec2((p.x - position.x - thumb_length(false) * 0.5) / track * ms.x, scroll.y))
+                var rel = (p.x - position.x - _lead - thumb_length(false) * 0.5) / track
+                set_scroll(vec2((is_mirrored() ? 1.0 - rel : rel) * ms.x, scroll.y))
             }
             _drag_from = p
             _drag_scroll = scroll
@@ -781,7 +835,11 @@ class ScrollContainer extends Container {
     // Continues the drag started in pointer_down(): moves the thumb or the content.
     fn pointer_drag(p: vec2) {
         if _drag == 2 {
-            set_scroll(_drag_scroll - (p - _drag_from))
+            var moved = p - _drag_from
+            if is_mirrored() {
+                moved = vec2(0.0 - moved.x, moved.y)
+            }
+            set_scroll(_drag_scroll - moved)
         } else if _drag == 1 {
             var ms = max_scroll()
             if _bar_vertical {
@@ -789,7 +847,8 @@ class ScrollContainer extends Container {
                 set_scroll(vec2(scroll.x, _drag_scroll.y + (p.y - _drag_from.y) / track * ms.y))
             } else {
                 var track = max(_view.x - thumb_length(false), 1.0)
-                set_scroll(vec2(_drag_scroll.x + (p.x - _drag_from.x) / track * ms.x, scroll.y))
+                var dx = (p.x - _drag_from.x) / track * ms.x
+                set_scroll(vec2(_drag_scroll.x + (is_mirrored() ? 0.0 - dx : dx), scroll.y))
             }
         }
     }
@@ -822,13 +881,18 @@ class ScrollContainer extends Container {
         if needs_vertical_bar() {
             var len = thumb_length(true)
             var y = position.y + (_view.y - len) * (scroll.y / ms.y)
-            g.rect(vec2(position.x + size.x - bw, position.y), vec2(bw, _view.y), fill = t.panel, radius = bw * 0.5)
-            g.rect(vec2(position.x + size.x - bw + 1.0, y), vec2(bw - 2.0, len), fill = t.text_dim, radius = bw * 0.5)
+            var bx = is_mirrored() ? position.x : position.x + size.x - bw
+            g.rect(vec2(bx, position.y), vec2(bw, _view.y), fill = t.panel, radius = bw * 0.5)
+            g.rect(vec2(bx + 1.0, y), vec2(bw - 2.0, len), fill = t.text_dim, radius = bw * 0.5)
         }
         if needs_horizontal_bar() {
             var len = thumb_length(false)
-            var x = position.x + (_view.x - len) * (scroll.x / ms.x)
-            g.rect(vec2(position.x, position.y + size.y - bw), vec2(_view.x, bw), fill = t.panel, radius = bw * 0.5)
+            var frac = scroll.x / ms.x
+            if is_mirrored() {
+                frac = 1.0 - frac
+            }
+            var x = position.x + _lead + (_view.x - len) * frac
+            g.rect(vec2(position.x + _lead, position.y + size.y - bw), vec2(_view.x, bw), fill = t.panel, radius = bw * 0.5)
             g.rect(vec2(x, position.y + size.y - bw + 1.0), vec2(len, bw - 2.0), fill = t.text_dim, radius = bw * 0.5)
         }
     }

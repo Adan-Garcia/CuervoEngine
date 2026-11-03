@@ -18,6 +18,7 @@ std::string_view asset_kind_name(AssetKind kind) {
         case AssetKind::Sound: return "sound";
         case AssetKind::Vector: return "vector";
         case AssetKind::Image: return "image";
+        case AssetKind::Atlas: return "atlas";
         case AssetKind::Replay: return "replay";
         case AssetKind::Project: return "project";
         case AssetKind::Other: return "file";
@@ -34,7 +35,8 @@ AssetKind asset_kind_of(const fs::path& path) {
     if (ext == ".ttf" || ext == ".otf" || ext == ".efont") return AssetKind::Font;
     if (ext == ".wav" || ext == ".ogg" || ext == ".flac" || ext == ".mp3") return AssetKind::Sound;
     if (ext == ".svg" || ext == ".evec") return AssetKind::Vector;
-    if (ext == ".png" || ext == ".jpg" || ext == ".jpeg") return AssetKind::Image;
+    if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".qoi") return AssetKind::Image;
+    if (ext == ".atlas" || ext == ".catlas") return AssetKind::Atlas;
     if (ext == ".replay") return AssetKind::Replay;
     return AssetKind::Other;
 }

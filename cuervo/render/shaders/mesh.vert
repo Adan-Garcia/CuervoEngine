@@ -20,11 +20,20 @@ layout(location = 0) out vec2 v_local;
 layout(location = 1) out vec4 v_color;
 layout(location = 2) flat out uint v_paint;
 
+// Authored colors are sRGB; with linear color (Globals.row0.w = 1, 4.19) shading
+// and blending happen in linear space, so convert once per instance here.
+vec4 working_color(vec4 c) {
+    if (globals.row0.w > 0.5) {
+        c.rgb = mix(c.rgb / 12.92, pow((c.rgb + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c.rgb));
+    }
+    return c;
+}
+
 void main() {
     vec3 local = vec3(a_position, 1.0);
     vec3 world = vec3(dot(i_row0, local), dot(i_row1, local), 1.0);
     gl_Position = vec4(dot(globals.row0.xyz, world), dot(globals.row1.xyz, world), 0.0, 1.0);
     v_local = a_position; // gradients are defined in document (mesh) space
-    v_color = a_color * i_tint;
+    v_color = working_color(a_color) * working_color(i_tint);
     v_paint = a_paint;
 }

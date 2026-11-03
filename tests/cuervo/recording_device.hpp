@@ -49,12 +49,41 @@ public:
     int updates = 0;
     int texture_updates = 0;
     std::uint32_t next = 1;
+    ivec2 target_size_{1280, 720};
+    std::uint32_t current_target_ = 0;
+    std::map<std::uint32_t, std::uint32_t> target_textures_;
 
     const rhi::DeviceInfo& info() const override { return info_; }
     void begin_frame(ivec2) override {}
     void clear(rhi::Color) override {}
     void end_frame() override {}
-    ivec2 framebuffer_size() const override { return {1280, 720}; }
+    ivec2 framebuffer_size() const override { return target_size_; }
+
+    // Render targets: a recorded pass list, no pixels.
+    std::map<std::uint32_t, rhi::RenderTargetDesc> targets;
+    std::vector<std::uint32_t> target_switches; // every set_render_target id, in order
+    rhi::RenderTargetHandle create_render_target(const rhi::RenderTargetDesc& desc) override {
+        rhi::TextureDesc texture_desc;
+        texture_desc.width = desc.width;
+        texture_desc.height = desc.height;
+        const rhi::TextureHandle texture = create_texture(texture_desc);
+        targets[next] = desc;
+        target_textures_[next] = texture.id;
+        return {next++};
+    }
+    rhi::TextureHandle render_target_texture(rhi::RenderTargetHandle t) const override {
+        return {target_textures_.at(t.id)};
+    }
+    void destroy_render_target(rhi::RenderTargetHandle t) override {
+        textures.erase(target_textures_.at(t.id));
+        target_textures_.erase(t.id);
+        targets.erase(t.id);
+    }
+    void set_render_target(rhi::RenderTargetHandle t) override {
+        target_switches.push_back(t.id);
+        current_target_ = t.id;
+        target_size_ = t.id ? ivec2{targets.at(t.id).width, targets.at(t.id).height} : ivec2{1280, 720};
+    }
 
     rhi::BufferHandle create_buffer(const rhi::BufferDesc& desc) override {
         std::vector<std::byte> data(desc.size);
@@ -127,7 +156,19 @@ public:
         uniform_ = b.id;
     }
     void bind_texture(std::uint32_t binding, rhi::TextureHandle t) override { textures_bound_[binding] = t.id; }
-    void draw(std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t) override { FAIL("unexpected draw()"); }
+    // Non-indexed draws (full-screen passes) are an error unless a test opts in.
+    bool allow_plain_draws = false;
+    struct PlainDraw {
+        std::uint32_t vertex_count;
+        std::uint32_t pipeline;
+        std::uint32_t target; // the render target selected when it was drawn (0 = window)
+        std::array<std::uint32_t, rhi::max_texture_bindings> textures;
+    };
+    std::vector<PlainDraw> plain_draws;
+    void draw(std::uint32_t vertex_count, std::uint32_t, std::uint32_t, std::uint32_t) override {
+        if (!allow_plain_draws) FAIL("unexpected draw()");
+        plain_draws.push_back({vertex_count, pipeline_, current_target_, textures_bound_});
+    }
     void draw_indexed(std::uint32_t count, std::uint32_t instances, std::uint32_t first,
                       std::uint32_t first_instance) override {
         draws.push_back({count, instances, first, first_instance, pipeline_, vertex_, uniform_, textures_bound_});

@@ -17,8 +17,37 @@ bool InputMap::set_action(Name name, std::span<const Binding> bindings) {
     if (actions_.size() == InputFrame::max_actions) {
         return false;
     }
-    actions_.push_back({name, {bindings.begin(), bindings.end()}});
+    std::uint32_t id = derive_action_id(name.str());
+    while (action_index_by_id(id)) id = id == 0xffffffffu ? 1u : id + 1;
+    actions_.push_back({name, {bindings.begin(), bindings.end()}, id});
     return true;
+}
+
+bool InputMap::set_action(Name name, std::span<const Binding> bindings, std::uint32_t id) {
+    if (id == 0) return false;
+    if (auto owner = action_index_by_id(id); owner && actions_[*owner].name != name) return false;
+    if (!set_action(name, bindings)) return false;
+    actions_[*action_index(name)].id = id;
+    return true;
+}
+
+std::uint32_t InputMap::derive_action_id(std::string_view name) {
+    std::uint32_t h = 2166136261u; // FNV-1a
+    for (unsigned char c : name) h = (h ^ c) * 16777619u;
+    return h == 0 ? 1u : h;
+}
+
+std::vector<std::uint32_t> InputMap::action_ids() const {
+    std::vector<std::uint32_t> out;
+    for (const Action& a : actions_) out.push_back(a.id);
+    return out;
+}
+
+std::optional<std::size_t> InputMap::action_index_by_id(std::uint32_t id) const {
+    for (std::size_t i = 0; i < actions_.size(); ++i) {
+        if (actions_[i].id == id) return i;
+    }
+    return std::nullopt;
 }
 
 bool InputMap::set_axis(Name name, std::initializer_list<AxisSource> sources) {

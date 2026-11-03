@@ -1,0 +1,113 @@
+<rml>
+<head>
+<title>Cuervo editor</title>
+<link type="text/rcss" href="{{TOKENS}}"/>
+<link type="text/rcss" href="{{RCSS}}"/>
+<link type="text/rcss" href="{{WIDGETS}}"/>
+<link type="text/rcss" href="{{SCRIPT}}"/>
+</head>
+<body>
+<div id="menubar">
+  <span class="menu" data-menu="file" title="File menu">File</span><span class="menu" data-menu="edit">Edit</span><span class="menu" data-menu="play">Play</span><span class="menu" data-menu="view">View</span><span class="menu" data-menu="help">Help</span>
+  <span id="doc-title"></span>
+  <div class="grow"></div>
+  <div id="search" data-act="palette" title="Command palette (Ctrl+Shift+P)"><img class="ic muted" src="icon:search:14"/><span>Search commands</span><span class="kbd">Ctrl+Shift+P</span></div>
+</div>
+<div id="toolbar">
+  <div class="plate">
+    <button class="ibtn" data-action="file.new" title="New scene"><img class="ic" src="icon:new:16"/></button><button class="ibtn" data-action="file.open" title="Open scene (Ctrl+O)"><img class="ic" src="icon:open:16"/></button><button class="ibtn" data-action="file.save" title="Save scene (Ctrl+S)"><img class="ic" src="icon:save:16"/></button>
+  </div>
+  <div class="plate">
+    <button class="ibtn" data-action="edit.undo" title="Undo (Ctrl+Z)"><img class="ic" src="icon:undo:16"/></button><button class="ibtn" data-action="edit.redo" title="Redo (Ctrl+Shift+Z)"><img class="ic" src="icon:redo:16"/></button>
+  </div>
+  <div class="plate">
+    <button class="ibtn" data-tool="select" title="Select (Q)"><img class="ic" src="icon:select:16"/></button><button class="ibtn" data-tool="move" title="Move (W)"><img class="ic" src="icon:move:16"/></button><button class="ibtn" data-tool="rotate" title="Rotate (E)"><img class="ic" src="icon:rotate:16"/></button><button class="ibtn" data-tool="scale" title="Scale (R)"><img class="ic" src="icon:scale:16"/></button><button class="ibtn" data-tool="paint" title="Paint tiles (B)"><img class="ic" src="icon:paint:16"/></button>
+  </div>
+  <div class="plate">
+    <button class="ibtn" data-action="view.snap" title="Snap to grid"><img class="ic" src="icon:grid:16"/></button><button class="ibtn" data-action="view.frame" title="Frame scene (F)"><img class="ic" src="icon:frame:16"/></button>
+  </div>
+  <div class="grow"></div>
+  <div class="plate" id="playbar">
+    <button class="ibtn" id="btn-play" data-action="play.play" title="Play (F5)"><img class="ic" src="icon:play:16"/></button><button class="ibtn" data-action="play.record" title="Play and record"><img class="ic" src="icon:record:16"/></button><button class="ibtn" data-action="play.pause" title="Pause (F7)"><img class="ic" src="icon:pause:16"/></button><button class="ibtn" data-action="play.step" title="Step one tick (F10)"><img class="ic" src="icon:step:16"/></button><button class="ibtn" data-action="play.stop" title="Stop (Shift+F5)"><img class="ic" src="icon:stop:16"/></button>
+  </div>
+  <div class="grow"></div>
+</div>
+<div id="body">
+  <div id="rail">
+    <button class="rbtn" data-rail="scene" title="Scene"><img class="ic" src="icon:layout:18"/></button>
+    <button class="rbtn" data-rail="assets" title="Assets"><img class="ic" src="icon:folder:18"/></button>
+    <button class="rbtn" data-rail="search" title="Search"><img class="ic" src="icon:search:18"/></button>
+    <div class="grow"></div>
+    <button class="rbtn" data-rail="settings" title="Settings"><img class="ic" src="icon:settings:18"/></button>
+  </div>
+  <div id="left" class="card">
+    <div class="pane" id="pane-scene">
+      <div class="ptitle"><span>Scene</span><button class="ibtn sm" data-act="add-child" title="Add child node (Ctrl+A)"><img class="ic" src="icon:plus:14"/></button></div>
+      <div class="section"><span>Nodes</span><span class="count" id="count"></span></div>
+      <div id="tree" class="scroll"><div id="tree-in"></div></div>
+    </div>
+    <div class="pane" id="pane-script">
+      <div class="ptitle"><span>Scripts</span><span class="tbtns"><button class="ibtn sm" data-sc="new" title="New script"><img class="ic" src="icon:plus:14"/></button></span></div>
+      <div class="pad"><input id="script-filter" type="text" placeholder="Filter scripts"/></div>
+      <div id="script-list" class="scroll"></div>
+      <div class="section"><span>Outline</span><span class="count" id="outline-file"></span></div>
+      <div id="script-outline" class="scroll"></div>
+    </div>
+    <div class="pane" id="pane-assets">
+      <div class="ptitle"><span>Assets</span><span class="tbtns"><button class="ibtn sm" data-act="asset-import" title="Import a file into the project"><img class="ic" src="icon:open:14"/></button><button class="ibtn sm" data-act="asset-folder" title="New folder"><img class="ic" src="icon:plus:14"/></button><button class="ibtn sm" data-act="asset-refresh" title="Rescan the project folder"><img class="ic" src="icon:reset:14"/></button></span></div>
+      <div class="pad"><input id="asset-filter" type="text" placeholder="Filter assets"/></div>
+      <div id="assets" class="scroll"></div>
+      <div id="asset-prev"></div>
+    </div>
+    <div class="pane" id="pane-search"><div class="ptitle"><span>Search</span></div><div class="pad"><input id="search-field" type="text" placeholder="Nodes and commands"/></div><div id="search-results" class="scroll"></div></div>
+    <div class="pane" id="pane-settings"><div class="ptitle"><span>Settings</span></div><div id="settings" class="scroll"></div></div>
+  </div>
+  <div class="split v" id="sp-left"></div>
+  <div id="mid">
+    <div id="center" class="card">
+      <div class="chead">
+        <div class="seg"><div class="segi" data-center="scene" title="Scene view">Scene</div><div class="segi" data-center="script" title="Script editor">Script</div></div>
+        <span id="crumb"></span>
+        <div class="grow"></div>
+      </div>
+      <div id="canvas"><span class="hud" id="hud"></span></div>
+      <div id="script-pane">
+        <div id="stabs"></div>
+        <div id="scrumb"></div>
+        <div id="sview"><code-view id="code"></code-view><div id="acpop"></div><div id="hovercard"></div><div id="sigcard"></div><div id="findbar"><div class="fr"><input id="find-q" type="text" placeholder="Find"/><span id="find-cnt"></span><span class="ft" data-sc="fopt" data-v="case" title="Match case">Aa</span><span class="ft" data-sc="fopt" data-v="word" title="Whole word">ab</span><span class="ft" data-sc="fopt" data-v="regex" title="Regular expression">.*</span><span class="ft" data-sc="fprev" title="Previous match (Shift+F3)">Prev</span><span class="ft" data-sc="fnext" title="Next match (F3)">Next</span><span class="ft" data-sc="fclose" title="Close (Esc)">x</span></div><div class="fr" id="find-rrow"><input id="find-r" type="text" placeholder="Replace"/><span class="ft" data-sc="frep" title="Replace this match (Enter)">Rep</span><span class="ft" data-sc="frepall" title="Replace all matches (one undo step)">All</span></div></div><div id="renamebar"><span class="rl">Rename to</span><input id="rename-q" type="text"/><span id="rename-cnt"></span><span class="ft" id="rename-go" data-sc="rename-apply" title="Apply (Enter)">Rename</span><span class="ft" data-sc="rename-close" title="Cancel (Esc)">x</span></div><div id="sempty"><span>Open a script from the list, or create one.</span><button class="btn" data-sc="new"><span>New script</span></button></div></div>
+      </div>
+    </div>
+    <div class="split h" id="sp-drawer"></div>
+    <div id="drawer" class="card"><div id="drawer-head"></div><div id="drawer-body" class="scroll"></div></div>
+    <div id="strip">
+      <div class="stab" data-drawer="diag" title="Compiler errors and warnings of the open scripts"><span>Diagnostics</span><span class="badge" id="n-diag"></span></div>
+      <div class="stab" data-drawer="refs" title="Where the symbol under the caret is used (Shift+F12)"><span>References</span></div>
+      <div class="stab" data-drawer="console" title="Console output and errors"><span>Console</span><span class="badge" id="n-console"></span></div>
+      <div class="stab" data-drawer="history" title="Undo history"><span>History</span><span class="badge" id="n-history"></span></div>
+      <div class="stab" data-drawer="profiler" title="Frame timings"><span>Profiler</span><span class="badge" id="n-profiler"></span></div>
+      <div class="stab" data-drawer="replay" title="Record and play back inputs"><span>Replay</span></div>
+      <div class="stab" data-drawer="tiers" title="Render tier migration report"><span>Tiers</span></div>
+      <div class="stab" data-drawer="input" title="Input actions and axes"><span>Input map</span></div>
+      <div class="stab" data-drawer="debugger" title="State of the running game"><span>Debugger</span></div>
+      <div class="stab" data-drawer="node" id="tab-node" title="Editor for the selected node"><span id="node-title"></span></div>
+      <div class="grow"></div>
+      <span id="lastlog"></span>
+    </div>
+  </div>
+  <div class="split v" id="sp-right"></div>
+  <button id="right-open" class="ibtn" data-act="open-right" title="Show the inspector"><img class="ic" src="icon:chevron_left:14"/></button>
+  <div id="right" class="card">
+    <div class="tabs"><div class="tab active">Inspector</div><button class="ibtn sm tright" data-act="collapse-right" title="Collapse the inspector"><img class="ic" src="icon:chevron_right:14"/></button></div>
+    <div class="pad"><div class="tf ui"><input id="insp-filter" type="text" placeholder="Filter fields"/><div class="clear hidden" id="insp-clear" data-clear="insp-filter" title="Clear"><img class="ic" src="icon:close:12"/></div></div></div>
+    <div id="inspector" class="scroll"></div>
+  </div>
+</div>
+<div id="status"><span id="st-mode">Editing</span><span id="st-scene"></span><span id="st-sel"></span><div class="grow"></div><span>{{BACKEND}} (RmlUi)</span></div>
+<div id="welcome"></div>
+<div id="popup" class="overlay"></div>
+<div id="tooltip"></div>
+<div id="dropline"></div>
+<div id="ghost"></div>
+<div id="modal"><div id="dialog"></div></div>
+</body>
+</rml>

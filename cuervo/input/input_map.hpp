@@ -6,6 +6,7 @@
 #include <initializer_list>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <span>
 #include <type_traits>
 #include <vector>
@@ -82,6 +83,10 @@ public:
     // Adds or replaces an action. Returns false if the 64-action limit is hit.
     bool set_action(Name name, std::initializer_list<Binding> bindings);
     bool set_action(Name name, std::span<const Binding> bindings); // bindings read from project files
+    // The same with a stable ID (non-zero, unique in the map; project.toml `[input.action_ids]`).
+    // Without one a new action gets derive_action_id(name), moved up while it collides. False: the
+    // action limit, or `id` is zero or taken by another action.
+    bool set_action(Name name, std::span<const Binding> bindings, std::uint32_t id);
     // Adds or replaces an axis. Returns false if the 8-axis limit is hit.
     bool set_axis(Name name, std::initializer_list<AxisSource> sources);
     bool set_axis(Name name, std::span<const AxisSource> sources);
@@ -89,16 +94,22 @@ public:
     std::optional<std::size_t> action_index(Name name) const;
     std::optional<std::size_t> axis_index(Name name) const;
     // Names in index order (bit i of InputFrame::held is action i); replays
-    // store them to detect a project whose actions moved.
+    // store them with the IDs and are mapped onto the current order on playback.
     std::vector<std::string> action_names() const;
     std::vector<std::string> axis_names() const;
+    // Stable action IDs (DESIGN.md 4.8, milestone 11.7a): they keep a replay playable when actions are
+    // added, removed, reordered or (with an explicit ID) renamed. Index order, like action_names().
+    std::vector<std::uint32_t> action_ids() const;
+    std::optional<std::size_t> action_index_by_id(std::uint32_t id) const;
+    // The ID an action without an explicit one gets: a hash of its name (never zero).
+    static std::uint32_t derive_action_id(std::string_view name);
 
     // Turn raw device state into one tick of mapped input, then clear the
     // device's latched taps and wheel motion so each counts for exactly one tick.
     InputFrame sample(DeviceState& devices) const;
 
 private:
-    struct Action { Name name; std::vector<Binding> bindings; };
+    struct Action { Name name; std::vector<Binding> bindings; std::uint32_t id = 0; };
     struct Axis { Name name; std::vector<AxisSource> sources; };
 
     bool binding_held(const DeviceState& devices, Binding binding) const;
@@ -122,6 +133,18 @@ public:
     float axis(Name axis) const;       // [-1, 1]
 
     const InputFrame& frame() const { return current_; }
+
+    // This tick's and the last tick's frames: what a simulation snapshot keeps (just-pressed
+    // and just-released read both).
+    struct State {
+        InputFrame current{};
+        InputFrame previous{};
+    };
+    State save_state() const { return {current_, previous_}; }
+    void restore_state(const State& s) {
+        current_ = s.current;
+        previous_ = s.previous;
+    }
 
 private:
     static bool bit(const InputFrame& frame, std::size_t index) { return (frame.held >> index) & 1u; }

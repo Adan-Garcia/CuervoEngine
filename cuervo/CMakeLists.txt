@@ -1,9 +1,19 @@
 add_library(cuervo STATIC
     core/log.cpp
+    net/loopback.cpp
+    net/lockstep.cpp
+    net/rollback.cpp
+    net/udp.cpp
+    net/websocket.cpp
+    net/http.cpp
     core/fixed_timestep.cpp
     core/name.cpp
     core/sha256.cpp
     core/profiler.cpp
+    profile/trace.cpp
+    save/save_store.cpp
+    save/settings.cpp
+    locale/locale.cpp
     math/dmath.cpp
     input/input_map.cpp
     input/replay.cpp
@@ -19,11 +29,16 @@ add_library(cuervo STATIC
     rhi/gl/gl_device.cpp
     render/camera.cpp
     render/sdf_batcher.cpp
+    render/sprite_batcher.cpp
+    render/sprite_library.cpp
+    render/post_fx.cpp
+    render/user_shader.cpp
     render/light_batcher.cpp
     render/mesh_batcher.cpp
     render/font.cpp
     render/font_import.cpp
     render/text_layout.cpp
+    text/shaping.cpp
     render/text_renderer.cpp
     vector/path.cpp
     vector/flatten.cpp
@@ -39,14 +54,24 @@ add_library(cuervo STATIC
     assets/pack.cpp
     assets/vfs.cpp
     assets/manifest.cpp
+    assets/image.cpp
+    assets/atlas.cpp
+    assets/sprite_sheet.cpp
+    assets/svg_raster.cpp
+    assets/atlas_file.cpp
     script/features.cpp
     script/dotnet_host.cpp
     script/plugin_host.cpp
     script/project.cpp
     script/script_host.cpp
     script/script_host_scene.cpp
+    script/script_host_snapshot.cpp
     script/anim_bindings.cpp
+    script/save_bindings.cpp
+    script/locale_bindings.cpp
+    script/net_bindings.cpp
     script/light_bindings.cpp
+    script/sprite_bindings.cpp
     script/scene_bridge.cpp
     script/game_runner.cpp
     script/game_session.cpp
@@ -141,6 +166,10 @@ endif()
 # string literals; editing a prelude file re-runs this step.
 set(CUERVO_PRELUDE_FILES
     script/prelude/core.plm
+    script/prelude/save.plm
+    script/prelude/locale.plm
+    script/prelude/net.plm
+    script/prelude/http.plm
     script/prelude/scene.plm
     script/prelude/nodes.plm
     script/prelude/animation.plm
@@ -270,18 +299,49 @@ cuervo_add_shaders(cuervo
     render/shaders/text.frag
     render/shaders/light.vert
     render/shaders/light.frag
+    render/shaders/sprite.vert
+    render/shaders/sprite.frag
+    render/shaders/post.vert
+    render/shaders/post_down.frag
+    render/shaders/post_up.frag
+    render/shaders/post_composite.frag
 )
 
 find_package(Threads REQUIRED)
+if(WIN32)
+    target_link_libraries(cuervo PRIVATE ws2_32)
+endif()
+if(NOT EMSCRIPTEN)
+    target_sources(cuervo PRIVATE net/tcp.cpp) # sockets + TLS for ws(s):// and http(s):// (the web uses the browser)
+    if(TARGET mbedtls_lib)
+        target_link_libraries(cuervo PRIVATE mbedtls_lib)
+        target_compile_definitions(cuervo PUBLIC CUERVO_HAS_TLS=1)
+    endif()
+endif()
+if(EMSCRIPTEN)
+    target_link_options(cuervo PUBLIC -sFETCH=1) # browser fetch for net/http.cpp
+    target_link_libraries(cuervo PUBLIC websocket.js) # browser WebSocket for net/websocket.cpp
+endif()
 target_link_libraries(cuervo
     PUBLIC project::flags pluma Threads::Threads
-    PRIVATE SDL3::SDL3 libtess2
+    PRIVATE SDL3::SDL3 libtess2 stb_image
 )
+if(TARGET webp_decoder)
+    target_link_libraries(cuervo PRIVATE webp_decoder)
+    target_compile_definitions(cuervo PRIVATE CUERVO_HAS_WEBP=1)
+endif()
 
 # Shipping builds load only ImportedVector files, never SVG (DESIGN.md 4.11).
 option(CUERVO_SVG_IMPORT "Allow loading .svg files at runtime (off for shipping builds)" ON)
 if(NOT CUERVO_SVG_IMPORT)
     target_compile_definitions(cuervo PRIVATE CUERVO_NO_SVG_IMPORT=1)
+endif()
+
+# HarfBuzz + SheenBidi (CUERVO_TEXT_SHAPING, cmake/Dependencies.cmake). Only
+# text/shaping.cpp sees them; without them it falls back to one LTR run.
+if(CUERVO_TEXT_SHAPING)
+    target_link_libraries(cuervo PRIVATE harfbuzz sheenbidi)
+    set_source_files_properties(text/shaping.cpp PROPERTIES COMPILE_DEFINITIONS CUERVO_HAS_TEXT_SHAPING=1)
 endif()
 
 # TTF/OTF import (CUERVO_FONT_IMPORT, cmake/Dependencies.cmake). Only

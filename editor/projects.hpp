@@ -47,6 +47,9 @@ struct ProjectTemplate {
 // move with the input map's `move` axis).
 const std::vector<ProjectTemplate>& project_templates();
 
+// Folders under `root` that hold a project.toml, as (folder name, absolute path), sorted by name.
+std::vector<std::pair<std::string, std::string>> list_example_projects(const std::filesystem::path& root);
+
 // Writes a new project named `name` from template `template_id` into `dir`
 // (created; it must be missing or empty): project.toml, scripts/, scenes/main.scene.
 // The messages follow the kit's formula (what happened, whether anything was lost, what to do).

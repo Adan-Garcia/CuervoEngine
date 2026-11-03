@@ -1,0 +1,55 @@
+// Engine API: networked play (DESIGN.md 4.19).
+//
+// The game owns one network session. It never exposes sockets or packets: the only
+// thing the network gives the simulation is each player's input for each tick, delivered
+// through `Input.held_by(player, action)` (player 0 is also the plain `Input.held`), so a
+// networked match records and replays exactly like local input. Connection state
+// (`connected`, `peers`, `peer_joined`, ...) is outside the simulation and is not part of
+// the state hash: use it for lobby and HUD code, and do not let it change simulation state.
+// Events are polled booleans rather than callbacks for the same reason.
+//
+// Usage: `Net.host(7777)` on one machine and `Net.join("192.168.1.5:7777")` on the other
+// (UDP, two players; `Net.mesh` for up to four); or `Net.relay("ws://relay.example:9000", "room1", 2)` for browsers and
+// NAT (players are numbered in join order). The runner then advances the simulation only when
+// every player's input for the next tick has arrived (lockstep) or from predicted input with
+// rollback (`Net.set_mode(#rollback)`), so `update` is called the same number of times on
+// every machine. Call `Net.set_mode` and `Net.set_input_delay` before connecting.
+class Net {
+    // Waits for one peer on UDP `port` and makes this machine player 0. False if the port cannot be bound.
+    @native static fn host(port: int) -> bool {}
+    // Connects to a host at "address:port" (UDP) and makes this machine player 1.
+    @native static fn join(address: str) -> bool {}
+    // UDP with 2 to 4 players and no server: `addresses` is every player's "host:port" in player order,
+    // comma separated ("10.0.0.1:7001,10.0.0.2:7001,10.0.0.3:7001"), `index` this machine's position in it.
+    // Binds our own port and sends to the others, so every machine passes the same list. False if
+    // the port cannot be bound or an address cannot be resolved.
+    @native static fn mesh(addresses: str, index: int) -> bool {}
+    // Joins `room` on a WebSocket relay (ws:// URL; wss:// is not supported yet). The relay assigns the
+    // player number in join order. False if the relay cannot be reached or the room is full.
+    @native static fn relay(url: str, room: str, players: int = 2) -> bool {}
+    // Leaves the session; the game goes back to ordinary local ticks.
+    @native static fn stop() {}
+
+    // `#lockstep` (default: wait for every player's input, fixed input delay) or `#rollback`
+    // (predict missing input, re-simulate when the real input differs).
+    @native static fn set_mode(mode: name) {}
+    // True when the mode is `#rollback`.
+    @native static fn is_rollback() -> bool {}
+    // Lockstep input delay in ticks (0..30, default 2): higher hides latency, costs responsiveness.
+    @native static fn set_input_delay(ticks: int) {}
+
+    // This machine's player number (0 when not networked).
+    @native static fn player() -> int {}
+    // Players in the match (1 when not networked).
+    @native static fn players() -> int {}
+    // Remote players heard from recently.
+    @native static fn peers() -> int {}
+    // True once every other player has been heard from.
+    @native static fn connected() -> bool {}
+    // True once a state-hash mismatch with a peer was detected (sticky).
+    @native static fn desynced() -> bool {}
+    // True once for each newly seen peer.
+    @native static fn peer_joined() -> bool {}
+    // True once for each peer that went silent.
+    @native static fn peer_left() -> bool {}
+}

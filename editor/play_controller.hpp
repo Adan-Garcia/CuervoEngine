@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -9,6 +11,7 @@
 #include "cuervo/core/fixed_timestep.hpp"
 #include "cuervo/input/replay.hpp"
 #include "cuervo/script/game_session.hpp"
+#include "editor/script_debug.hpp"
 
 // Play-in-editor (DESIGN.md 4.13, "Clarified (Phase 6B)"): the game runs on
 // a script::GameSession -- the same code `cuervo --game` runs -- in its own
@@ -20,9 +23,11 @@
 // Two modes:
 //   Live    input comes from the devices (and `hold`); optionally recorded
 //   Replay  input comes from a Replay; every tick's state hash is compared
-//           with the recorded one and the first mismatch is kept. Seeking
-//           re-simulates from the start (the VM has no snapshots), forward
-//           seeks continue from the current tick.
+//           with the recorded one and the first mismatch is kept. A
+//           simulation snapshot (ScriptHost::save, DESIGN.md 4.8) is kept
+//           every `snapshot_interval` ticks played; seeking backwards resumes
+//           from the nearest one before the target, forward seeks continue
+//           from the current tick.
 // A panic pauses the game (DESIGN.md 5.8); panic() has its frames and
 // locals. Saving a script while playing hot-reloads it (5.13); a reload
 // that fixes the panic lets the game resume.
@@ -81,8 +86,21 @@ public:
     const Replay& replay() const { return replay_; }
     std::uint64_t replay_length() const { return replay_.ticks(); }
     // Moves to `tick` (0 = before the first tick): forward by simulating,
-    // backward by restarting the session and re-simulating.
+    // backward by restoring the nearest snapshot at or before it and simulating
+    // on (restarting the session when there is none, or restoring fails).
     bool seek(std::uint64_t tick, std::string& error);
+    // Replay playback keeps a snapshot every this many ticks (0 = none) and at most
+    // `max_snapshots`; beyond that every other one is dropped and the interval doubles.
+    std::uint64_t snapshot_interval = 60;
+    std::size_t max_snapshots = 256;
+    std::size_t snapshot_count() const { return snapshots_.size(); }
+    // What the last seek did.
+    struct SeekInfo {
+        std::uint64_t from = 0;          // the tick it started simulating from
+        std::uint64_t simulated = 0;     // ticks simulated to reach the target
+        bool from_snapshot = false;      // resumed from a snapshot (else from the start or the current tick)
+    };
+    const SeekInfo& last_seek() const { return last_seek_; }
     float speed = 1.0f;
     // Hashes compared so far, and the first tick whose hash differed.
     std::uint64_t verified() const { return verified_; }
@@ -102,10 +120,24 @@ public:
     double last_tick_ms() const { return last_tick_ms_; }
     double average_tick_ms() const { return average_tick_ms_; }
 
+    // ---- script debugger (live mode only)
+    // The Debugger hooks every executed line, so a session only gets one when the project has breakpoints
+    // at start (the editor sets them before Play); breakpoints added later need a restart.
+    void set_debug_breakpoints(DebugSession::Breakpoints b) { debug_bps_ = std::move(b); }
+    DebugSession* debug() { return debug_.get(); }
+    const DebugSession* debug() const { return debug_.get(); }
+    // While the game is stopped at a breakpoint the VM blocks inside the debugger and calls this about every
+    // 20 ms; the app runs a UI frame from it. Stop, Play and reload do nothing then (Stop is deferred).
+    void set_debug_idle(std::function<void()> f) { debug_idle_ = std::move(f); }
+    bool debug_blocked() const { return blocked_; }
+
 private:
     bool open(std::string& error);
-    void run_tick(const InputFrame& frame);
+    void debug_tick();
+    void run_tick(const InputFrame& frame, std::uint64_t index);
     InputFrame live_frame(DeviceState& devices, vec2 pointer);
+    void keep_snapshot();
+    void drop_snapshots();
 
     script::SessionOptions options_;
     std::unique_ptr<script::GameSession> session_;
@@ -118,10 +150,19 @@ private:
     double average_tick_ms_ = 0.0;
     Replay replay_;
     Replay empty_;
+    std::vector<InputFrame> players_; // scratch: one tick's frames of all players
     std::uint64_t verified_ = 0;
     std::optional<std::uint64_t> first_mismatch_;
     std::uint64_t mismatch_expected_ = 0;
     std::uint64_t mismatch_actual_ = 0;
+    std::map<std::uint64_t, script::SimSnapshot> snapshots_; // by tick, replay mode
+    std::uint64_t interval_ = 0;  // the interval in use (snapshot_interval, doubled when thinned)
+    bool snapshots_failed_ = false;
+    SeekInfo last_seek_;
+    DebugSession::Breakpoints debug_bps_;
+    std::unique_ptr<DebugSession> debug_;
+    std::function<void()> debug_idle_;
+    bool blocked_ = false, deferred_stop_ = false;
 };
 
 } // namespace cuervo::editor

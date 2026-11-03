@@ -12,7 +12,11 @@
 #include <string>
 #include <vector>
 
+#include <filesystem>
+
 #include "cuervo/core/profiler.hpp"
+#include "cuervo/profile/trace.hpp"
+#include "pluma/profiler.hpp"
 #include "editor/app.hpp"
 #include "editor/panels.hpp"
 
@@ -31,6 +35,37 @@ void plot(const char* label, const std::vector<float>& values, float height) {
 
 class ProfilerPanel final : public Panel {
 public:
+    // "Trace" captures zones, job tasks, draw calls and the Pluma heap
+    // (cuervo/profile/trace.hpp); "Save" writes the Chrome trace JSON for
+    // ui.perfetto.dev or chrome://tracing. A frame boundary is one panel draw.
+    void draw_trace_controls(bool recording) {
+        bool tracing = profile::capturing();
+        if (ImGui::Checkbox("Trace", &tracing)) {
+            if (tracing && recording) {
+                profile::start_capture();
+                saved_.clear();
+            } else {
+                profile::stop_capture();
+            }
+        }
+        if (tracing) {
+            profile::end_frame();
+            profile::add_counter("heap_live", profiler::clock_ns(), static_cast<double>(heap_.sample().live));
+        }
+        if (!tracing && !profile::events().empty()) {
+            ImGui::SameLine();
+            if (ImGui::Button("Save trace")) {
+                const std::filesystem::path path = std::filesystem::current_path() / "cuervo_trace.json";
+                std::string error;
+                saved_ = profile::write_chrome_trace(path, &error) ? "saved " + path.string() : error;
+            }
+        }
+        if (!saved_.empty()) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", saved_.c_str());
+        }
+    }
+
     const char* title() const override { return "Profiler"; }
     Dock dock() const override { return Dock::Bottom; }
 
@@ -52,6 +87,8 @@ public:
             profiler::reset();
             if (host != nullptr && host->script_profiler() != nullptr) host->script_profiler()->reset();
         }
+        ImGui::SameLine();
+        draw_trace_controls(on);
         ImGui::SameLine();
         const profiler::FrameStats frames = profiler::frame_stats();
         ImGui::TextDisabled("%s", std::format("frame {:.2f} ms avg, {:.2f} max over {} frames", frames.avg_ms,
@@ -149,6 +186,10 @@ public:
         }
         ImGui::EndChild();
     }
+
+private:
+    pluma::HeapProfiler heap_;
+    std::string saved_;
 };
 
 } // namespace

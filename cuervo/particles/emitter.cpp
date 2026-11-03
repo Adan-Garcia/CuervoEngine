@@ -357,4 +357,36 @@ void Emitter::hash_state(StateHasher& h) const {
     h.value(ticks_);
 }
 
+void Emitter::hash_deep(StateHasher& h) const {
+    hash_state(h);
+    const ParticlePool& p = pool_;
+    h.span(std::span<const std::uint8_t>(p.dead));
+    h.span(std::span<const std::uint32_t>(p.slot_generation_));
+    h.span(std::span<const std::uint32_t>(p.slot_index_));
+    h.value(static_cast<std::uint64_t>(p.max_particles));
+    h.value(static_cast<std::uint8_t>(config_.mode));
+    h.value(config_.collision.enabled);
+    h.value(config_.collision.layer);
+    h.value(config_.collision.hits);
+    h.value(config_.collision.radius);
+    h.value(config_.collision.half_length);
+    h.value(static_cast<std::uint8_t>(config_.collision.axis));
+    h.value(config_.collision.kill_on_hit);
+    h.value(config_.render.visible);
+    h.value(static_cast<std::uint8_t>(config_.render.shape));
+    h.value(config_.render.half_length);
+    h.value(config_.render.thickness);
+    h.value(config_.render.corner);
+    h.value(config_.render.outline_width);
+    h.value(static_cast<std::uint64_t>(config_.modules.size()));
+    h.value(static_cast<std::uint64_t>(config_.spawners.size()));
+    h.value(static_cast<std::uint64_t>(events_.size()));
+    for (const ParticleEvent& e : events_) {
+        h.value(static_cast<std::uint8_t>(e.type));
+        h.value(e.particle);
+        h.value(e.position);
+        h.value(e.other);
+    }
+}
+
 } // namespace cuervo::particles

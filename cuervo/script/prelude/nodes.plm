@@ -194,6 +194,174 @@ class Sprite extends Node2D {
     }
 }
 
+// A raster image in the world (DESIGN.md 4.4 "Raster pipeline"): a PNG, JPEG
+// or QOI file, a frame of an atlas (`asset` = "art/ui.atlas", `frame` = a
+// name in it) or an SVG, which is rasterized at the zoom it is drawn at when
+// you want it pixel-exact. Sprites sharing an atlas page draw in one batch.
+// (`Sprite` is the live-tessellated vector image; this is the raster one.)
+class Sprite2D extends Node2D {
+    // The image, atlas (.atlas / .catlas) or SVG file, relative to the project.
+    @export var asset = ""
+    // The frame to draw when `asset` is an atlas ("" = its first frame).
+    @export var frame = ""
+    // Centered on `position`; false puts the top-left corner there.
+    @export var centered = true
+    // Mirrors the image left-right.
+    @export var flip_h = false
+    // Mirrors the image top-bottom.
+    @export var flip_v = false
+    // Multiplies every color (alpha included).
+    @export var tint = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }
+    // #default (the project's scale mode: nearest under integer scaling),
+    // #nearest (pixel art) or #linear (smooth).
+    @export var filter = #default
+    // > 0 draws the image at this size instead of its own (before `scale`).
+    @export var size = vec2(0.0, 0.0)
+
+    // Draws the node (render only).
+    fn draw(g: Canvas) {
+        if asset != "" {
+            g.sprite(asset, global_position(), frame = frame, rotation = global_rotation(), scale = global_scale(),
+                     centered = centered, flip_h = flip_h, flip_v = flip_v, tint = tint, filter = filter, size = size)
+        }
+    }
+}
+
+// A flipbook: the named frames of an atlas played in order at `fps`,
+// advanced in whole simulation ticks (like Timer), so the frame shown is part
+// of the deterministic state and replays see the same animation.
+class AnimatedSprite2D extends Node2D {
+    // Emitted on the tick a non-looping animation shows its last frame for the full duration.
+    signal animation_finished
+    // The atlas (.atlas / .catlas) the frames are named in.
+    @export var asset = ""
+    // The frame names, in play order.
+    @export var frames = List<str>()
+    // Frames per second.
+    @export var fps = 12.0
+    // Starts over after the last frame.
+    @export var looping = true
+    // Plays from the moment the node enters the tree.
+    @export var playing = true
+    // Index of the frame shown (into `frames`).
+    @export var frame = 0
+    // Centered on `position`; false puts the top-left corner there.
+    @export var centered = true
+    // Mirrors the image left-right.
+    @export var flip_h = false
+    // Mirrors the image top-bottom.
+    @export var flip_v = false
+    // Multiplies every color (alpha included).
+    @export var tint = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }
+    // #default, #nearest or #linear (see Sprite2D).
+    @export var filter = #default
+    // Ticks the current frame has been shown.
+    var ticks = 0
+
+    // The names "<prefix>_0" ... "<prefix>_<count - 1>" (what a grid sheet in an .atlas file produces).
+    static fn sequence(prefix: str, count: int) -> List<str> {
+        var names = List<str>()
+        var i = 0
+        while i < count {
+            names.push("{prefix}_{i}")
+            i += 1
+        }
+        return names
+    }
+
+    // Plays from the first frame.
+    fn play() {
+        frame = 0
+        ticks = 0
+        playing = true
+    }
+
+    // Stops on the current frame.
+    fn stop() {
+        playing = false
+    }
+
+    // Shows frame `i` (clamped) and restarts its timer.
+    fn set_frame(i: int) {
+        frame = clamp(i, 0, max(frames.len() - 1, 0))
+        ticks = 0
+    }
+
+    // `fps` in whole ticks per frame, at least 1.
+    fn ticks_per_frame() -> int {
+        return max(1, round(1.0 / (max(fps, 0.001) * Time.dt)) as int)
+    }
+
+    // Engine-internal: advances the frame before the node's update().
+    fn update_tree(dt: float) {
+        var n = frames.len()
+        if !freed && playing && n > 0 && can_process() {
+            ticks += 1
+            if ticks >= ticks_per_frame() {
+                ticks = 0
+                if frame + 1 < n {
+                    frame += 1
+                } else if looping {
+                    frame = 0
+                } else {
+                    playing = false
+                    emit animation_finished
+                }
+            }
+        }
+        super.update_tree(dt)
+    }
+
+    // Draws the node (render only).
+    fn draw(g: Canvas) {
+        var n = frames.len()
+        if asset != "" && n > 0 {
+            g.sprite(asset, global_position(), frame = frames[clamp(frame, 0, n - 1)], rotation = global_rotation(),
+                     scale = global_scale(), centered = centered, flip_h = flip_h, flip_v = flip_v, tint = tint,
+                     filter = filter)
+        }
+    }
+}
+
+// A 9-slice panel: the image (or atlas frame) stretched to `size` with its
+// four borders kept at their natural size, so frames, buttons and speech
+// bubbles scale without distorting their corners. `position` is the top-left
+// corner unless `centered`. `scale` stretches the rectangle, not the borders.
+class NinePatchRect extends Node2D {
+    // The image, atlas (.atlas / .catlas) or SVG file, relative to the project.
+    @export var asset = ""
+    // The atlas frame ("" = the whole image / the atlas's first frame).
+    @export var frame = ""
+    // The rectangle to fill, in world units.
+    @export var size = vec2(64.0, 64.0)
+    // Border widths, in the image's own units (texels; SVG document units).
+    @export var margin_left = 8.0
+    // The top border's height.
+    @export var margin_top = 8.0
+    // The right border's width.
+    @export var margin_right = 8.0
+    // The bottom border's height.
+    @export var margin_bottom = 8.0
+    // false leaves the middle empty (a frame).
+    @export var draw_center = true
+    // Centered on `position` instead of top-left.
+    @export var centered = false
+    // Multiplies every color (alpha included).
+    @export var tint = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }
+    // #default, #nearest or #linear (see Sprite2D).
+    @export var filter = #default
+
+    // Draws the node (render only).
+    fn draw(g: Canvas) {
+        if asset != "" {
+            g.nine_patch(asset, global_position(), size, frame = frame, margin_left = margin_left,
+                         margin_top = margin_top, margin_right = margin_right, margin_bottom = margin_bottom,
+                         rotation = global_rotation(), scale = global_scale(), centered = centered,
+                         draw_center = draw_center, tint = tint, filter = filter)
+        }
+    }
+}
+
 // MSDF text placed in the world (moves with the camera, unlike UI labels on
 // a CanvasLayer). `position` is the anchor `align` and `baseline` refer to.
 class Text extends Node2D {

@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "editor/theme.hpp"
+#include "editor/imgui_theme.hpp"
 
 namespace {
 

@@ -57,6 +57,9 @@ struct RenderConfig {
     float corner = 0.3f;        // RoundedRect: corner radius / size
     float outline_width = 0.0f; // world units; 0 = none
     rhi::Color outline_color{1.0f, 1.0f, 1.0f, 1.0f};
+    // Additive / Screen make a glow without stacking shapes (11.2b); particles of
+    // one emitter composite in the order of the pool, so sums are order-independent.
+    render::SdfBlend blend = render::SdfBlend::Normal;
 };
 
 enum class EventType : std::uint8_t { Spawn, Death, Hit };
@@ -196,6 +199,8 @@ public:
     // Adds everything that defines this emitter's future (columns, slots,
     // spawner state, inputs) to `hasher`, for replay comparison.
     void hash_state(StateHasher& hasher) const;
+    // hash_state plus the dead flags, slot generations, events and the config fields (snapshot_hash).
+    void hash_deep(StateHasher& hasher) const;
 
 private:
     void integrate(float dt, std::size_t begin, std::size_t end);

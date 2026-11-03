@@ -1,7 +1,7 @@
 #version 450
-// Dear ImGui geometry (editor/imgui_rhi.hpp): 2D vertices in ImGui display
+// Editor UI geometry (editor/rml/rml_rhi.cpp, and the deprecated editor/imgui_rhi.hpp): 2D vertices in ImGui display
 // coordinates (top-left origin, y down), mapped to NDC by a scale + offset.
-// Varying names must match imgui.frag: GLSL 330 / ES 300 link them by name.
+// Varying names must match editor_ui.frag: GLSL 330 / ES 300 link them by name.
 
 layout(location = 0) in vec2 a_position;
 layout(location = 1) in vec2 a_uv;

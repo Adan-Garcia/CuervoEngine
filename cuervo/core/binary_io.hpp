@@ -51,6 +51,7 @@ public:
     bool ok() const { return ok_; }
     const std::string& error() const { return error_; }
     bool at_end() const { return pos_ == data_.size(); }
+    std::size_t remaining() const { return data_.size() - pos_; }
 
     void fail(std::string_view message) {
         if (ok_) {

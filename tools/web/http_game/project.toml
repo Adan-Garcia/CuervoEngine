@@ -1,0 +1,10 @@
+# HTTP client smoke project (tools/web/http_smoke.py, milestone 11.1): Http.get and Http.post from the
+# browser build against tools/net/http_test_server.py --cors on a fixed local port. Build:
+#   cmake --preset web -B build/http-web -DCUERVO_WEB_GAME=$PWD/tools/web/http_game
+name = "HttpSmoke"
+main = "Game"
+virtual_size = [320, 180]
+tick_rate = 60
+seed = 7
+clear_color = "10131f"
+render_tier = "compatible"

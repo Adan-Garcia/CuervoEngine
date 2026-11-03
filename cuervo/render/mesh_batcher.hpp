@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <unordered_map>
@@ -44,6 +45,10 @@ struct MeshGlobals {
     float row1[4];
 };
 static_assert(sizeof(MeshGlobals) == 32);
+
+// Converts the stop colors of a paint window (vector/mesh.hpp layout) from
+// premultiplied sRGB to premultiplied linear; used when the device is linear.
+void linearize_paint_window(std::vector<std::array<float, 4>>& window);
 
 MeshInstance make_mesh_instance(const Affine2& transform, rhi::Color tint);
 

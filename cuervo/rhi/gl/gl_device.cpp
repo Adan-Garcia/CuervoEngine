@@ -73,15 +73,28 @@ struct TextureInfo {
     rhi::TextureFormat format = rhi::TextureFormat::RGBA8;
 };
 
+// An offscreen target: `texture` (in textures_) is the sampled, single-sample
+// color; with MSAA a persistent multisampled renderbuffer is drawn into and
+// resolved into it whenever a pass leaves the target.
+struct RenderTargetInfo {
+    std::uint32_t texture = 0;
+    std::int32_t width = 0;
+    std::int32_t height = 0;
+    GLuint resolve_fbo = 0; // the texture attached (the draw FBO without MSAA)
+    GLuint msaa_fbo = 0;
+    GLuint msaa_color = 0;
+};
+
 struct GlTextureFormat {
     GLint internal_format;
     GLenum format;
 };
 
 // Sized internal formats + matching client formats: valid on GL 3.3 and GLES 3.0.
-GlTextureFormat to_gl_texture_format(rhi::TextureFormat format) {
+GlTextureFormat to_gl_texture_format(rhi::TextureFormat format, bool srgb = false) {
     switch (format) {
-        case rhi::TextureFormat::RGBA8: return {static_cast<GLint>(GL_RGBA8), GL_RGBA};
+        case rhi::TextureFormat::RGBA8:
+            return {static_cast<GLint>(srgb ? GL_SRGB8_ALPHA8 : GL_RGBA8), GL_RGBA};
         case rhi::TextureFormat::R8:    return {static_cast<GLint>(GL_R8), GL_RED};
     }
     return {static_cast<GLint>(GL_RGBA8), GL_RGBA};
@@ -176,7 +189,8 @@ public:
         // Everything Compatible is core GLES 3.0; nothing Full exists in GL.
         using rhi::Feature;
         for (Feature f : {Feature::InstancedDraws, Feature::IndexUInt32, Feature::UniformBuffers, Feature::Textures,
-                          Feature::IntegerAttributes, Feature::PointsAndLines, Feature::FrameCapture}) {
+                          Feature::IntegerAttributes, Feature::PointsAndLines, Feature::FrameCapture, Feature::TextureMips,
+                          Feature::RenderTargets, Feature::MultiSurface}) {
             info_.hardware_features.set(f);
         }
         info_.hardware_features.set(Feature::Msaa, limits.max_msaa_samples >= 2);
@@ -206,8 +220,18 @@ public:
         }
         msaa_format_ = alpha_bits > 0 ? GL_RGBA8 : GL_RGB8;
         info_.msaa_samples = samples_;
+        info_.render_target_flip_v = true; // GL stores framebuffer rows bottom-up
+        // Linear color: sRGB render targets (renderable in GLES 3.0 / WebGL2). The
+        // default framebuffer can't be switched portably, so the window stays
+        // UNORM and the last pass encodes (DeviceInfo::window_srgb).
+        linear_ = options.linear_color;
+        info_.linear_color = linear_;
 
-        gl_.glDisable(GL_FRAMEBUFFER_SRGB);
+        // Desktop GL: off until a pass writes an sRGB target (bind_current_framebuffer).
+        // GLES / WebGL2: sRGB attachments always encode, but where EXT_sRGB_write_control
+        // exists (desktop drivers' ES contexts) the same token is a switch: keep it on.
+        if (es_) gl_.glEnable(GL_FRAMEBUFFER_SRGB);
+        else gl_.glDisable(GL_FRAMEBUFFER_SRGB);
         while (gl_.glGetError() != GL_NO_ERROR) {
         }
     }
@@ -215,6 +239,9 @@ public:
     ~GlDevice() override {
         fences_.drain([this](GLsync fence) { gl_.glDeleteSync(fence); });
         destroy_msaa_target();
+        for (auto& [id, target] : targets_) {
+            delete_target_objects(target);
+        }
         for (auto& [id, buffer] : buffers_) {
             gl_.glDeleteBuffers(static_cast<GLsizei>(buffer.version_count), buffer.names.data());
         }
@@ -224,9 +251,109 @@ public:
         for (auto& [id, texture] : textures_) {
             gl_.glDeleteTextures(1, &texture.name);
         }
+        // Surfaces still open: their contexts die with the device.
+        while (!surfaces_.empty()) {
+            destroy_window_surface(rhi::SurfaceHandle{surfaces_.begin()->first});
+        }
         gl_.glBindVertexArray(0);
         gl_.glDeleteVertexArrays(1, &vao_);
         SDL_GL_DestroyContext(context_);
+    }
+
+    // --- secondary window surfaces (Feature::MultiSurface) ----------------------
+    // Each surface has its own GL context sharing buffers, textures and programs
+    // with the main one. Not shared, so kept per context: the vertex array
+    // object, the MSAA framebuffer and the caches of what is bound. A surface
+    // frame swaps that state into the members the ordinary frame code uses and
+    // makes the context current; end_frame_surface swaps back, so the main
+    // window's path is untouched. Render targets (framebuffer objects) belong
+    // to the main context: they're refused during a surface frame.
+    rhi::SurfaceHandle create_window_surface(SDL_Window* window) override {
+        if (!window) {
+            return {};
+        }
+        if (active_surface_ != 0) {
+            LOG_ERROR("create_window_surface: called during a surface frame");
+            return {};
+        }
+        if (!SDL_GL_MakeCurrent(window_, context_)) {
+            LOG_ERROR("create_window_surface: SDL_GL_MakeCurrent failed: {}", SDL_GetError());
+            return {};
+        }
+        SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
+        SDL_GLContext context = SDL_GL_CreateContext(window);
+        SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 0);
+        if (!context) {
+            LOG_ERROR("create_window_surface: SDL_GL_CreateContext failed: {}", SDL_GetError());
+            SDL_GL_MakeCurrent(window_, context_);
+            return {};
+        }
+        // The main window paces frames; a second vsync wait per tick would halve the rate.
+        SDL_GL_SetSwapInterval(0);
+        ContextState state;
+        state.window = window;
+        state.context = context;
+        if (!es_) {
+            gl_.glEnable(GL_PROGRAM_POINT_SIZE);
+        }
+        if (es_) gl_.glEnable(GL_FRAMEBUFFER_SRGB);
+        else gl_.glDisable(GL_FRAMEBUFFER_SRGB);
+        gl_.glGenVertexArrays(1, &state.vao);
+        gl_.glBindVertexArray(state.vao);
+        while (gl_.glGetError() != GL_NO_ERROR) {
+        }
+        SDL_GL_MakeCurrent(window_, context_);
+        const std::uint32_t id = next_surface_id_++;
+        surfaces_.emplace(id, state);
+        return {id};
+    }
+
+    void destroy_window_surface(rhi::SurfaceHandle surface) override {
+        auto it = surfaces_.find(surface.id);
+        if (it == surfaces_.end()) {
+            return;
+        }
+        if (active_surface_ == surface.id) {
+            end_frame_surface();
+        }
+        ContextState& state = it->second;
+        // Per-context objects are deleted from their own context.
+        if (SDL_GL_MakeCurrent(state.window, state.context)) {
+            if (state.msaa_fbo) {
+                gl_.glDeleteFramebuffers(1, &state.msaa_fbo);
+                gl_.glDeleteRenderbuffers(1, &state.msaa_color);
+            }
+            gl_.glBindVertexArray(0);
+            gl_.glDeleteVertexArrays(1, &state.vao);
+        }
+        SDL_GL_MakeCurrent(window_, context_);
+        SDL_GL_DestroyContext(state.context);
+        surfaces_.erase(it);
+    }
+
+    void begin_frame_surface(rhi::SurfaceHandle surface, ivec2 framebuffer_size) override {
+        auto it = surfaces_.find(surface.id);
+        if (it == surfaces_.end() || active_surface_ != 0) {
+            LOG_ERROR("begin_frame_surface: unknown surface or a surface frame is already active");
+            return;
+        }
+        swap_context_state(it->second);
+        if (!SDL_GL_MakeCurrent(window_, context_)) {
+            LOG_ERROR("begin_frame_surface: SDL_GL_MakeCurrent failed: {}", SDL_GetError());
+        }
+        active_surface_ = surface.id;
+        begin_frame(framebuffer_size);
+    }
+
+    void end_frame_surface() override {
+        auto it = surfaces_.find(active_surface_);
+        if (it == surfaces_.end()) {
+            return;
+        }
+        end_frame();
+        swap_context_state(it->second);
+        active_surface_ = 0;
+        SDL_GL_MakeCurrent(window_, context_);
     }
 
     const rhi::DeviceInfo& info() const override { return info_; }
@@ -234,6 +361,8 @@ public:
     void begin_frame(ivec2 framebuffer_size) override {
         ++frame_;
         framebuffer_size_ = framebuffer_size;
+        target_size_ = framebuffer_size;
+        current_target_ = 0;
         ensure_msaa_target();
         gl_.glBindFramebuffer(GL_FRAMEBUFFER, msaa_fbo_);
         const rhi::Rect full{0, 0, framebuffer_size.x(), framebuffer_size.y()};
@@ -265,6 +394,7 @@ public:
     }
 
     void end_frame() override {
+        set_render_target({});
         resolve_msaa();
         if (!capture_path_.empty()) {
             read_back(capture_path_);
@@ -303,7 +433,106 @@ public:
         }
     }
 
-    ivec2 framebuffer_size() const override { return framebuffer_size_; }
+    ivec2 framebuffer_size() const override { return target_size_; }
+
+    rhi::RenderTargetHandle create_render_target(const rhi::RenderTargetDesc& desc) override {
+        if (!rhi::detail::render_target_allowed(info_, desc)) {
+            return {};
+        }
+        // The sampled texture is an ordinary RGBA8 texture (zero-filled).
+        rhi::TextureDesc texture_desc;
+        texture_desc.srgb = linear_;
+        texture_desc.width = desc.width;
+        texture_desc.height = desc.height;
+        texture_desc.filter = desc.filter;
+        texture_desc.debug_name = desc.debug_name;
+        const rhi::TextureHandle texture = create_texture(texture_desc);
+        if (!texture) {
+            return {};
+        }
+        RenderTargetInfo target;
+        target.texture = texture.id;
+        target.width = desc.width;
+        target.height = desc.height;
+        gl_.glGenFramebuffers(1, &target.resolve_fbo);
+        gl_.glBindFramebuffer(GL_FRAMEBUFFER, target.resolve_fbo);
+        gl_.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textures_.at(texture.id).name, 0);
+        bool ok = gl_.glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+        if (ok && samples_ > 1) {
+            gl_.glGenRenderbuffers(1, &target.msaa_color);
+            gl_.glBindRenderbuffer(GL_RENDERBUFFER, target.msaa_color);
+            gl_.glRenderbufferStorageMultisample(GL_RENDERBUFFER, static_cast<GLsizei>(samples_),
+                                                 linear_ ? GL_SRGB8_ALPHA8 : GL_RGBA8, desc.width, desc.height);
+            gl_.glGenFramebuffers(1, &target.msaa_fbo);
+            gl_.glBindFramebuffer(GL_FRAMEBUFFER, target.msaa_fbo);
+            gl_.glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, target.msaa_color);
+            ok = gl_.glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+            if (ok) {
+                // Renderbuffer storage starts undefined; the RHI promises transparent black.
+                gl_.glDisable(GL_SCISSOR_TEST);
+                gl_.glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+                gl_.glClear(GL_COLOR_BUFFER_BIT);
+                gl_.glEnable(GL_SCISSOR_TEST);
+            }
+        }
+        bind_current_framebuffer();
+        if (!ok) {
+            LOG_ERROR("create_render_target '{}': the framebuffer is incomplete", desc.debug_name);
+            delete_target_objects(target);
+            destroy_texture(texture);
+            return {};
+        }
+        const rhi::RenderTargetHandle handle{next_id_++};
+        targets_.emplace(handle.id, target);
+        return handle;
+    }
+
+    rhi::TextureHandle render_target_texture(rhi::RenderTargetHandle handle) const override {
+        auto it = targets_.find(handle.id);
+        return it == targets_.end() ? rhi::TextureHandle{} : rhi::TextureHandle{it->second.texture};
+    }
+
+    void destroy_render_target(rhi::RenderTargetHandle handle) override {
+        auto it = targets_.find(handle.id);
+        if (it == targets_.end()) {
+            return;
+        }
+        if (current_target_ == handle.id) {
+            set_render_target({});
+        }
+        const RenderTargetInfo target = it->second;
+        targets_.erase(it);
+        delete_target_objects(target);
+        destroying_target_ = true;
+        destroy_texture(rhi::TextureHandle{target.texture});
+        destroying_target_ = false;
+    }
+
+    void set_render_target(rhi::RenderTargetHandle handle) override {
+        if (handle.id && active_surface_ != 0) {
+            LOG_ERROR("set_render_target: render targets can't be used while drawing to a secondary surface");
+            return;
+        }
+        if (handle.id && !targets_.contains(handle.id)) {
+            LOG_ERROR("set_render_target: invalid render target {}", handle.id);
+            return;
+        }
+        if (handle.id == current_target_) {
+            return;
+        }
+        resolve_current_target();
+        current_target_ = handle.id;
+        if (handle.id) {
+            const RenderTargetInfo& target = targets_.at(handle.id);
+            target_size_ = {target.width, target.height};
+        } else {
+            target_size_ = framebuffer_size_;
+        }
+        bind_current_framebuffer();
+        const rhi::Rect full{0, 0, target_size_.x(), target_size_.y()};
+        set_viewport(full);
+        set_scissor(full);
+    }
 
     rhi::BufferHandle create_buffer(const rhi::BufferDesc& desc) override {
         BufferInfo buffer;
@@ -374,31 +603,44 @@ public:
     }
 
     rhi::TextureHandle create_texture(const rhi::TextureDesc& desc) override {
-        if (!rhi::detail::texture_size_allowed(info_, desc)) {
+        const std::uint32_t levels = rhi::detail::texture_levels(info_, desc);
+        if (levels == 0) {
             return {};
         }
         TextureInfo texture{0, desc.width, desc.height, desc.format};
-        const GlTextureFormat format = to_gl_texture_format(desc.format);
-        const GLint filter = static_cast<GLint>(desc.filter == rhi::Filter::Nearest ? GL_NEAREST : GL_LINEAR);
+        const GlTextureFormat format = to_gl_texture_format(desc.format, desc.srgb);
+        // Linear is trilinear and Nearest picks the nearest level once there is a chain.
+        const bool mips = levels > 1;
+        const GLint mag = static_cast<GLint>(desc.filter == rhi::Filter::Nearest ? GL_NEAREST : GL_LINEAR);
+        const GLint min = !mips ? mag
+                                : static_cast<GLint>(desc.filter == rhi::Filter::Nearest ? GL_NEAREST_MIPMAP_NEAREST
+                                                                                         : GL_LINEAR_MIPMAP_LINEAR);
         gl_.glActiveTexture(upload_texture_unit);
         gl_.glGenTextures(1, &texture.name);
         gl_.glBindTexture(GL_TEXTURE_2D, texture.name);
-        gl_.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
-        gl_.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+        gl_.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min);
+        gl_.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mag);
         gl_.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, static_cast<GLint>(GL_CLAMP_TO_EDGE));
         gl_.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, static_cast<GLint>(GL_CLAMP_TO_EDGE));
-        gl_.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0); // one level: complete without mips
+        gl_.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(levels - 1));
         gl_.glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-        // GL leaves storage without data undefined; the RHI promises zeros.
+        // Per-level glTexImage2D (not glTexStorage2D: GL 3.3 core lacks it). GL leaves
+        // storage without data undefined; the RHI promises zeros.
         std::vector<std::byte> zeros;
-        const void* pixels = desc.initial_data;
-        if (!pixels) {
-            zeros.resize(static_cast<std::size_t>(desc.width) * static_cast<std::size_t>(desc.height) *
-                         rhi::texture_format_size(desc.format));
-            pixels = zeros.data();
+        for (std::uint32_t level = 0; level < levels; ++level) {
+            const std::int32_t w = rhi::detail::mip_extent(desc.width, level);
+            const std::int32_t h = rhi::detail::mip_extent(desc.height, level);
+            const std::span<const std::byte> data = rhi::detail::texture_level_data(desc, level);
+            const void* pixels = data.data();
+            if (data.empty()) {
+                zeros.assign(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) *
+                                 rhi::texture_format_size(desc.format),
+                             std::byte{0});
+                pixels = zeros.data();
+            }
+            gl_.glTexImage2D(GL_TEXTURE_2D, static_cast<GLint>(level), format.internal_format, w, h, 0, format.format,
+                             GL_UNSIGNED_BYTE, pixels);
         }
-        gl_.glTexImage2D(GL_TEXTURE_2D, 0, format.internal_format, desc.width, desc.height, 0, format.format,
-                         GL_UNSIGNED_BYTE, pixels);
         gl_.glBindTexture(GL_TEXTURE_2D, 0);
 
         rhi::TextureHandle handle{next_id_++};
@@ -431,6 +673,15 @@ public:
     void destroy_texture(rhi::TextureHandle handle) override {
         // Like buffers, GL keeps the storage alive until queued commands finish.
         if (auto it = textures_.find(handle.id); it != textures_.end()) {
+            if (!destroying_target_) {
+                for (const auto& [id, target] : targets_) {
+                    if (target.texture == handle.id) {
+                        LOG_ERROR("destroy_texture: texture {} belongs to a render target; destroy the target",
+                                  handle.id);
+                        return;
+                    }
+                }
+            }
             for (std::uint32_t& bound : bound_textures_) {
                 if (bound == handle.id) {
                     bound = 0;
@@ -530,11 +781,11 @@ public:
 
     // GL's window origin is bottom-left; the RHI's is top-left.
     void set_viewport(rhi::Rect r) override {
-        gl_.glViewport(r.x, framebuffer_size_.y() - r.y - r.height, r.width, r.height);
+        gl_.glViewport(r.x, target_size_.y() - r.y - r.height, r.width, r.height);
     }
 
     void set_scissor(rhi::Rect r) override {
-        gl_.glScissor(r.x, framebuffer_size_.y() - r.y - r.height, std::max(r.width, 0), std::max(r.height, 0));
+        gl_.glScissor(r.x, target_size_.y() - r.y - r.height, std::max(r.width, 0), std::max(r.height, 0));
     }
 
     void bind_pipeline(rhi::PipelineHandle handle) override {
@@ -564,6 +815,14 @@ public:
             case rhi::BlendMode::Additive:
                 gl_.glEnable(GL_BLEND);
                 gl_.glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE, GL_ONE, GL_ONE);
+                break;
+            case rhi::BlendMode::AdditivePremultiplied:
+                gl_.glEnable(GL_BLEND);
+                gl_.glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ONE, GL_ONE);
+                break;
+            case rhi::BlendMode::Screen:
+                gl_.glEnable(GL_BLEND);
+                gl_.glBlendFuncSeparate(GL_ONE_MINUS_DST_COLOR, GL_ONE, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
                 break;
         }
         gl_.glBlendEquation(GL_FUNC_ADD);
@@ -764,6 +1023,48 @@ private:
         LOG_DEBUG("GL: {}x MSAA target {}x{}", samples_, msaa_size_.x(), msaa_size_.y());
     }
 
+    void bind_current_framebuffer() {
+        // Desktop GL encodes on write to an sRGB attachment only while this is
+        // on; GLES / WebGL2 always do. The window (UNORM) must never see it.
+        if (!es_ && linear_) {
+            if (current_target_) gl_.glEnable(GL_FRAMEBUFFER_SRGB);
+            else gl_.glDisable(GL_FRAMEBUFFER_SRGB);
+        }
+        if (current_target_) {
+            const RenderTargetInfo& target = targets_.at(current_target_);
+            gl_.glBindFramebuffer(GL_FRAMEBUFFER, target.msaa_fbo ? target.msaa_fbo : target.resolve_fbo);
+        } else {
+            gl_.glBindFramebuffer(GL_FRAMEBUFFER, msaa_fbo_);
+        }
+    }
+
+    // Leaving a multisampled target: average its samples into the texture.
+    void resolve_current_target() {
+        if (!current_target_) {
+            return;
+        }
+        const RenderTargetInfo& target = targets_.at(current_target_);
+        if (!target.msaa_fbo) {
+            return;
+        }
+        gl_.glBindFramebuffer(GL_READ_FRAMEBUFFER, target.msaa_fbo);
+        gl_.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, target.resolve_fbo);
+        gl_.glDisable(GL_SCISSOR_TEST); // blits are scissored too
+        gl_.glBlitFramebuffer(0, 0, target.width, target.height, 0, 0, target.width, target.height,
+                              GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        gl_.glEnable(GL_SCISSOR_TEST);
+    }
+
+    void delete_target_objects(const RenderTargetInfo& target) {
+        if (target.resolve_fbo) {
+            gl_.glDeleteFramebuffers(1, &target.resolve_fbo);
+        }
+        if (target.msaa_fbo) {
+            gl_.glDeleteFramebuffers(1, &target.msaa_fbo);
+            gl_.glDeleteRenderbuffers(1, &target.msaa_color);
+        }
+    }
+
     // Resolves the multisampled frame into the default framebuffer.
     void resolve_msaa() {
         if (!msaa_fbo_) {
@@ -800,8 +1101,38 @@ private:
         rhi::detail::write_ppm(path, w, h, rgb);
     }
 
+    // What a GL context owns that the others don't (see create_window_surface).
+    struct ContextState {
+        SDL_Window* window = nullptr;
+        SDL_GLContext context = nullptr;
+        GLuint vao = 0;
+        GLuint msaa_fbo = 0;
+        GLuint msaa_color = 0;
+        ivec2 msaa_size{0, 0};
+        ivec2 framebuffer_size{0, 0};
+        std::uint32_t enabled_attributes = 0;
+        std::uint32_t uniform_bound = 0;
+        std::array<std::uint32_t, rhi::max_texture_bindings> bound_textures{};
+    };
+
+    void swap_context_state(ContextState& other) {
+        std::swap(window_, other.window);
+        std::swap(context_, other.context);
+        std::swap(vao_, other.vao);
+        std::swap(msaa_fbo_, other.msaa_fbo);
+        std::swap(msaa_color_, other.msaa_color);
+        std::swap(msaa_size_, other.msaa_size);
+        std::swap(framebuffer_size_, other.framebuffer_size);
+        std::swap(enabled_attributes_, other.enabled_attributes);
+        std::swap(uniform_bound_, other.uniform_bound);
+        std::swap(bound_textures_, other.bound_textures);
+    }
+
     SDL_Window* window_;
     SDL_GLContext context_;
+    std::unordered_map<std::uint32_t, ContextState> surfaces_;
+    std::uint32_t next_surface_id_ = 1;
+    std::uint32_t active_surface_ = 0; // surface whose state is swapped in, 0 = the main window
     Functions gl_;
     rhi::DeviceInfo info_;
     std::string version_;
@@ -813,7 +1144,12 @@ private:
     GLuint msaa_fbo_ = 0;
     GLuint msaa_color_ = 0;
     ivec2 msaa_size_{0, 0};
-    ivec2 framebuffer_size_{0, 0};
+    ivec2 framebuffer_size_{0, 0}; // the window
+    ivec2 target_size_{0, 0};      // the current render target (the window by default)
+    std::unordered_map<std::uint32_t, RenderTargetInfo> targets_;
+    std::uint32_t current_target_ = 0;
+    bool destroying_target_ = false;
+    bool linear_ = false;
     std::uint64_t frame_ = 1; // > every BufferInfo::written_frame default
     rhi::FenceRing<GLsync> fences_{max_frames_in_flight};
 

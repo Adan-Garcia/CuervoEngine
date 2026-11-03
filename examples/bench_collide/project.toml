@@ -1,0 +1,16 @@
+# Colliding-bullet capacity test (milestone 11.8, docs/PERFORMANCE.md "Colliding bullets"):
+# every bullet is a collidable gameplay particle checked against a field of hitboxes each tick.
+#   cuervo --game examples/bench_collide --bench 10 [--press 1:more]
+name = "bench_collide"
+main = "BenchCollide"
+virtual_size = [1280, 720]
+tick_rate = 60
+seed = 20261018
+clear_color = "0d0f1a"
+render_tier = "compatible"   # DESIGN.md 4.4: runs on Vulkan, GL and the web
+
+[scene]
+transform_hierarchy = false   # script-driven world-space scene (DESIGN.md 4.17)
+
+[input.actions]
+more = ["Key.Space", "Key.Enter", "Pad.South"]

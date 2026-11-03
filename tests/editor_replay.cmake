@@ -29,7 +29,7 @@ endif()
 
 foreach(jobs 1 8)
     execute_process(
-        COMMAND "${EDITOR}" --project "${PROJECT}" --replay-verify "${OUT}/run.replay" --jobs ${jobs}
+        COMMAND "${EDITOR}" ${EDITOR_ARGS} --project "${PROJECT}" --replay-verify "${OUT}/run.replay" --jobs ${jobs}
         RESULT_VARIABLE code OUTPUT_VARIABLE out ERROR_VARIABLE err)
     if(NOT code EQUAL 0 OR NOT "${out}${err}" MATCHES "240 ticks replayed on ${jobs} thread")
         message(FATAL_ERROR "--replay-verify on ${jobs} job(s) failed (${code}):\n${out}\n${err}")
@@ -45,7 +45,7 @@ endforeach()
 file(COPY "${PROJECT}/" DESTINATION "${OUT}/drifted")
 file(APPEND "${OUT}/drifted/scripts/game.plm" "\nclass Drift {\n    static var amount = 1\n}\n")
 execute_process(
-    COMMAND "${EDITOR}" --project "${OUT}/drifted" --replay-verify "${OUT}/run.replay" --jobs 1
+    COMMAND "${EDITOR}" ${EDITOR_ARGS} --project "${OUT}/drifted" --replay-verify "${OUT}/run.replay" --jobs 1
     RESULT_VARIABLE code OUTPUT_VARIABLE out ERROR_VARIABLE err)
 if(code EQUAL 0 OR NOT "${out}${err}" MATCHES "mismatch at tick 1 of 240")
     message(FATAL_ERROR "--replay-verify accepted a drifted project (${code}):\n${out}\n${err}")
@@ -62,7 +62,7 @@ file(WRITE "${OUT}/play.cmds"
     "expect-hash ${runtime_hash}\n"
     "stop\n")
 execute_process(
-    COMMAND "${EDITOR}" --project "${PROJECT}" --script-commands "${OUT}/play.cmds"
+    COMMAND "${EDITOR}" ${EDITOR_ARGS} --project "${PROJECT}" --script-commands "${OUT}/play.cmds"
     RESULT_VARIABLE code OUTPUT_VARIABLE out ERROR_VARIABLE err)
 if(NOT code EQUAL 0)
     message(FATAL_ERROR "play-in-editor did not reach the runtime's hash ${runtime_hash} (${code}):\n${out}\n${err}")

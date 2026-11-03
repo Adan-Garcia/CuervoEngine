@@ -435,6 +435,14 @@ std::optional<Project> load_project(const assets::Vfs& vfs, std::string& error) 
             (section == "input.actions" ? p.actions : p.axes).emplace_back(key, std::move(list));
             continue;
         }
+        if (section == "input.action_ids") {
+            if (v.kind != TomlValue::Kind::Number || v.num < 1.0 || v.num > 4294967295.0 ||
+                v.num != static_cast<double>(static_cast<std::uint32_t>(v.num))) {
+                return fail(std::format("'{}' in [input.action_ids] must be an integer from 1 to 4294967295", key));
+            }
+            p.action_ids.emplace_back(key, static_cast<std::uint32_t>(v.num));
+            continue;
+        }
         if (section == "features") {
             if (v.kind != TomlValue::Kind::Bool) return fail(std::format("'{}' in [features] must be a boolean", key));
             if (key == "audio") p.features.audio = v.b;
@@ -454,12 +462,98 @@ std::optional<Project> load_project(const assets::Vfs& vfs, std::string& error) 
             if (!dependency_entry(section, key, v, number, p.dependencies, handled, message)) return fail(message);
             if (handled) continue;
         }
+        if (section == "render") {
+            if (key == "color_space" && v.kind == TomlValue::Kind::String && (v.str == "srgb" || v.str == "linear")) {
+                p.linear_color = v.str == "linear";
+            } else if (key == "color_space") {
+                return fail("color_space must be \"srgb\" or \"linear\"");
+            } else {
+                return fail(std::format("unknown key '{}' in [render]", key));
+            }
+            continue;
+        }
+        if (section == "render.post.params") {
+            std::vector<float> values;
+            if (v.kind == TomlValue::Kind::Number) {
+                values.push_back(static_cast<float>(v.num));
+            } else if (v.kind == TomlValue::Kind::Array && !v.items.empty() && v.items.size() <= 4) {
+                for (const TomlValue& item : v.items) {
+                    if (item.kind != TomlValue::Kind::Number) return fail(std::format("'{}' must be numbers", key));
+                    values.push_back(static_cast<float>(item.num));
+                }
+            } else {
+                return fail(std::format("'{}' in [render.post.params] must be a number or an array of up to 4", key));
+            }
+            p.post_params.emplace_back(key, std::move(values));
+            p.post_enabled = true;
+            continue;
+        }
+        if (section == "render.post") {
+            const auto number_in = [&](float& out, float lo, float hi) {
+                if (v.kind != TomlValue::Kind::Number || v.num < lo || v.num > hi) {
+                    return false;
+                }
+                out = static_cast<float>(v.num);
+                return true;
+            };
+            bool ok = true;
+            if (key == "bloom") {
+                ok = v.kind == TomlValue::Kind::Bool;
+                if (ok) p.post.bloom = v.b;
+            } else if (key == "bloom_threshold") ok = number_in(p.post.bloom_threshold, 0.0f, 4.0f);
+            else if (key == "bloom_knee") ok = number_in(p.post.bloom_knee, 0.0f, 4.0f);
+            else if (key == "bloom_intensity") ok = number_in(p.post.bloom_intensity, 0.0f, 8.0f);
+            else if (key == "bloom_levels") {
+                float levels = 0.0f;
+                ok = number_in(levels, 1.0f, 8.0f);
+                p.post.bloom_levels = static_cast<int>(levels);
+            } else if (key == "vignette") ok = number_in(p.post.vignette, 0.0f, 1.0f);
+            else if (key == "vignette_radius") ok = number_in(p.post.vignette_radius, 0.0f, 1.0f);
+            else if (key == "crt") {
+                ok = v.kind == TomlValue::Kind::Bool;
+                if (ok) p.post.crt = v.b;
+            } else if (key == "crt_scanlines") ok = number_in(p.post.crt_scanlines, 0.0f, 1.0f);
+            else if (key == "crt_curvature") ok = number_in(p.post.crt_curvature, 0.0f, 0.5f);
+            else if (key == "crt_mask") ok = number_in(p.post.crt_mask, 0.0f, 1.0f);
+            else if (key == "lut_strength") ok = number_in(p.post.lut_strength, 0.0f, 1.0f);
+            else if (key == "shader" && v.kind == TomlValue::Kind::String) {
+                const std::filesystem::path rel(v.str);
+                bool escapes = rel.is_absolute();
+                for (const auto& part : rel) escapes = escapes || part == "..";
+                if (v.str.empty() || escapes) return fail("shader must be a path inside the project");
+                p.post_shader = v.str;
+            } else if (key == "lut" && v.kind == TomlValue::Kind::String) {
+                const std::filesystem::path rel(v.str);
+                bool escapes = rel.is_absolute();
+                for (const auto& part : rel) escapes = escapes || part == "..";
+                if (v.str.empty() || escapes) return fail("lut must be a path inside the project");
+                p.post_lut = v.str;
+            } else {
+                return fail(std::format("unknown key '{}' in [render.post]", key));
+            }
+            if (!ok) return fail(std::format("invalid value for '{}' in [render.post]", key));
+            p.post_enabled = true;
+            continue;
+        }
         if (section == "scene") {
             if (key == "transform_hierarchy") {
                 if (v.kind != TomlValue::Kind::Bool) return fail("'transform_hierarchy' in [scene] must be a boolean");
                 p.transform_hierarchy = v.b;
             } else {
                 return fail(std::format("unknown key '{}' in [scene]", key));
+            }
+            continue;
+        }
+        if (section == "text") {
+            if (key != "fallbacks") return fail(std::format("unknown key '{}' in [text]", key));
+            if (!strings(p.font_fallbacks)) return fail("'fallbacks' in [text] must be an array of strings");
+            for (const std::string& f : p.font_fallbacks) {
+                const std::filesystem::path rel(f);
+                bool escapes = false;
+                for (const auto& part : rel) escapes = escapes || part == "..";
+                if (f.empty() || rel.is_absolute() || escapes) {
+                    return fail("'fallbacks' in [text] must be paths inside the project, e.g. \"assets/arabic.ttf\"");
+                }
             }
             continue;
         }
@@ -712,6 +806,27 @@ bool resolve_packages(const Project& project, const assets::Vfs& vfs, std::vecto
 }
 
 bool apply_input(const Project& project, InputMap& map, std::string& error) {
+    // Stable action IDs: the explicit ones, else a hash of the name (moved up while it collides).
+    std::vector<std::pair<std::string, std::uint32_t>> ids;
+    std::vector<std::uint32_t> taken;
+    for (const auto& [action, id] : project.action_ids) {
+        const bool known = std::any_of(project.actions.begin(), project.actions.end(),
+                                       [&](const auto& a) { return a.first == action; });
+        if (!known) continue; // left over from a removed action
+        if (std::find(taken.begin(), taken.end(), id) != taken.end()) {
+            error = std::format("[input.action_ids]: the id {} is used twice", id);
+            return false;
+        }
+        taken.push_back(id);
+        ids.emplace_back(action, id);
+    }
+    for (const auto& [action, sources] : project.actions) {
+        if (std::any_of(ids.begin(), ids.end(), [&](const auto& e) { return e.first == action; })) continue;
+        std::uint32_t id = InputMap::derive_action_id(action);
+        while (std::find(taken.begin(), taken.end(), id) != taken.end()) id = id == 0xffffffffu ? 1u : id + 1;
+        taken.push_back(id);
+        ids.emplace_back(action, id);
+    }
     for (const auto& [action, sources] : project.actions) {
         std::vector<Binding> bindings;
         for (const std::string& s : sources) {
@@ -722,7 +837,8 @@ bool apply_input(const Project& project, InputMap& map, std::string& error) {
             }
             bindings.push_back(*b);
         }
-        if (!map.set_action(Name(action), std::span<const Binding>(bindings))) {
+        const auto id = std::find_if(ids.begin(), ids.end(), [&](const auto& e) { return e.first == action; });
+        if (!map.set_action(Name(action), std::span<const Binding>(bindings), id->second)) {
             error = "too many input actions (64 at most)";
             return false;
         }

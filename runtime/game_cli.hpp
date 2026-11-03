@@ -9,19 +9,26 @@
 //                        [--no-hot-reload] [--press <tick:action,...>] [--pointer <tick:x:y,...>]
 //                        [--type <tick:text,...>] [--gl-es] [--no-audio]
 //                        [--record <file.replay>] [--bench <seconds> [--bench-warmup <seconds>]]
-//                        [--profile]
+//                        [--net-host <port> | --net-join <host:port> | --net-relay <ws-url> --net-room <name>]
+//                        [--net-players <n>] [--net-mode lockstep|rollback] [--profile]
 //
 // --screenshot simulates one tick per frame up to the capture tick (240, or
 // --screenshot-tick / CUERVO_SCREENSHOT_TICK), writes that frame and exits, so captures are
 // reproducible and comparable across backends. --press (or CUERVO_PRESS)
 // holds project actions on given ticks, e.g. "60:ui_accept,300:pause", so
-// automated runs can reach menus ("10-20:ui_click" holds for a range of ticks).
+// automated runs can reach menus ("10-20:ui_click" holds for a range of ticks);
+// "60-300:move=1,0" pushes a two-dimensional axis (cuervo/script/game_session.hpp).
+// Every flag is listed in runtime/cli_flags.hpp, which prints --help and docs/CLI.md.
+// Exit codes: 0 ok, 1 failure, 2 scripts did not compile, 3 a script panicked.
 // --pointer ("tick:x:y") puts the pointer somewhere from that tick on, and --type
 // ("tick:text") types text into a focused text field, a character per tick. --gl-es (or CUERVO_GL_ES=1) asks the GL
 // backend for an OpenGL ES 3.0 context, the API WebGL2 exposes, so desktop
 // runs exercise the web's shaders (GLSL ES 300) and limits.
 // --record writes the run as a replay (every tick's input and state hash,
 // docs/REPLAYS.md) when the game ends; `cuervo-editor --replay-verify` checks it.
+// --net-* start a network session before the first tick (docs/REPLAYS.md, DESIGN.md 4.19): the loop then
+// runs the sim through ScriptHost::net_tick, stalling while a peer's input is missing, and --record writes
+// every player's delivered frames.
 // --bench turns VSync off, runs the game for --bench-warmup seconds (default
 // 3), then logs frame-time stats (avg / p50 / p95 / p99 / max, sim and render
 // CPU time) over the given seconds and exits; examples/bench is the SDF stress

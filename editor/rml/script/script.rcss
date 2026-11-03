@@ -1,0 +1,151 @@
+/* Script workspace (editor/rml/script): file tabs, breadcrumb, code view, script list, outline and
+   diagnostics rows. Token colors only (tokens.rcss); the code view reads its palette from the hidden
+   .p-* probe children below, so a theme change recolors it without C++ constants. */
+
+code-view { display: block; flex: 1 1 0; width: 100%; min-height: 0dp; background-color: var(--layer); font-family: "JetBrains Mono"; font-size: 13dp; color: var(--text); tab-index: auto; overflow: hidden; cursor: text; drag: drag; }
+code-view .p { display: block; position: absolute; width: 0dp; height: 0dp; visibility: hidden; }
+code-view .p-text { color: var(--text); }
+code-view .p-kw { color: var(--syn-kw); }
+code-view .p-ty { color: var(--syn-ty); }
+code-view .p-str { color: var(--syn-str); }
+code-view .p-num { color: var(--syn-num); }
+code-view .p-cm { color: var(--syn-cm); }
+code-view .p-err { color: var(--danger); }
+code-view .p-warn { color: var(--warning); }
+code-view .p-note { color: var(--info); }
+code-view .p-gut { color: var(--muted); }
+code-view .p-gutcur { color: var(--text-2); }
+code-view .p-sel { color: var(--accent-subtle); }
+code-view .p-curline { color: var(--hover); }
+code-view .p-caret { color: var(--text); }
+code-view .p-gutbg { color: var(--field); }
+code-view .p-match { color: var(--press); }
+code-view .p-matchcur { color: var(--border-strong); }
+code-view .p-fn { color: var(--text); }
+code-view .p-const { color: var(--syn-num); }
+
+#sview { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0dp; position: relative; }
+#sempty { display: none; flex-direction: column; align-items: flex-start; justify-content: center; flex: 1 1 0; padding: 0 24dp; color: var(--text-2); }
+#sempty .btn { margin-top: 10dp; margin-right: 0dp; }
+
+#stabs { display: flex; flex-direction: row; align-items: center; height: 28dp; flex: none; padding: 0 6dp; border-bottom: 1dp var(--edge); background-color: var(--layer); overflow: hidden; }
+.ftab { display: flex; flex-direction: row; align-items: center; height: 22dp; margin-right: 2dp; padding: 0 4dp 0 8dp; border-radius: 4dp; color: var(--text-2); cursor: pointer; flex: none; transition: background-color 0.1s; }
+.ftab:hover { background-color: var(--hover); color: var(--text); }
+.ftab.active { background-color: var(--field); color: var(--text); border-bottom: 2dp var(--accent); }
+.ftab .fname { white-space: nowrap; }
+.ftab .dirty, .row .dirty { display: block; width: 6dp; height: 6dp; margin-right: 6dp; border-radius: 3dp; background-color: var(--accent); flex: none; }
+.row .dirty { margin-left: 6dp; margin-right: 0dp; }
+.ftab .ferr { margin-left: 6dp; padding: 0 4dp; height: 14dp; line-height: 14dp; border-radius: 3dp; font-size: 11dp; color: var(--danger); border: 1dp var(--danger); }
+.ftab .fx { display: block; width: 16dp; height: 16dp; margin-left: 4dp; padding: 2dp; border-radius: 3dp; opacity: 0.0; }
+.ftab .fx img { width: 12dp; height: 12dp; image-color: var(--text-2); }
+.ftab:hover .fx, .ftab.active .fx { opacity: 1.0; }
+.ftab .fx:hover { background-color: var(--press); }
+.ftab-add { display: block; width: 22dp; height: 22dp; padding: 4dp; border-radius: 4dp; cursor: pointer; flex: none; }
+.ftab-add img { width: 14dp; height: 14dp; image-color: var(--text-2); }
+.ftab-add:hover { background-color: var(--hover); }
+#stabs .btn { margin-right: 0dp; margin-left: 4dp; }
+#stabs .btn.off { color: var(--muted); }
+.closebar { display: flex; flex-direction: row; align-items: center; margin-right: 6dp; color: var(--text); flex: none; }
+.closebar span { margin-right: 8dp; white-space: nowrap; }
+.closebar .btn { margin-left: 0dp; margin-right: 4dp; }
+
+#scrumb { display: flex; flex-direction: row; align-items: center; height: 22dp; flex: none; padding: 0 10dp; border-bottom: 1dp var(--edge); color: var(--text-2); font-size: 12dp; }
+#scrumb .crumbs { white-space: nowrap; flex: 0 1 auto; min-width: 0dp; overflow: hidden; }
+#scrumb .pos { font-family: "JetBrains Mono"; font-size: 12dp; color: var(--muted); white-space: nowrap; flex: none; margin-left: 8dp; }
+#scrumb .sep { margin: 0 6dp; color: var(--muted); }
+
+#pane-script .newrow { padding: 2dp 8dp 4dp 8dp; }
+#script-list { flex: 0 1 auto; max-height: 45%; min-height: 40dp; }
+#script-outline { flex: 1 1 0; }
+#script-list .row .dir { margin-left: 6dp; color: var(--muted); font-size: 12dp; white-space: nowrap; }
+#script-list .row .prob { margin-left: 6dp; color: var(--danger); font-size: 12dp; white-space: nowrap; }
+.orow .kind { display: block; width: 14dp; height: 14dp; line-height: 14dp; margin-right: 6dp; text-align: center; font-family: "JetBrains Mono"; font-size: 11dp; color: var(--muted); border: 1dp var(--border); border-radius: 3dp; flex: none; }
+.orow .kind.kC { color: var(--syn-ty); }
+.orow .kind.km { color: var(--syn-kw); }
+.orow .type { font-family: "JetBrains Mono"; }
+
+.chips { display: flex; flex-direction: row; margin-left: 12dp; flex: none; white-space: nowrap; }
+.chips .chip { flex: none; white-space: nowrap; height: 20dp; line-height: 20dp; padding: 0 8dp; margin-right: 2dp; border-radius: 4dp; color: var(--text-2); cursor: pointer; font-size: 13dp; }
+.chips .chip:hover { background-color: var(--hover); }
+.chips .chip.on { background-color: var(--accent-subtle); color: var(--accent); }
+.drow { display: flex; flex-direction: row; align-items: center; height: 22dp; padding: 0 12dp; cursor: pointer; }
+.drow:hover { background-color: var(--hover); }
+.drow .sev { display: block; width: 16dp; margin-right: 8dp; font-family: "JetBrains Mono"; font-size: 12dp; font-weight: bold; text-align: center; }
+.drow .s-err { color: var(--danger); }
+.drow .s-warn { color: var(--warning); }
+.drow .s-note { color: var(--info); }
+.drow .dmsg { white-space: nowrap; }
+.drow .dcode { font-family: "JetBrains Mono"; font-size: 12dp; color: var(--muted); white-space: nowrap; margin-right: 12dp; }
+.drow .dloc { font-family: "JetBrains Mono"; font-size: 12dp; color: var(--muted); white-space: nowrap; }
+
+#drawer-head .dh-note { margin-right: 10dp; flex: 0 1 auto; min-width: 0dp; overflow: hidden; white-space: nowrap; }
+#script-list .hint, #script-outline .hint { padding: 4dp 12dp; }
+
+/* Find bar: top right of the code view, like mockup s2. */
+#findbar { display: none; position: absolute; right: 70dp; top: 0dp; flex-direction: column; padding: 6dp; background-color: var(--card); border: 1dp var(--border); border-top-width: 0dp; border-radius: 0dp 0dp 4dp 4dp; }
+#findbar.open { display: flex; }
+#findbar .fr { display: flex; flex-direction: row; align-items: center; height: 24dp; margin-bottom: 4dp; }
+#findbar .fr:last-child { margin-bottom: 0dp; }
+#findbar input { width: 190dp; height: 22dp; margin: 0dp 4dp 0dp 0dp; font-family: "JetBrains Mono"; }
+#find-cnt { display: block; width: 62dp; margin: 0dp 4dp; font-family: "JetBrains Mono"; font-size: 12dp; color: var(--muted); white-space: nowrap; overflow: hidden; }
+#find-cnt.bad { color: var(--danger); }
+#findbar .ft { display: block; height: 22dp; line-height: 22dp; min-width: 24dp; padding: 0dp 4dp; margin-right: 2dp; text-align: center; font-family: "JetBrains Mono"; font-size: 11dp; border-radius: 3dp; color: var(--text-2); cursor: pointer; }
+#findbar .ft:hover { background-color: var(--hover); }
+#findbar .ft.on { background-color: var(--accent-subtle); color: var(--accent); }
+#find-rrow { display: none; }
+#findbar.rep #find-rrow { display: flex; }
+
+/* Autocomplete, hover card and signature help (mockup s2). Positioned by ScriptPanel next to the caret. */
+#acpop, #hovercard, #sigcard { display: none; position: absolute; background-color: var(--card); border: 1dp var(--border); border-radius: 4dp; }
+#acpop.open, #hovercard.open, #sigcard.open { display: block; }
+#acpop { width: 380dp; padding: 3dp 0dp; }
+#acpop .ac-it { display: flex; flex-direction: row; align-items: center; height: 22dp; padding: 0dp 8dp; margin: 0dp 3dp; border-radius: 3dp; color: var(--text-2); cursor: pointer; }
+#acpop .ac-it:hover { background-color: var(--hover); }
+#acpop .ac-it.sel { background-color: var(--accent-subtle); color: var(--text); }
+#acpop .k { display: block; width: 16dp; height: 16dp; line-height: 16dp; margin-right: 8dp; border-radius: 3dp; font-family: "JetBrains Mono"; font-size: 10dp; font-weight: bold; text-align: center; background-color: var(--hover); color: var(--text-2); flex: none; }
+#acpop .lbl { font-family: "JetBrains Mono"; font-size: 13dp; white-space: nowrap; }
+#acpop .sig { margin-left: auto; padding-left: 12dp; font-family: "JetBrains Mono"; font-size: 12dp; color: var(--muted); white-space: nowrap; overflow: hidden; }
+#acpop .ac-ft { border-top: 1dp var(--border); margin-top: 3dp; padding: 5dp 10dp 3dp; color: var(--text-2); font-size: 12dp; line-height: 16dp; }
+#acpop .ac-ft .nm { font-family: "JetBrains Mono"; color: var(--text); }
+#hovercard { width: 340dp; padding: 6dp 10dp; font-size: 12dp; line-height: 17dp; color: var(--text-2); }
+#hovercard code, #sigcard code { font-family: "JetBrains Mono"; font-size: 12dp; color: var(--text); }
+#hovercard .mdcode { font-family: "JetBrains Mono"; margin-bottom: 3dp; }
+#hovercard .er { color: var(--danger); font-weight: bold; }
+#hovercard .wr { color: var(--warning); font-weight: bold; }
+#hovercard .dg { margin-top: 3dp; }
+#sigcard { padding: 4dp 10dp; font-family: "JetBrains Mono"; font-size: 12dp; color: var(--text-2); white-space: nowrap; }
+#sigcard .cur { color: var(--accent); font-weight: bold; }
+#sigcard .sd { font-family: "Figtree"; color: var(--muted); }
+#sigcard div, #hovercard div { display: block; }
+
+#renamebar { display: none; position: absolute; right: 70dp; top: 0dp; flex-direction: row; align-items: center; height: 34dp; padding: 0dp 6dp; background-color: var(--card); border: 1dp var(--border); border-top-width: 0dp; border-radius: 0dp 0dp 4dp 4dp; }
+#renamebar.open { display: flex; }
+#renamebar .rl { color: var(--text-2); margin-right: 6dp; }
+#renamebar input { width: 170dp; height: 22dp; margin: 0dp 8dp 0dp 0dp; font-family: "JetBrains Mono"; }
+#renamebar #rename-cnt { color: var(--text-2); margin-right: 8dp; white-space: nowrap; }
+#renamebar .ft { display: block; height: 22dp; line-height: 22dp; padding: 0dp 6dp; margin-right: 2dp; text-align: center; border-radius: 3dp; color: var(--text-2); cursor: pointer; }
+#renamebar .ft:hover { background-color: var(--hover); }
+#renamebar #rename-go { background-color: var(--accent-subtle); color: var(--accent); }
+#renamebar #rename-go.off { background-color: transparent; color: var(--muted); cursor: default; }
+.drow .mono { font-family: "JetBrains Mono"; font-size: 12dp; }
+
+/* Columns wrap under their minimum width (4 across, then 2x2, then stacked); the strip scrolls vertically. */
+.dcols { display: flex; flex-direction: row; flex-wrap: wrap; align-content: flex-start; height: 100%; overflow-y: auto; }
+.dcol { flex: 1 1 190dp; min-width: 170dp; height: 100%; min-height: 120dp; overflow-y: auto; border-right: 1dp var(--border); border-bottom: 1dp var(--border); }
+@media (max-width: 1400dp) { .dcol { height: 50%; min-height: 110dp; } }
+/* Narrow windows: two rows of two. */
+.dcol .dch { height: 22dp; line-height: 22dp; padding: 0dp 10dp; color: var(--text-2); font-size: 11dp; border-bottom: 1dp var(--border); }
+.dcol .drow { padding: 0dp 8dp; overflow: hidden; }
+.dcol .dmsg { flex: 0 1 auto; min-width: 0dp; overflow: hidden; }
+.dcol .dloc { margin-left: 8dp; flex: 0 1 auto; min-width: 0dp; overflow: hidden; }
+.dcol .hint { display: block; padding: 6dp 10dp; white-space: normal; color: var(--text-2); }
+.dcol .drow.selected { background-color: var(--accent-subtle); }
+.dcol .drow input { width: 100%; height: 20dp; font-family: "JetBrains Mono"; }
+.dcol .twist { display: block; width: 12dp; color: var(--muted); font-family: "JetBrains Mono"; }
+.dcol .bpdot { display: block; width: 14dp; color: var(--danger); font-family: "JetBrains Mono"; }
+.dcol .fx { display: block; margin-left: 6dp; opacity: 0.6; }
+.dcol .fx:hover { opacity: 1; }
+.dcol .dloc.bad { color: var(--muted); }
+#drawer-head .dh-tag { margin-right: 8dp; padding: 0dp 5dp; height: 16dp; line-height: 16dp; font-size: 11dp; border: 1dp var(--border); border-radius: 3dp; color: var(--text-2); }
+#drawer-head .dh-tag.paused { border-color: var(--warning); color: var(--warning); }
+#drawer-head .btn.off { opacity: 0.45; }

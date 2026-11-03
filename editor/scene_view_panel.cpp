@@ -30,7 +30,8 @@
 #include "editor/app.hpp"
 #include "editor/commands.hpp"
 #include "editor/panels.hpp"
-#include "editor/theme.hpp"
+#include "editor/scene_input.hpp"
+#include "editor/imgui_theme.hpp"
 #include "editor/ui.hpp"
 
 namespace cuervo::editor {
@@ -42,59 +43,6 @@ constexpr float ring_radius = 60.0f; // pixels, the rotate ring
 constexpr float pick_slop = 7.0f;
 constexpr float pi = 3.14159265f;
 
-void paint_cell(EditorDocument& doc, NodeId id, int cx, int cy, int tile_id, bool erase) {
-    bool stored = false;
-    scene::Value before = doc.field_value(id, "cells", &stored);
-    scene::Value after = before;
-    if (after.kind != scene::ValueKind::List) {
-        after.kind = scene::ValueKind::List;
-        after.items.clear();
-    }
-    int found_idx = -1;
-    for (std::size_t i = 0; i < after.items.size(); ++i) {
-        const auto& item = after.items[i];
-        if (item.kind == scene::ValueKind::Struct) {
-            int ix = 0, iy = 0;
-            for (const auto& f : item.fields) {
-                if (f.name == "x" && f.value.kind == scene::ValueKind::Int) ix = static_cast<int>(f.value.i);
-                if (f.name == "y" && f.value.kind == scene::ValueKind::Int) iy = static_cast<int>(f.value.i);
-            }
-            if (ix == cx && iy == cy) {
-                found_idx = static_cast<int>(i);
-                break;
-            }
-        }
-    }
-    if (erase) {
-        if (found_idx >= 0) {
-            after.items.erase(after.items.begin() + found_idx);
-            doc.set_field(id, "cells", after, true);
-        }
-    } else {
-        scene::Value cell_val;
-        cell_val.kind = scene::ValueKind::Struct;
-        cell_val.type = "TileCell";
-        cell_val.fields.push_back({"x", {}, scene::Value::integer(cx)});
-        cell_val.fields.push_back({"y", {}, scene::Value::integer(cy)});
-        cell_val.fields.push_back({"tile_id", {}, scene::Value::integer(tile_id)});
-        cell_val.fields.push_back({"terrain", {}, scene::Value::integer(-1)});
-
-        if (found_idx >= 0) {
-            int cur_tid = -1;
-            for (const auto& f : after.items[static_cast<std::size_t>(found_idx)].fields) {
-                if (f.name == "tile_id" && f.value.kind == scene::ValueKind::Int) cur_tid = static_cast<int>(f.value.i);
-            }
-            if (cur_tid != tile_id) {
-                after.items[static_cast<std::size_t>(found_idx)] = cell_val;
-                doc.set_field(id, "cells", after, true);
-            }
-        } else {
-            after.items.push_back(cell_val);
-            doc.set_field(id, "cells", after, true);
-        }
-    }
-}
-
 float segment_distance(vec2 p, vec2 a, vec2 b) {
     const vec2 ab = b - a;
     const float t = std::clamp(dot(p - a, ab) / std::max(dot(ab, ab), 1e-6f), 0.0f, 1.0f);
@@ -104,14 +52,6 @@ float segment_distance(vec2 p, vec2 a, vec2 b) {
 
 ImVec2 im(vec2 v) { return {v.x(), v.y()}; }
 vec2 cv(ImVec2 v) { return {v.x, v.y}; }
-
-float wrap_pi(float a) {
-    while (a > pi) a -= 2.0f * pi;
-    while (a < -pi) a += 2.0f * pi;
-    return a;
-}
-
-enum class Handle { None, MoveX, MoveY, MoveFree, Ring, ScaleX, ScaleY, ScaleBoth, Marquee };
 
 class SceneViewPanel final : public Panel {
 public:
@@ -236,28 +176,16 @@ public:
         const ModelNode* sel_node = doc.model().get(sel_id);
         const bool is_tilemap = sel_node != nullptr && sel_node->type == "TileMapLayer";
 
-        vec2 tile_sz{32.0f, 32.0f};
-        vec2 layer_origin{0.0f, 0.0f};
-        if (is_tilemap) {
-            bool stored_ts = false;
-            scene::Value ts_val = doc.field_value(sel_id, "tile_size", &stored_ts);
-            if (ts_val.kind == scene::ValueKind::Vec && ts_val.vec.size() >= 2) {
-                tile_sz = vec2{ts_val.vec[0], ts_val.vec[1]};
-            }
-            if (tile_sz.x() <= 0.0f || tile_sz.y() <= 0.0f) tile_sz = vec2{32.0f, 32.0f};
-            if (const NodeBounds* b = bounds_of(sel_id); b != nullptr && b->has_position) {
-                layer_origin = b->position;
-            }
-        }
         const vec2 world_m = to_world(mouse);
-        const int cell_x = is_tilemap ? static_cast<int>(std::floor((world_m.x() - layer_origin.x()) / tile_sz.x())) : 0;
-        const int cell_y = is_tilemap ? static_cast<int>(std::floor((world_m.y() - layer_origin.y()) / tile_sz.y())) : 0;
+        const TileCellRef cell = is_tilemap ? tile_cell_at(doc, sel_id, order, bounds, world_m) : TileCellRef{};
+        const vec2 tile_sz = cell.tile, layer_origin = cell.origin;
+        const int cell_x = cell.x, cell_y = cell.y;
 
         if (tool == Tool::Paint && is_tilemap) {
             if (hovered && (ImGui::IsMouseDown(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Left))) {
-                paint_cell(doc, sel_id, cell_x, cell_y, app.paint_tile_id(), false);
+                paint_tile_cell(doc, sel_id, cell_x, cell_y, app.paint_tile_id(), false);
             } else if (hovered && (ImGui::IsMouseDown(ImGuiMouseButton_Right) || ImGui::IsMouseClicked(ImGuiMouseButton_Right))) {
-                paint_cell(doc, sel_id, cell_x, cell_y, 0, true);
+                paint_tile_cell(doc, sel_id, cell_x, cell_y, 0, true);
             }
             if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) || ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
                 doc.seal();
@@ -286,17 +214,12 @@ public:
                 }
                 drag_start_ = to_world(mouse);
                 applied_ = {0.0f, 0.0f};
-                applied_angle_ = 0.0f;
-                applied_factor_ = 1.0f;
                 marquee_moved_ = false;
                 if (drag_ != Handle::None && drag_ != Handle::Marquee && pivot) {
                     pivot_ = *pivot;
                     const vec2 p = a;
-                    last_mouse_angle_ = std::atan2(mouse.y() - p.y(), mouse.x() - p.x());
-                    total_angle_ = 0.0f;
-                    start_distance_ = std::max(8.0f, length_of(mouse - p));
-                    start_axis_distance_ = std::max(8.0f, drag_ == Handle::ScaleY ? std::abs(mouse.y() - p.y())
-                                                                                  : std::abs(mouse.x() - p.x()));
+                    turn_.begin(mouse, p);
+                    scale_.begin(drag_, mouse, p);
                 }
             }
             // ---- dragging
@@ -407,40 +330,14 @@ private:
                 break;
             }
             case Handle::Ring: {
-                const float now = std::atan2(mouse.y() - a.y(), mouse.x() - a.x());
-                total_angle_ += wrap_pi(now - last_mouse_angle_);
-                last_mouse_angle_ = now;
-                float target = total_angle_;
-                if (snap) {
-                    target = std::round(target / (pi / 12.0f)) * (pi / 12.0f); // 15 degrees
-                } else if (!free) {
-                    target = std::round(target * 1000.0f) / 1000.0f;
-                }
-                if (target != applied_angle_) {
-                    app.report(doc.rotate_selection_by(target - applied_angle_, pivot_, true));
-                    applied_angle_ = target;
-                }
+                const float step = turn_.update(mouse, a, snap, free);
+                if (step != 0.0f) app.report(doc.rotate_selection_by(step, pivot_, true));
                 break;
             }
             case Handle::ScaleX:
             case Handle::ScaleY:
             case Handle::ScaleBoth: {
-                float factor = 1.0f;
-                if (h == Handle::ScaleBoth) {
-                    factor = length_of(mouse - a) / start_distance_;
-                } else {
-                    const float d = h == Handle::ScaleX ? std::abs(mouse.x() - a.x()) : std::abs(mouse.y() - a.y());
-                    factor = d / start_axis_distance_;
-                }
-                factor = std::clamp(factor, 0.05f, 20.0f);
-                factor = snap ? std::round(factor * 10.0f) / 10.0f : std::round(factor * 100.0f) / 100.0f;
-                factor = std::max(factor, 0.05f);
-                if (factor != applied_factor_) {
-                    const float ratio = factor / applied_factor_;
-                    const vec2 f{h == Handle::ScaleY ? 1.0f : ratio, h == Handle::ScaleX ? 1.0f : ratio};
-                    app.report(doc.scale_selection_by(f, pivot_, true));
-                    applied_factor_ = factor;
-                }
+                if (const auto f = scale_.update(h, mouse, a, snap)) app.report(doc.scale_selection_by(*f, pivot_, true));
                 break;
             }
             case Handle::Marquee:
@@ -455,24 +352,7 @@ private:
             if (!marquee_additive_) doc.select(doc.model().root());
             return;
         }
-        const vec2 lo = min(drag_start_, world_end);
-        const vec2 hi = max(drag_start_, world_end);
-        std::vector<NodeId> hit;
-        if (marquee_additive_) hit = doc.selected();
-        for (std::size_t i = 0; i < order.size() && i < bounds.size(); ++i) {
-            if (order[i] == doc.model().root()) continue;
-            const NodeBounds& b = bounds[i];
-            bool inside = false;
-            if (b.has_rect) {
-                inside = b.rect_min.x() <= hi.x() && b.rect_min.x() + b.rect_size.x() >= lo.x() &&
-                         b.rect_min.y() <= hi.y() && b.rect_min.y() + b.rect_size.y() >= lo.y();
-            } else if (b.has_position) {
-                inside = b.position.x() >= lo.x() && b.position.x() <= hi.x() && b.position.y() >= lo.y() &&
-                         b.position.y() <= hi.y();
-            }
-            if (inside && std::find(hit.begin(), hit.end(), order[i]) == hit.end()) hit.push_back(order[i]);
-        }
-        doc.select_set(hit);
+        marquee_select(doc, order, bounds, drag_start_, world_end, marquee_additive_);
     }
 
     template <typename ToScreen>
@@ -522,13 +402,13 @@ private:
             dl->AddCircleFilled(im(a), 3.0f, lit(Handle::Ring, ui.accent));
             if (drag_ == Handle::Ring) {
                 // The turned angle as a wedge from the start direction.
-                const float start = last_mouse_angle_ - total_angle_;
+                const float start = turn_.start_angle();
                 dl->PathLineTo(im(a));
-                dl->PathArcTo(im(a), ring_radius - 10.0f, start, start + total_angle_, 48);
+                dl->PathArcTo(im(a), ring_radius - 10.0f, start, start + turn_.total, 48);
                 dl->PathFillConvex(theme::im32(brand::with_alpha(ui.accent, 0.22f)));
-                const ImVec2 tip{a.x() + std::cos(last_mouse_angle_) * ring_radius, a.y() + std::sin(last_mouse_angle_) * ring_radius};
+                const ImVec2 tip{a.x() + std::cos(turn_.last) * ring_radius, a.y() + std::sin(turn_.last) * ring_radius};
                 dl->AddLine(im(a), tip, theme::im32(ui.accent), 1.5f);
-                const std::string label = std::format("{:+.1f}\xC2\xB0", applied_angle_ * 180.0f / pi);
+                const std::string label = std::format("{:+.1f}\xC2\xB0", turn_.applied * 180.0f / pi);
                 dl->AddText({a.x() + 12.0f, a.y() - ring_radius - 22.0f}, theme::im32(ui.text), label.c_str());
             }
         } else if (tool == Tool::Scale) {
@@ -542,7 +422,7 @@ private:
             dl->AddRectFilled(im(ye - vec2{6.0f, 6.0f}), im(ye + vec2{6.0f, 6.0f}), lit(Handle::ScaleY, yc), 1.5f);
             dl->AddRectFilled(im(a - vec2{6.0f, 6.0f}), im(a + vec2{6.0f, 6.0f}), lit(Handle::ScaleBoth, both), 1.5f);
             if (drag_ == Handle::ScaleX || drag_ == Handle::ScaleY || drag_ == Handle::ScaleBoth) {
-                const std::string label = std::format("\xC3\x97{:.2f}", applied_factor_);
+                const std::string label = std::format("\xC3\x97{:.2f}", scale_.applied);
                 dl->AddText({a.x() + 12.0f, a.y() - 28.0f}, theme::im32(ui.text), label.c_str());
             }
         }
@@ -553,12 +433,8 @@ private:
     vec2 applied_{0.0f, 0.0f};
     EditorDocument::DeltaToLocal to_local_; // set while drag() runs (world -> local move deltas)
     vec2 pivot_{0.0f, 0.0f};
-    float applied_angle_ = 0.0f;
-    float total_angle_ = 0.0f;
-    float last_mouse_angle_ = 0.0f;
-    float applied_factor_ = 1.0f;
-    float start_distance_ = 8.0f;
-    float start_axis_distance_ = 8.0f;
+    TurnDrag turn_;
+    ScaleDrag scale_;
     vec2 marquee_a_{0.0f, 0.0f};
     bool marquee_moved_ = false;
     bool marquee_additive_ = false;

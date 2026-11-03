@@ -17,7 +17,7 @@
 // entry's path, size and modification time with the last scan.
 namespace cuervo::editor {
 
-enum class AssetKind { Folder, Scene, Script, Font, Sound, Vector, Image, Replay, Project, Other };
+enum class AssetKind { Folder, Scene, Script, Font, Sound, Vector, Image, Atlas, Replay, Project, Other };
 
 std::string_view asset_kind_name(AssetKind kind);
 AssetKind asset_kind_of(const std::filesystem::path& path);

@@ -5,6 +5,8 @@
 //                                 [--args "<runtime args>"] [--expect "<log text>"] [--gpu]
 //                                 [--no-webgpu] [--expect-backend webgpu|gl]
 //                                 [--pull <memfs path>=<file>] [--browser-flags "<flags>"]
+//                                 [--expect-audio worklet|script]
+//                                 [--profile <dir>]   (browser profile kept between runs; see persist_smoke.mjs)
 //
 // Serves <dir> on 127.0.0.1, starts headless Chrome/Chromium (SwiftShader
 // WebGL2) with remote debugging, opens index.html?args=--quit-after <seconds>
@@ -44,6 +46,8 @@ const browserFlags = opt('--browser-flags', '').split(' ').filter(Boolean);
 const noWebgpu = process.argv.includes('--no-webgpu');
 const expectBackend = opt('--expect-backend', '');
 const pull = opt('--pull', '');
+const expectAudio = opt('--expect-audio', ''); // worklet | script: which Web Audio node the engine used
+const keepProfile = opt('--profile', ''); // reused across runs: IndexedDB persists in it
 const backendLine = { webgpu: 'WebGPU device:', gl: 'OpenGL device:' }[expectBackend];
 if (expectBackend && !backendLine) {
     console.error(`smoke_test: --expect-backend takes webgpu or gl, not '${expectBackend}'`);
@@ -86,7 +90,7 @@ if (!browserPath) {
     process.exit(77);
 }
 await new Promise((ok) => server.listen(port, '127.0.0.1', ok));
-const profile = mkdtempSync(join(tmpdir(), 'cuervo-web-smoke-'));
+const profile = keepProfile ? resolve(keepProfile) : mkdtempSync(join(tmpdir(), 'cuervo-web-smoke-'));
 const browser = spawn(browserPath, [
     '--headless=new', '--no-sandbox', '--no-first-run', '--no-default-browser-check',
     `--user-data-dir=${profile}`, '--remote-debugging-port=0',
@@ -108,7 +112,7 @@ let backendSeen = !backendLine;
 const finish = (code) => {
     browser.kill('SIGKILL');
     server.close();
-    try { rmSync(profile, { recursive: true, force: true }); } catch { /* best effort */ }
+    if (!keepProfile) try { rmSync(profile, { recursive: true, force: true }); } catch { /* best effort */ }
     console.log(code === 0 ? 'smoke_test: OK' : 'smoke_test: FAILED');
     process.exit(code);
 };
@@ -161,6 +165,10 @@ ws.onmessage = async (event) => {
             }, (seconds * 1000) / 2);
         }
         if (text.includes('[web] engine exited')) {
+            if (expectAudio && !lines.some((l) => l.includes('audio node: ' + expectAudio))) {
+                console.error(`smoke_test: no ${expectAudio} audio node was created`);
+                failed = true;
+            }
             if (!backendSeen) console.error(`smoke_test: the engine never logged "${backendLine}"`);
             const pulled = pull ? await pullFile() : true;
             finish(passed && backendSeen && pulled && !failed ? 0 : 1);
@@ -201,4 +209,13 @@ if (noWebgpu) {
         source: "Object.defineProperty(Navigator.prototype, 'gpu', { get: () => undefined, configurable: true });",
     });
 }
+// --expect-audio: log which Web Audio node type the page creates (milestone 11.9: the
+// threads builds run on an AudioWorklet, the single-threaded ones on a ScriptProcessorNode).
+await send('Page.addScriptToEvaluateOnNewDocument', { source: `(() => {
+    const note = (kind) => console.log('[smoke] audio node: ' + kind);
+    const sp = BaseAudioContext.prototype.createScriptProcessor;
+    BaseAudioContext.prototype.createScriptProcessor = function (...a) { note('script'); return sp.apply(this, a); };
+    const W = window.AudioWorkletNode;
+    if (W) window.AudioWorkletNode = class extends W { constructor(...a) { super(...a); note('worklet'); } };
+})();` });
 await send('Page.navigate', { url: `http://127.0.0.1:${port}/index.html?args=${encodeURIComponent(runtimeArgs)}` });

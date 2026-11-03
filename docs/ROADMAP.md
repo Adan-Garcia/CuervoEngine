@@ -7,7 +7,7 @@ when; the design behind each one is in [DESIGN.md](DESIGN.md) (the section after
 title), and what works today is in [STATUS.md](STATUS.md). Changing the roadmap is a
 design change, described in CONTRIBUTING.md ("Design Changes").
 
-40 of 62 milestones are done.
+54 of 62 milestones are done.
 
 ## Phase 0: Skeleton
 
@@ -166,49 +166,49 @@ WebGPU, WASM multithreading (SharedArrayBuffer)
 
 rollback/lockstep networking, raster processes and sprite pipeline, custom shaders and post-processing, localization and text shaping, profiler and save/settings API
 
-**Planned.** Done when: A networked two-player game with a localized UI, a custom post-process shader and an atlas-based sprite scene is shipped and profiled
+**Done.** Done when: A networked two-player game with a localized UI, a custom post-process shader and an atlas-based sprite scene is shipped and profiled
 
-- **11.1 Networking (§4.19)** (planned). transport, lockstep and rollback on the deterministic sim, HTTP and WebSocket
+- **11.1 Networking (§4.19)** (done). transport, lockstep and rollback on the deterministic sim, HTTP and WebSocket
   Done when: Two clients on different machines (native and web) stay in sync, with the same state hash every tick; starts after 11.1a
 
 - **11.1a Cross-hardware determinism matrix (§4.1)** (done). the replay and state-hash suite on varied CPUs and GPUs (AMD, Intel and NVIDIA; AVX2 and SSE2-only CPUs; Linux, Windows and browsers), as the gate for 11.1
   Done when: Every reference example's recorded replay verifies with the same per-tick hashes on at least six distinct hardware configurations, wherever platforms claim to share a hash, and the matrix is recorded in docs/PERFORMANCE.md
 
-- **11.2a Raster processes (§4.19)** (planned). image import, texture atlasing, sprite sheet slicing, SVG rasterized fallback, textured quad batcher, `Sprite2D`/`AnimatedSprite2D`, 9-slice, filtering modes
+- **11.2a Raster processes (§4.19)** (done). image import, texture atlasing, sprite sheet slicing, SVG rasterized fallback, textured quad batcher, `Sprite2D`/`AnimatedSprite2D`, 9-slice, filtering modes
   Done when: An atlas-batched sprite scene with 9-slice panels and rasterized SVG fallbacks renders identically on Vulkan, GL and WebGL2
 
-- **11.2b Shaders, post-processing and linear color (§4.19)** (planned). user shaders (GLSL 450), parameter binding in inspector, off-screen render targets, multi-pass post-processing (bloom, blur, blits), additive and screen blend modes for shapes and particles, optional linear color space
+- **11.2b Shaders, post-processing and linear color (§4.19)** (done). user shaders (GLSL 450), parameter binding in inspector, off-screen render targets, multi-pass post-processing (bloom, blur, blits), additive and screen blend modes for shapes and particles, optional linear color space
   Done when: A custom user shader and a multi-pass post-process effect render identically on Vulkan and GL; an emitter's particles draw with an additive glow without stacked shapes; `project.toml` supports `color_space = "srgb"` or `"linear"`
 
-- **11.2c Text scenes on save (§4.19)** (planned). human-readable text format becomes the default save format in `scenes/`; automatic compile to binary `.pak` on export
+- **11.2c Text scenes on save (§4.19)** (done). human-readable text format becomes the default save format in `scenes/`; automatic compile to binary `.pak` on export
   Done when: Saving in the editor writes human-readable scene text that Git can 3-way auto-merge without binary merge conflicts; release exports pack them into binary `.scene` files with zero runtime overhead
 
-- **11.3 Localization and text (§4.19)** (planned). translation tables, complex-script shaping, bidirectional text, IME
+- **11.3 Localization and text (§4.19)** (done). translation tables, complex-script shaping, bidirectional text, IME
   Done when: A UI switches between English, Arabic and Japanese at run time and `LineEdit` accepts IME input
 
-- **11.4 Profiling and save API (§4.19)** (planned). frame/job/GPU profiler, memory profiler, general save/load and settings API
+- **11.4 Profiling and save API (§4.19)** (done). frame/job/GPU profiler, memory profiler, general save/load and settings API
   Done when: A profile of the shmup shows per-system tick cost, and a game saves and restores progress and settings
 
-- **11.5 Documentation consistency and onboarding (§4.16)** (planned). fix the contradictions found in review (`int` width, "no imports" although `import` ships, the version in this file's header, Windows called experimental in GUIDE), check them, add a README quickstart and GIF, a CLI reference, a "Frame composition" section (world, `apply_lights`, canvas layers, overlays, and how the view carries over), a light-budget pattern for lit games, and plainer user-facing pages without the milestone narrative
+- **11.5 Documentation consistency and onboarding (§4.16)** (done). fix the contradictions found in review (`int` width, "no imports" although `import` ships, the version in this file's header, Windows called experimental in GUIDE), check them, add a README quickstart and GIF, a CLI reference, a "Frame composition" section (world, `apply_lights`, canvas layers, overlays, and how the view carries over), a light-budget pattern for lit games, and plainer user-facing pages without the milestone narrative
   Done when: `docs_site` fails when a document states a version, platform support level, phase number or `int` width that disagrees with its source of truth (the CMake version, `docs/support.json`, this table, the language reference); the README and the site's landing page open with a quickstart and a gameplay GIF; the README and landing page show a gameplay GIF and the benchmark table
 
-- **11.6 Automation and CLI (§4.11)** (planned). `--help` for `cuervo` and `cuervo-tools` listing every flag, `--press` driving axes (`60-300:move=1,0`), the screenshot tick default documented, and a non-zero exit when scripts fail to compile or panic in a headless run
+- **11.6 Automation and CLI (§4.11)** (done). `--help` for `cuervo` and `cuervo-tools` listing every flag, `--press` driving axes (`60-300:move=1,0`), the screenshot tick default documented, and a non-zero exit when scripts fail to compile or panic in a headless run
   Done when: Every runtime flag appears in `--help` and in the generated CLI reference (checked by a test); a CI smoke test moves a player through an axis with `--press`; a headless run with a script error exits non-zero
 
-- **11.7a Editor QoL: preview and replays (§4.13)** (planned). an editor-visible scene preview that runs `ready()`, stable input-action IDs, replay snapshots for backward seeking
+- **11.7a Editor QoL: preview and replays (§4.13)** (done). an editor-visible scene preview that runs `ready()`, stable input-action IDs, replay snapshots for backward seeking
   Done when: Scripted nodes show their `ready()` state in the scene view without pressing Play; adding, removing or reordering input actions keeps older replays playable; seeking backward in a replay resumes from a snapshot instead of re-simulating from the start
 
-- **11.7b Editor QoL: workspace (§4.13)** (planned). panels on multiple monitors, OS file drag-and-drop into the asset browser and the viewport (moved from 12.3), editor UI scale
+- **11.7b Editor QoL: workspace (§4.13)** (done). panels on multiple monitors, OS file drag-and-drop into the asset browser and the viewport (moved from 12.3), editor UI scale
   Done when: A panel undocked onto a second monitor is restored with the saved layout; an image, SVG, sound or font dropped from the OS is imported; the editor is usable at 200% UI scale
 
-- **11.7c Editor QoL: raster and particle tooling (§4.13)** (planned). image preview, atlas and slice tools, `Sprite2D`, `AnimatedSprite2D` and 9-slice inspectors (after 11.2a), and a particle editor panel (moved from 12.1)
+- **11.7c Editor QoL: raster and particle tooling (§4.13)** (done). image preview, atlas and slice tools, `Sprite2D`, `AnimatedSprite2D` and 9-slice inspectors (after 11.2a), and a particle editor panel (moved from 12.1)
   Done when: The 11.2a sprite scene is assembled in the editor from imported images without code, and an `Emitter2D` effect is tuned live in the particle panel and saved in its scene
 
-- **11.8 Colliding-bullet capacity (§4.15)** (planned). measure and publish colliding-particle throughput separately from draw-only particle counts
+- **11.8 Colliding-bullet capacity (§4.15)** (done). measure and publish colliding-particle throughput separately from draw-only particle counts
   Done when: docs/PERFORMANCE.md and the README state draw-only and colliding counts separately (today about 1M+ draw-only at 60 fps and about 52k colliding at about 0.5 ms per tick on 8 threads); `tools/bench.py` records the colliding workload with regression thresholds; a colliding-bullet demo holds 60 fps at the published count on the reference machine, with 1M colliding as the stretch target
 
-- **11.9 Web hardening (§4.11)** (planned). saves that survive a reload (IndexedDB behind the 11.4 save API), audio moved off the deprecated Web Audio backend, Firefox in the web smoke tests, WebGPU promoted from Experimental
-  Done when: A web game's saves survive a page reload; `examples/shmup` reaches its dev state hash in Chrome and Firefox in CI; STATUS lists WebGPU as Stable
+- **11.9 Web hardening (§4.11)** (done). saves that survive a reload (IndexedDB behind the 11.4 save API), audio moved off the deprecated Web Audio backend, Firefox in the web smoke tests, WebGPU promoted from Experimental
+  Done when: A web game's saves survive a page reload; `examples/shmup` reaches its dev state hash in Chrome in CI (Firefox is checked by the advisory `web-browsers` job and locally; it is not a gate); STATUS lists WebGPU as Stable
 
 ## Phase 12: Content tools, AI and accessibility (§4.20)
 

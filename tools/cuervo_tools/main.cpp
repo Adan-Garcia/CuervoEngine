@@ -2,6 +2,8 @@
 //
 //   cuervo-tools scene dump <file.scene>               stable text view on stdout
 //   cuervo-tools scene build <file.txt> <file.scene>   text view -> binary
+//   cuervo-tools scene load-text <file.txt> <file.scene>  parse the text view, write canonical text
+//   cuervo-tools scene migrate <dir> --text|--binary [--dry-run]  convert every .scene under dir
 //   cuervo-tools scene upgrade <file.scene> [<out>]    rewrite in the current version
 //   cuervo-tools tier check <project> [--to compatible|full] [--platform linux|windows|web]
 //   cuervo-tools tier set <project> compatible|full [--force]
@@ -40,6 +42,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <iostream>
 #include <optional>
 #include <sstream>
@@ -57,6 +60,8 @@
 #include "pluma/format.hpp"
 #include "pluma/lsp.hpp"
 #include "tools/cuervo_tools/api_docs.hpp"
+#include "tools/cuervo_tools/cli_docs.hpp"
+#include "tools/cuervo_tools/shader_build.hpp"
 #include "tools/cuervo_tools/export.hpp"
 #include "tools/cuervo_tools/packages.hpp"
 #include "tools/cuervo_tools/registry.hpp"
@@ -64,38 +69,44 @@
 namespace {
 
 int usage() {
-    std::fputs("usage:\n"
-               "  cuervo-tools scene dump <file.scene>\n"
-               "  cuervo-tools scene build <file.txt> <file.scene>\n"
-               "  cuervo-tools scene upgrade <file.scene> [<out.scene>]\n"
-               "  cuervo-tools tier check <project> [--to compatible|full] [--platform linux|windows|web]\n"
-               "  cuervo-tools tier set <project> compatible|full [--force]\n"
-               "  cuervo-tools pack <project> -o <game.pak> [--platform linux|web|windows] [--scripts source|native]\n"
-               "               [--aot] [--strip] [--font <file>]\n"
-               "  cuervo-tools export <project> --platform linux|web|windows -o <dir> [--scripts source|native] [--aot]\n"
-               "               [--strip] [--runtime <path>] [--name <launcher>] [--font <file>]\n"
-               "               [--engine auto|full|stripped] [--cmake <path>] [--player-cache <dir>] [--no-verify]\n"
-               "               [--emsdk <dir>] [--host-build <dir>]   (web stripped players)\n"
-               "  cuervo-tools pack-info <game.pak>\n"
-               "  cuervo-tools fmt <file-or-project> [--check] [--write|-w]\n"
-               "  cuervo-tools lsp [<project>] [--check-style|--no-check-style]\n"
-               "  cuervo-tools docs [-o <file.md>] [--check <file.md>] [--check-coverage]\n"
-               "  cuervo-tools package new <dir> --name <name> [--version <x.y.z>]\n"
-               "  cuervo-tools package check <dir>\n"
-               "  cuervo-tools test <project-or-package> [--filter <substring>]\n"
-               "  cuervo-tools plugin verify <package-dir> [--registry <dir>]\n"
-               "  cuervo-tools plugin publish <package-dir> [--registry <dir>]\n"
-               "  cuervo-tools plugin install <name>[@<range>] [--project <dir>] [--registry <dir>]\n"
-               "  cuervo-tools plugin list [--registry <dir>]\n"
-               "  cuervo-tools license report <project>\n"
-               "  (--registry defaults to $CUERVO_REGISTRY)\n",
-               stderr);
+    // Generated from the flag table (tools/cuervo_tools/cli_flags.hpp).
+    std::fputs(cuervo::tools::tools_help().c_str(), stderr);
     return 2;
 }
 
 int fail(const std::string& message) {
     std::fprintf(stderr, "cuervo-tools: %s\n", message.c_str());
     return 1;
+}
+
+// Converts every *.scene under `dir` (a project or a scenes/ folder) to `format`,
+// leaving files already in it alone. Old format versions migrate on load.
+int migrate_scenes(const char* dir_arg, cuervo::scene::SaveFormat format, bool dry_run) {
+    using namespace cuervo;
+    namespace fs = std::filesystem;
+    const fs::path dir = platform::path_from_utf8(dir_arg);
+    std::vector<fs::path> files;
+    std::error_code ec;
+    for (fs::recursive_directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        if (it->is_regular_file(ec) && it->path().extension() == ".scene") files.push_back(it->path());
+    }
+    std::sort(files.begin(), files.end());
+    int changed = 0;
+    for (const fs::path& p : files) {
+        std::ifstream in(p, std::ios::binary);
+        std::vector<char> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        in.close();
+        const bool is_bin = scene::is_binary(std::as_bytes(std::span(bytes)));
+        if (is_bin == (format == scene::SaveFormat::Binary)) continue;
+        std::string error;
+        auto doc = scene::load_file(p, error);
+        if (!doc) return fail(error);
+        if (!dry_run && !scene::save_file(p, *doc, error, format)) return fail(error);
+        std::printf("%s %s\n", dry_run ? "would convert" : "converted", platform::utf8(p).c_str());
+        ++changed;
+    }
+    std::printf("%d scene file(s) %s\n", changed, dry_run ? "to convert" : "converted");
+    return 0;
 }
 
 int scene_command(int argc, char** argv) {
@@ -110,21 +121,40 @@ int scene_command(int argc, char** argv) {
         std::fwrite(text.data(), 1, text.size(), stdout);
         return 0;
     }
-    if (cmd == "build" && argc == 5) {
+    if ((cmd == "build" || cmd == "load-text") && argc == 5) {
         std::ifstream in(argv[3], std::ios::binary);
         if (!in) return fail(std::string("can't open ") + argv[3]);
         std::stringstream ss;
         ss << in.rdbuf();
         auto doc = scene::parse_text(ss.str(), error);
         if (!doc) return fail(std::string(argv[3]) + ": " + error);
-        if (!scene::save_file(argv[4], *doc, error)) return fail(error);
+        // `build` compiles to binary; `load-text` normalizes to canonical text.
+        const bool text = cmd == "load-text";
+        if (!scene::save_file(argv[4], *doc, error, text ? scene::SaveFormat::Text : scene::SaveFormat::Binary)) {
+            return fail(error);
+        }
         return 0;
+    }
+    if (cmd == "migrate" && (argc == 5 || argc == 6) && std::string_view(argv[4]) == "--text") {
+        return migrate_scenes(argv[3], scene::SaveFormat::Text, argc == 6 && std::string_view(argv[5]) == "--dry-run");
+    }
+    if (cmd == "migrate" && (argc == 5 || argc == 6) && std::string_view(argv[4]) == "--binary") {
+        return migrate_scenes(argv[3], scene::SaveFormat::Binary, argc == 6 && std::string_view(argv[5]) == "--dry-run");
     }
     if (cmd == "upgrade" && (argc == 4 || argc == 5)) {
         scene::LoadInfo info;
         auto doc = scene::load_file(argv[3], error, &info);
         if (!doc) return fail(error);
-        if (!scene::save_file(argc == 5 ? argv[4] : argv[3], *doc, error)) return fail(error);
+        // Keep the input's form: upgrading a text scene stays text.
+        std::ifstream probe(argv[3], std::ios::binary);
+        char head[4] = {};
+        probe.read(head, 4);
+        const bool was_binary = std::equal(head, head + 4, scene::magic);
+        probe.close();
+        if (!scene::save_file(argc == 5 ? argv[4] : argv[3], *doc, error,
+                              was_binary ? scene::SaveFormat::Binary : scene::SaveFormat::Text)) {
+            return fail(error);
+        }
         for (const std::string& m : info.migrated) std::fprintf(stderr, "migrated: %s\n", m.c_str());
         return 0;
     }
@@ -439,6 +469,43 @@ void print_summary(const cuervo::tools::PackSummary& s) {
                 static_cast<unsigned long long>(s.content_hash));
 }
 
+// shader build <project|file.glsl> [-o <out.cshader>]
+int shader_command(int argc, char** argv) {
+    namespace fs = std::filesystem;
+    if (std::string_view(argv[2]) != "build" || argc < 4) return usage();
+    const fs::path target = argv[3];
+    std::string error;
+    if (fs::is_directory(target)) {
+        const int built = cuervo::tools::build_project_shaders(target, error);
+        if (built < 0) {
+            std::fprintf(stderr, "cuervo-tools: %s\n", error.c_str());
+            return 1;
+        }
+        std::printf("built %d shader%s\n", built, built == 1 ? "" : "s");
+        return 0;
+    }
+    std::ifstream in(target, std::ios::binary);
+    if (!in) {
+        std::fprintf(stderr, "cuervo-tools: can't read '%s'\n", target.string().c_str());
+        return 1;
+    }
+    const std::string source((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    std::vector<std::string> notes;
+    auto bytes = cuervo::tools::build_cshader(source, target.filename().string(), error, &notes);
+    if (!bytes) {
+        std::fprintf(stderr, "cuervo-tools: %s\n", error.c_str());
+        return 1;
+    }
+    for (const std::string& n : notes) std::fprintf(stderr, "note: %s\n", n.c_str());
+    fs::path out = target;
+    out.replace_extension(".cshader");
+    if (argc == 6 && std::string_view(argv[4]) == "-o") out = argv[5];
+    std::ofstream file(out, std::ios::binary);
+    file.write(reinterpret_cast<const char*>(bytes->data()), static_cast<std::streamsize>(bytes->size()));
+    std::printf("wrote %s (%zu bytes)\n", out.string().c_str(), bytes->size());
+    return file ? 0 : 1;
+}
+
 int pack_command(int argc, char** argv) {
     using namespace cuervo;
     Flags f;
@@ -717,11 +784,50 @@ int docs_command(int argc, char** argv) {
     return 0;
 }
 
+// docs/CLI.md from the flag tables; `--check` is for ctest like `docs --check`.
+int cli_docs_command(int argc, char** argv) {
+    std::string out_path, check_path;
+    for (int i = 2; i < argc; ++i) {
+        const std::string_view a = argv[i];
+        if ((a == "-o" || a == "--out") && i + 1 < argc) {
+            out_path = argv[++i];
+        } else if (a == "--check" && i + 1 < argc) {
+            check_path = argv[++i];
+        } else {
+            return usage();
+        }
+    }
+    const std::string docs = cuervo::tools::generate_cli_docs();
+    if (!check_path.empty()) {
+        std::ifstream in(cuervo::platform::path_from_utf8(check_path), std::ios::binary);
+        if (!in) return fail("can't open " + check_path);
+        std::stringstream ss;
+        ss << in.rdbuf();
+        if (ss.str() != docs) {
+            return fail(check_path + " is out of date with the flag tables; regenerate it with `cuervo-tools cli-docs -o " +
+                        check_path + "`");
+        }
+        return 0;
+    }
+    if (out_path.empty()) {
+        std::fwrite(docs.data(), 1, docs.size(), stdout);
+        return 0;
+    }
+    std::ofstream out(cuervo::platform::path_from_utf8(out_path), std::ios::binary | std::ios::trunc);
+    if (!out || !out.write(docs.data(), static_cast<std::streamsize>(docs.size()))) return fail("can't write " + out_path);
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     if (argc < 2) return usage();
     const std::string_view group = argv[1];
+    if (group == "--help" || group == "-h" || group == "help") {
+        std::fputs(cuervo::tools::tools_help().c_str(), stdout);
+        return 0;
+    }
+    if (group == "cli-docs") return cli_docs_command(argc, argv);
     if (group == "lsp") return lsp_command(argc, argv);
     if (group == "docs") return docs_command(argc, argv);
     if (argc < 3) return usage();
@@ -730,6 +836,7 @@ int main(int argc, char** argv) {
     if (group == "plugin") return plugin_command(argc, argv);
     if (group == "license") return license_command(argc, argv);
     if (group == "pack") return pack_command(argc, argv);
+    if (group == "shader") return shader_command(argc, argv);
     if (group == "export") return export_command(argc, argv);
     if (group == "pack-info") return pack_info_command(argc, argv);
     if (argc < 4) return usage();

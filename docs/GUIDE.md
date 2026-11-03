@@ -52,9 +52,9 @@ sudo pacman -S cmake ninja glslang sdl3 vulkan-validation-layers   # validation 
 ```
 
 On Ubuntu 25.04+ / Debian: `sudo apt install cmake ninja-build glslang-tools libsdl3-dev` (and
-your GPU's Vulkan driver). Elsewhere, any Linux with the tools above works. Linux and the web are
-the supported targets ([STATUS.md](STATUS.md)); Windows is experimental and still being
-validated ([WINDOWS.md](WINDOWS.md)); the web build is in [WEB.md](WEB.md).
+your GPU's Vulkan driver). Elsewhere, any Linux with the tools above works. Linux, Windows and the web are
+supported targets ([STATUS.md](STATUS.md) has the support level of each); the Windows build is
+in [WINDOWS.md](WINDOWS.md) and the web build in [WEB.md](WEB.md).
 
 Build and run the tests:
 
@@ -854,6 +854,32 @@ playhead, drag keys along the ruler, right-click to delete one, and tick **Previ
 the pose in the scene view while you scrub. Each change is one undo step and is saved with
 the scene.
 
+### Frame composition
+
+Every rendered frame is drawn in the same order, by `Scene.draw_frame`:
+
+1. **The world.** If a `Camera2D` is current, the view is set to it (`set_view`: the camera's
+   position, zoom and rotation) and the whole tree draws through it, in tree order. Later
+   nodes cover earlier ones.
+2. **Lights.** The lights and occluders the world queued while it drew are applied once,
+   with `apply_lights()`, to everything drawn so far. They use the camera's view, and they
+   shade only the world.
+3. **The view is reset.** `reset_view()` returns to the screen view (virtual pixels, no
+   camera). This is how the view carries over: the camera applies to the world and to
+   nothing after it, so a HUD does not move or scale with the camera.
+4. **Canvas layers.** Each `CanvasLayer` subtree draws in screen coordinates, in increasing
+   `layer` order (ties in tree order), and each one starts a new layer that covers
+   everything before it. Layers are never lit.
+5. **Overlays.** Nodes that queued themselves with `Scene.overlays` (popups, menus that
+   are open, tooltips) run `draw_overlay` last, on top of every layer. An overlay that
+   opens another one (a popup in a popup) is drawn after it.
+
+Rules of thumb: put things that live in the level (sprites, tiles, enemies, lights) in the
+tree; put the HUD and menus under a `CanvasLayer`; draw dialogs that must float above
+everything as overlays (the UI widgets do this by themselves). If you draw with a `Canvas`
+yourself, `set_view` and `reset_view` switch the camera by hand, and `new_layer()` makes
+what follows cover what came before.
+
 ### 2D lighting
 
 Lights are nodes too. A `PointLight2D` lights a circle of `radius` (a cone when
@@ -881,6 +907,89 @@ level.add_child(AmbientLight2D()) // night
 `examples/lantern_cave` is a small platformer built this way (tiles, physics, an animated
 explorer with a lantern, flickering torches); View > Lighting Preview toggles the lights in
 the editor's scene view. Limits and the shading method are in DESIGN.md 4.17.
+
+### Light budget
+
+A lit view has hard limits: 32 lights, 128 occluders and 512 occluder references. Past them
+the rest are dropped and logged once. Each light only marches the occluders that can reach it,
+so cost grows with the lights on screen and with shadow-casting, not with the size of the
+level. A pattern that keeps a large lit level inside the budget:
+
+- **Switch off what the player cannot see.** Keep the lights under one node and set
+  `enabled = false` on those whose circle does not touch the view. A disabled light costs
+  nothing.
+- **Cap shadows.** Shadows are the expensive part. Give the few lights that matter
+  (the player's lantern, the nearest torches) `shadow_enabled = true` and the rest `false`.
+- **Keep radii small.** Cost follows the area a light reaches. Two lights of radius 150 are
+  cheaper than one of 300.
+- **Share occluders.** One `LightOccluder2D` per wall or tile layer
+  (`light_occluders = true` on a `TileMapLayer`), not one per decoration.
+- **Prefer the nearest N.** If more than 32 lights can be near, rank them by distance to
+  the camera and enable the first 32, so which lights are dropped is a decision rather than
+  the order of the tree.
+
+```
+class LightBudget extends Node2D {
+    @export var max_lit = 24
+    var lights = List<PointLight2D>()
+
+    fn ready() {
+        for c in children {
+            if c is PointLight2D l { lights.push(l) }   // the lights placed under this node
+        }
+    }
+
+    fn update(dt: float) {
+        var cam = Camera2D.current_camera
+        if cam == null { return }
+        var lit = 0
+        for l in lights {
+            var near = l.global_position().distance(cam.global_position()) < 640.0 / cam.zoom + l.radius
+            l.enabled = near && lit < max_lit
+            if l.enabled { lit += 1 }
+        }
+    }
+}
+```
+
+The lights are render only, but `enabled` is an ordinary field: set it from `update`, from
+the same state the game already has, so a replay of the same inputs makes the same choices.
+`examples/lantern_cave` stays well inside the limits by keeping its lights to the explorer,
+the torches in the hall, and a few gems. View > Lighting Preview in the editor turns the lights off, which shows what they cost in
+your scene.
+
+### Beyond the tutorial
+
+These parts are newer than the rest of this guide and carry the *experimental* label in
+[STATUS.md](STATUS.md) unless it says otherwise; each is documented in [API.md](API.md).
+
+- **Sprites.** `Sprite2D`, `AnimatedSprite2D` and `NinePatchRect` draw PNG, JPEG and QOI
+  images, sprite sheets and atlas frames (and rasterize an SVG when a vector will not do).
+  `cuervo-tools` slices and packs atlases deterministically; the editor's Sprites panel
+  previews them. Art stays vector first: sprites are an addition, not the default.
+- **Post-processing, linear color and your own shaders.** `[render.post]` in `project.toml`
+  turns on bloom, vignette, a color LUT or a CRT look, and `[render] color_space = "linear"`
+  blends in linear color, including mesh gradients and light colors. Your own `.glsl` shaders, with `@export` uniforms, are compiled ahead of time with
+  `cuervo-tools shader build`, so a web export carries them without a runtime compiler.
+- **Text and localization.** `Locale.load` reads a CSV of translations and `tr(#key)` looks one
+  up, with plural forms. Text is shaped (ligatures, Arabic joining, bidirectional order), the
+  UI containers mirror when `Locale.is_rtl()` is true, and `LineEdit` accepts input-method
+  composition. Not finished: `LineEdit` is not right-to-left aware, and fallback fonts are not
+  yet loaded from the project's configuration.
+- **Saving and settings.** `Save` keeps named, versioned slots in the per-user directory
+  (IndexedDB in the browser, so a web save survives a reload); `Settings` keeps graphics,
+  audio and input choices. Saving is outside the simulation: it is never hashed or replayed.
+  New scenes are saved in the text form by default.
+- **Profiling.** `cuervo --profile` logs engine zones and script functions at exit;
+  `--trace out.json` writes a Chrome trace (zones, job tasks, draw calls, the Pluma heap)
+  for ui.perfetto.dev. The editor's Profiler panel shows the same data live.
+- **Networked play.** The network delivers each player's input to
+  `Input.held_by(player, action)` and nothing else, so a match records and replays like local
+  input. `Net.host` and `Net.join` (UDP) or `Net.relay` (WebSocket, for browsers) start
+  a session from a script, or run any game with `--net-host <port>`, `--net-join host:port`,
+  or `--net-relay <url> --net-room <name>`; `--net-mode lockstep|rollback` picks how
+  it waits. `examples/netduel` is a two-player game written for it. See [CLI.md](CLI.md).
+- **Particles in the editor.** The Particles panel tunes the selected `Emitter2D` live.
 
 ## 8. Debugging and profiling
 
@@ -964,7 +1073,9 @@ leaves out engine features the game doesn't use.
   `examples/tictak` (a board game with mouse input), `examples/editor_level` (a level made
   only in the editor, no main script), `examples/node_level` (every built-in node, no
   scripts), `examples/ui_menus` (a settings and inventory menu from the UI widgets),
-  `examples/bench` (a stress test) and `examples/tutorial` (the game from this guide).
+  `examples/lantern_cave` (a lit physics platformer), `examples/netduel` (two players over the
+  network), `examples/bench` (a stress test) and `examples/tutorial` (the game from this guide).
+- [CLI.md](CLI.md): every `cuervo` and `cuervo-tools` flag.
 - [STATUS.md](STATUS.md): what is stable, experimental, planned or unsupported.
 - [LANGUAGE.md](LANGUAGE.md) for enums and `match`, structs, traits, generics, `foreach`
   batch loops and manual memory.

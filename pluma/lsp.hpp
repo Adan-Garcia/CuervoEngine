@@ -59,6 +59,9 @@ struct DiagnosticItem {
     Range range;
     Severity severity = Severity::Error;
     std::string message;
+    // Stable code for warnings: "unused-variable", "unused-import",
+    // "unreachable-code", "style". Empty for errors.
+    std::string code;
     std::optional<TextEdit> fix;
 };
 
@@ -139,6 +142,20 @@ struct DocumentSymbol {
     std::vector<DocumentSymbol> children;
 };
 
+// Semantic highlighting (LSP semanticTokens). `type` indexes
+// semantic_token_types(); `modifiers` is a bit set over semantic_token_modifiers().
+struct SemanticToken {
+    std::uint32_t line = 0;      // 0-based
+    std::uint32_t character = 0; // 0-based
+    std::uint32_t length = 0;
+    std::uint32_t type = 0;
+    std::uint32_t modifiers = 0;
+};
+// The legend: {"type", "function", "variable", "parameter", "property",
+// "enumMember", "keyword", "constant"} and {"declaration", "readonly"}.
+const std::vector<std::string>& semantic_token_types();
+const std::vector<std::string>& semantic_token_modifiers();
+
 struct WorkspaceSymbol {
     std::string name;
     SymbolKind kind = SymbolKind::Variable;
@@ -169,6 +186,9 @@ struct ServerOptions {
     std::string root_path;
     // Include naming style warnings (LANGUAGE.md 6) in published diagnostics.
     bool check_style = false;
+    // Lint warnings (unused variable / import, unreachable code) in published
+    // diagnostics; they never affect compilation.
+    bool lint_warnings = true;
     // The packages a workspace depends on (LANGUAGE.md 9.26), found by the
     // host from its project file: files under a package's directory are
     // checked in that package's namespace, and directories outside the
@@ -210,6 +230,10 @@ public:
     std::optional<HoverInfo> hover(std::string_view uri, Position pos);
     std::optional<SignatureHelp> signature_help(std::string_view uri, Position pos);
     std::vector<DocumentSymbol> document_symbols(std::string_view uri);
+    // Name-resolved tokens (types, functions, variables, parameters, fields,
+    // enum variants, constants) plus keywords, sorted by position, one per
+    // identifier. The editor layers them over the lexer's coloring.
+    std::vector<SemanticToken> semantic_tokens(std::string_view uri);
     std::vector<WorkspaceSymbol> workspace_symbols(std::string_view query);
     std::vector<Location> references(std::string_view uri, Position pos, bool include_declaration = true);
     std::optional<Range> prepare_rename(std::string_view uri, Position pos);

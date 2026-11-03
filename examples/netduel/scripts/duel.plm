@@ -1,0 +1,62 @@
+// Two players, one screen: move with the arrows or WASD, shoot with Space. Every player's input
+// reaches the game as Input.held_by(player, action); nothing here reads the network, so the same
+// script plays offline (player 1 idle) and replays a networked match from its recording.
+var COLORS = [Color.hex("7fe6ff"), Color.hex("ffb86b")]
+// A globals-only digest of the match: the state hash covers script globals, so replays and the
+// two peers prove they agree on positions and hits through it.
+var checksum = 0
+
+class Duel extends Node {
+    var pos = [vec2(120.0, 180.0), vec2(520.0, 180.0)]
+    var shots = List<vec2>()
+    var dirs = List<float>()
+    var hits = [0, 0]
+    var cooldown = [0, 0]
+
+    fn update(dt: float) {
+        for p in 0..2 {
+            var move = vec2(0.0, 0.0)
+            if Input.held_by(p, #left) { move = vec2(move.x - 1.0, move.y) }
+            if Input.held_by(p, #right) { move = vec2(move.x + 1.0, move.y) }
+            if Input.held_by(p, #up) { move = vec2(move.x, move.y - 1.0) }
+            if Input.held_by(p, #down) { move = vec2(move.x, move.y + 1.0) }
+            var next = pos[p] + move * (180.0 * dt)
+            pos[p] = vec2(clamp(next.x, 20.0, 620.0), clamp(next.y, 20.0, 340.0))
+            if cooldown[p] > 0 { cooldown[p] -= 1 }
+            if Input.held_by(p, #shoot) && cooldown[p] == 0 {
+                cooldown[p] = 12
+                shots.push(pos[p])
+                dirs.push(p == 0 ? 1.0 : -1.0)
+            }
+        }
+        var i = 0
+        while i < shots.len() {
+            shots[i] = vec2(shots[i].x + dirs[i] * 6.0, shots[i].y)
+            var target = dirs[i] > 0.0 ? 1 : 0
+            var gone = shots[i].x < 0.0 || shots[i].x > 640.0
+            if (shots[i] - pos[target]).length() < 18.0 {
+                hits[1 - target] += 1
+                pos[target] = vec2(pos[target].x, 20.0 + Random.range(0.0, 320.0))
+                gone = true
+            }
+            if gone {
+                shots.remove(i)
+                dirs.remove(i)
+            } else {
+                i += 1
+            }
+        }
+        checksum = (checksum * 31 + (pos[0].x as int) + 7 * (pos[1].x as int) + 13 * (pos[1].y as int) + 1000 * hits[0] + hits[1]) % 1000003
+    }
+
+    fn draw(g: Canvas) {
+        for p in 0..2 {
+            g.circle(pos[p], 14.0, fill = COLORS[p])
+        }
+        for s in shots {
+            g.circle(s, 3.0, fill = Color.hex("ffffff"))
+        }
+        g.text(vec2(24.0, 18.0), "{hits[0]}", size = 24.0, color = COLORS[0])
+        g.text(vec2(616.0, 18.0), "{hits[1]}", size = 24.0, color = COLORS[1], align = #right)
+    }
+}

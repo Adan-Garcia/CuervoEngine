@@ -1,0 +1,432 @@
+#include "doctest.h"
+
+#include <algorithm>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+
+#include "cuervo/assets/atlas.hpp"
+#include "cuervo/assets/image.hpp"
+#include "cuervo/assets/sprite_sheet.hpp"
+
+// Raster import, atlas packing and sprite-sheet slicing (milestone 11.2a, slice 1).
+using namespace cuervo::assets;
+
+namespace {
+
+constexpr unsigned char kPng4x2[] = {0x89,0x50,0x4e,0x47,0xd,0xa,0x1a,0xa,0x0,0x0,0x0,0xd,0x49,0x48,0x44,0x52,0x0,0x0,0x0,0x4,0x0,0x0,0x0,0x2,0x8,0x6,0x0,0x0,0x0,0x7f,0xa8,0x7d,0x63,0x0,0x0,0x0,0x28,0x49,0x44,0x41,0x54,0x78,0x9c,0x63,0x60,0x60,0x38,0xf1,0xdf,0x86,0xe1,0xc4,0xd7,0xa,0x86,0x13,0xaf,0xb7,0x30,0x9c,0x78,0xc8,0xc0,0x90,0x2,0x14,0x48,0x1,0xa,0xa4,0x0,0x5,0x52,0x4e,0x3c,0x4,0x0,0x15,0xd9,0x12,0x21,0x46,0x80,0x80,0x35,0x0,0x0,0x0,0x0,0x49,0x45,0x4e,0x44,0xae,0x42,0x60,0x82};
+constexpr unsigned char kJpeg8x8[] = {0xff,0xd8,0xff,0xe0,0x0,0x10,0x4a,0x46,0x49,0x46,0x0,0x1,0x1,0x0,0x0,0x1,0x0,0x1,0x0,0x0,0xff,0xdb,0x0,0x43,0x0,0x2,0x1,0x1,0x1,0x1,0x1,0x2,0x1,0x1,0x1,0x2,0x2,0x2,0x2,0x2,0x4,0x3,0x2,0x2,0x2,0x2,0x5,0x4,0x4,0x3,0x4,0x6,0x5,0x6,0x6,0x6,0x5,0x6,0x6,0x6,0x7,0x9,0x8,0x6,0x7,0x9,0x7,0x6,0x6,0x8,0xb,0x8,0x9,0xa,0xa,0xa,0xa,0xa,0x6,0x8,0xb,0xc,0xb,0xa,0xc,0x9,0xa,0xa,0xa,0xff,0xdb,0x0,0x43,0x1,0x2,0x2,0x2,0x2,0x2,0x2,0x5,0x3,0x3,0x5,0xa,0x7,0x6,0x7,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xa,0xff,0xc0,0x0,0x11,0x8,0x0,0x8,0x0,0x8,0x3,0x1,0x22,0x0,0x2,0x11,0x1,0x3,0x11,0x1,0xff,0xc4,0x0,0x1f,0x0,0x0,0x1,0x5,0x1,0x1,0x1,0x1,0x1,0x1,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x1,0x2,0x3,0x4,0x5,0x6,0x7,0x8,0x9,0xa,0xb,0xff,0xc4,0x0,0xb5,0x10,0x0,0x2,0x1,0x3,0x3,0x2,0x4,0x3,0x5,0x5,0x4,0x4,0x0,0x0,0x1,0x7d,0x1,0x2,0x3,0x0,0x4,0x11,0x5,0x12,0x21,0x31,0x41,0x6,0x13,0x51,0x61,0x7,0x22,0x71,0x14,0x32,0x81,0x91,0xa1,0x8,0x23,0x42,0xb1,0xc1,0x15,0x52,0xd1,0xf0,0x24,0x33,0x62,0x72,0x82,0x9,0xa,0x16,0x17,0x18,0x19,0x1a,0x25,0x26,0x27,0x28,0x29,0x2a,0x34,0x35,0x36,0x37,0x38,0x39,0x3a,0x43,0x44,0x45,0x46,0x47,0x48,0x49,0x4a,0x53,0x54,0x55,0x56,0x57,0x58,0x59,0x5a,0x63,0x64,0x65,0x66,0x67,0x68,0x69,0x6a,0x73,0x74,0x75,0x76,0x77,0x78,0x79,0x7a,0x83,0x84,0x85,0x86,0x87,0x88,0x89,0x8a,0x92,0x93,0x94,0x95,0x96,0x97,0x98,0x99,0x9a,0xa2,0xa3,0xa4,0xa5,0xa6,0xa7,0xa8,0xa9,0xaa,0xb2,0xb3,0xb4,0xb5,0xb6,0xb7,0xb8,0xb9,0xba,0xc2,0xc3,0xc4,0xc5,0xc6,0xc7,0xc8,0xc9,0xca,0xd2,0xd3,0xd4,0xd5,0xd6,0xd7,0xd8,0xd9,0xda,0xe1,0xe2,0xe3,0xe4,0xe5,0xe6,0xe7,0xe8,0xe9,0xea,0xf1,0xf2,0xf3,0xf4,0xf5,0xf6,0xf7,0xf8,0xf9,0xfa,0xff,0xc4,0x0,0x1f,0x1,0x0,0x3,0x1,0x1,0x1,0x1,0x1,0x1,0x1,0x1,0x1,0x0,0x0,0x0,0x0,0x0,0x0,0x1,0x2,0x3,0x4,0x5,0x6,0x7,0x8,0x9,0xa,0xb,0xff,0xc4,0x0,0xb5,0x11,0x0,0x2,0x1,0x2,0x4,0x4,0x3,0x4,0x7,0x5,0x4,0x4,0x0,0x1,0x2,0x77,0x0,0x1,0x2,0x3,0x11,0x4,0x5,0x21,0x31,0x6,0x12,0x41,0x51,0x7,0x61,0x71,0x13,0x22,0x32,0x81,0x8,0x14,0x42,0x91,0xa1,0xb1,0xc1,0x9,0x23,0x33,0x52,0xf0,0x15,0x62,0x72,0xd1,0xa,0x16,0x24,0x34,0xe1,0x25,0xf1,0x17,0x18,0x19,0x1a,0x26,0x27,0x28,0x29,0x2a,0x35,0x36,0x37,0x38,0x39,0x3a,0x43,0x44,0x45,0x46,0x47,0x48,0x49,0x4a,0x53,0x54,0x55,0x56,0x57,0x58,0x59,0x5a,0x63,0x64,0x65,0x66,0x67,0x68,0x69,0x6a,0x73,0x74,0x75,0x76,0x77,0x78,0x79,0x7a,0x82,0x83,0x84,0x85,0x86,0x87,0x88,0x89,0x8a,0x92,0x93,0x94,0x95,0x96,0x97,0x98,0x99,0x9a,0xa2,0xa3,0xa4,0xa5,0xa6,0xa7,0xa8,0xa9,0xaa,0xb2,0xb3,0xb4,0xb5,0xb6,0xb7,0xb8,0xb9,0xba,0xc2,0xc3,0xc4,0xc5,0xc6,0xc7,0xc8,0xc9,0xca,0xd2,0xd3,0xd4,0xd5,0xd6,0xd7,0xd8,0xd9,0xda,0xe2,0xe3,0xe4,0xe5,0xe6,0xe7,0xe8,0xe9,0xea,0xf2,0xf3,0xf4,0xf5,0xf6,0xf7,0xf8,0xf9,0xfa,0xff,0xda,0x0,0xc,0x3,0x1,0x0,0x2,0x11,0x3,0x11,0x0,0x3f,0x0,0xf9,0x7e,0x8a,0x28,0xaf,0xc4,0xcf,0xf5,0x0,0xff,0xd9};
+
+template<std::size_t N>
+std::span<const std::byte> as_bytes(const unsigned char (&a)[N]) {
+    return {reinterpret_cast<const std::byte*>(a), N};
+}
+
+// Minimal QOI writer: every pixel as QOI_OP_RGBA (valid, if uncompressed).
+std::vector<std::byte> make_qoi(const Image& im) {
+    std::vector<std::byte> out;
+    auto put = [&](unsigned v) { out.push_back(static_cast<std::byte>(v & 0xFF)); };
+    for (char c : {'q', 'o', 'i', 'f'}) {
+        put(static_cast<unsigned char>(c));
+    }
+    for (unsigned v : {static_cast<unsigned>(im.width), static_cast<unsigned>(im.height)}) {
+        put(v >> 24);
+        put(v >> 16);
+        put(v >> 8);
+        put(v);
+    }
+    put(4);
+    put(0);
+    for (std::size_t i = 0; i < im.rgba.size(); i += 4) {
+        put(0xFF);
+        for (std::size_t c = 0; c < 4; ++c) {
+            put(im.rgba[i + c]);
+        }
+    }
+    for (int i = 0; i < 7; ++i) {
+        put(0);
+    }
+    put(1);
+    return out;
+}
+
+Image solid(int w, int h, std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a = 255) {
+    Image im;
+    im.width = w;
+    im.height = h;
+    for (int i = 0; i < w * h; ++i) {
+        im.rgba.insert(im.rgba.end(), {r, g, b, a});
+    }
+    return im;
+}
+
+} // namespace
+
+TEST_CASE("image import: PNG decodes to RGBA8") {
+    const auto r = decode_image(as_bytes(kPng4x2));
+    REQUIRE(r.image.has_value());
+    CHECK(r.image->width == 4);
+    CHECK(r.image->height == 2);
+    // pixel (3,1): (180, 100, 200, 225)
+    const auto* p = &r.image->rgba[(1 * 4 + 3) * 4];
+    CHECK(p[0] == 180);
+    CHECK(p[1] == 100);
+    CHECK(p[2] == 200);
+    CHECK(p[3] == 225);
+}
+
+TEST_CASE("image import: JPEG decodes") {
+    const auto r = decode_image(as_bytes(kJpeg8x8));
+    REQUIRE(r.image.has_value());
+    CHECK(r.image->width == 8);
+    CHECK(r.image->height == 8);
+    CHECK(std::abs(int(r.image->rgba[0]) - 200) < 6);
+    CHECK(std::abs(int(r.image->rgba[1]) - 40) < 6);
+    CHECK(r.image->rgba[3] == 255);
+}
+
+TEST_CASE("image import: QOI round trip and malformed input") {
+    Image im = solid(3, 2, 10, 20, 30, 40);
+    im.rgba[4] = 200;
+    const auto qoi = make_qoi(im);
+    const auto r = decode_image(qoi);
+    REQUIRE(r.image.has_value());
+    CHECK(r.image->rgba == im.rgba);
+
+    auto truncated = qoi;
+    truncated.resize(truncated.size() - 20);
+    CHECK_FALSE(decode_image(truncated).image.has_value());
+
+    auto huge = qoi;
+    huge[6] = std::byte{0xFF}; // width = 0x0000FF03, over the dimension cap
+    huge[7] = std::byte{0xFF};
+    CHECK_FALSE(decode_image(huge).image.has_value());
+}
+
+TEST_CASE("image import: unsupported and unknown formats are errors, not crashes") {
+    const unsigned char webp[] = {'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'E', 'B', 'P', 'V', 'P', '8', ' '};
+    const auto w = decode_image(as_bytes(webp));
+    CHECK_FALSE(w.image.has_value());
+    CHECK(w.error.find("WebP") != std::string::npos);
+    const unsigned char junk[] = {1, 2, 3, 4, 5};
+    CHECK_FALSE(decode_image(as_bytes(junk)).image.has_value());
+    const unsigned char bad_png[] = {0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0};
+    CHECK_FALSE(decode_image(as_bytes(bad_png)).image.has_value());
+}
+
+TEST_CASE("mips: chain length, sizes and averaging") {
+    Image im;
+    im.width = 5;
+    im.height = 3;
+    im.rgba.assign(5 * 3 * 4, 0);
+    for (std::size_t i = 0; i < im.rgba.size(); i += 4) {
+        im.rgba[i] = 100;
+        im.rgba[i + 3] = 255;
+    }
+    const auto tex = build_texture(im, false);
+    CHECK(tex.mip_count() == 3); // 5x3, 2x1, 1x1
+    CHECK(tex.level_width(1) == 2);
+    CHECK(tex.level_height(1) == 1);
+    CHECK(tex.level(2).size() == 4);
+    CHECK(tex.level(1)[0] == 100);
+    CHECK(tex.level(2)[3] == 255);
+    CHECK(build_texture(im, false, 2).mip_count() == 2);
+}
+
+TEST_CASE("mips: sRGB averages in linear light, transparent texels do not bleed") {
+    Image im;
+    im.width = 2;
+    im.height = 1;
+    im.rgba = {0, 0, 0, 255, 255, 255, 255, 255}; // black | white
+    const auto srgb = build_texture(im, true);
+    const auto raw = build_texture(im, false);
+    // linear mid-grey encodes to ~188, a byte average to 128
+    CHECK(srgb.level(1)[0] >= 186);
+    CHECK(srgb.level(1)[0] <= 190);
+    CHECK(raw.level(1)[0] == 128);
+
+    im.rgba = {255, 0, 0, 0, 0, 255, 0, 255}; // transparent red | opaque green
+    const auto t = build_texture(im, true);
+    CHECK(t.level(1)[0] == 0); // red did not bleed in
+    CHECK(t.level(1)[1] == 255);
+    CHECK(t.level(1)[3] == 128);
+}
+
+TEST_CASE("CTEX: encode/decode round trip, deterministic, rejects garbage") {
+    const auto tex = build_texture(solid(6, 4, 9, 8, 7), true);
+    const auto bytes = encode_ctex(tex);
+    CHECK(bytes == encode_ctex(tex));
+    const auto back = decode_ctex(bytes);
+    REQUIRE(back.has_value());
+    CHECK(back->width == 6);
+    CHECK(back->srgb);
+    CHECK(back->data == tex.data);
+    CHECK(back->level_offsets == tex.level_offsets);
+    auto cut = bytes;
+    cut.pop_back();
+    CHECK_FALSE(decode_ctex(cut).has_value());
+    CHECK_FALSE(decode_ctex(std::span<const std::byte>{}).has_value());
+}
+
+TEST_CASE("import_image writes .import/<name>.ctex") {
+    const auto dir = std::filesystem::temp_directory_path() / "cuervo_raster_import_test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "hero.png", std::ios::binary);
+        f.write(reinterpret_cast<const char*>(kPng4x2), sizeof(kPng4x2));
+    }
+    const auto r = import_image(dir / "hero.png", dir / ".import");
+    REQUIRE(r.error.empty());
+    CHECK(r.output.filename() == "hero.png.ctex");
+    std::vector<char> raw;
+    {
+        // Closed before remove_all below: Windows refuses to delete a directory holding an open file.
+        std::ifstream in(r.output, std::ios::binary);
+        raw.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    const auto tex = decode_ctex({reinterpret_cast<const std::byte*>(raw.data()), raw.size()});
+    REQUIRE(tex.has_value());
+    CHECK(tex->width == 4);
+    CHECK(tex->mip_count() == 3);
+    CHECK_FALSE(import_image(dir / "missing.png", dir / ".import").error.empty());
+    std::filesystem::remove_all(dir);
+}
+
+namespace {
+std::vector<AtlasInput> sample_sprites() {
+    std::vector<AtlasInput> v;
+    for (int i = 0; i < 12; ++i) {
+        const int w = 8 + (i * 7) % 23;
+        const int h = 6 + (i * 5) % 19;
+        v.push_back({"spr" + std::to_string(i), solid(w, h, std::uint8_t(i * 20), std::uint8_t(255 - i * 9), 77)});
+    }
+    return v;
+}
+} // namespace
+
+TEST_CASE("atlas: same input gives identical atlas bytes, independent of input order") {
+    const auto a = pack_atlas(sample_sprites());
+    const auto b = pack_atlas(sample_sprites());
+    REQUIRE(a.atlas.has_value());
+    REQUIRE(b.atlas.has_value());
+    REQUIRE(a.atlas->pages.size() == b.atlas->pages.size());
+    for (std::size_t i = 0; i < a.atlas->pages.size(); ++i) {
+        CHECK(a.atlas->pages[i].rgba == b.atlas->pages[i].rgba);
+    }
+    auto reversed = sample_sprites();
+    std::reverse(reversed.begin(), reversed.end());
+    const auto c = pack_atlas(reversed);
+    REQUIRE(c.atlas.has_value());
+    CHECK(c.atlas->pages[0].rgba == a.atlas->pages[0].rgba);
+}
+
+TEST_CASE("atlas: power-of-two pages, no overlaps, padding and extrusion") {
+    AtlasOptions opt;
+    opt.padding = 2;
+    const auto r = pack_atlas(sample_sprites(), opt);
+    REQUIRE(r.atlas.has_value());
+    const Atlas& at = *r.atlas;
+    CHECK(at.frames.size() == 12);
+    for (const Image& p : at.pages) {
+        CHECK((p.width & (p.width - 1)) == 0);
+        CHECK((p.height & (p.height - 1)) == 0);
+    }
+    for (std::size_t i = 0; i < at.frames.size(); ++i) {
+        const auto& f = at.frames[i];
+        const Image& page = at.pages[std::size_t(f.page)];
+        CHECK(f.x >= 1);
+        CHECK(f.y >= 1);
+        CHECK(f.x + f.w + 1 <= page.width);
+        CHECK(f.y + f.h + 1 <= page.height);
+        for (std::size_t j = i + 1; j < at.frames.size(); ++j) {
+            const auto& g = at.frames[j];
+            if (f.page != g.page) {
+                continue;
+            }
+            // Sprite rects grown by extrusion (1) plus padding (2) never touch.
+            const bool apart = f.x + f.w + 1 + 2 <= g.x - 1 || g.x + g.w + 1 + 2 <= f.x - 1 ||
+                               f.y + f.h + 1 + 2 <= g.y - 1 || g.y + g.h + 1 + 2 <= f.y - 1;
+            CHECK(apart);
+        }
+    }
+    // Extrusion: the texel just left of a sprite equals its first column.
+    const auto* f = at.find("spr3");
+    REQUIRE(f != nullptr);
+    const Image& page = at.pages[std::size_t(f->page)];
+    auto px = [&](int x, int y, int c) {
+        return page.rgba[(std::size_t(y) * std::size_t(page.width) + std::size_t(x)) * 4 + std::size_t(c)];
+    };
+    CHECK(px(f->x - 1, f->y, 0) == px(f->x, f->y, 0));
+    CHECK(px(f->x + f->w, f->y + f->h - 1, 1) == px(f->x + f->w - 1, f->y + f->h - 1, 1));
+    CHECK(px(f->x - 1, f->y - 1, 3) == 255); // corner extruded too
+}
+
+TEST_CASE("atlas: spills to more pages at max_size; rejects oversized and duplicate sprites") {
+    std::vector<AtlasInput> v;
+    for (int i = 0; i < 6; ++i) {
+        v.push_back({"big" + std::to_string(i), solid(40, 40, 1, 2, 3)});
+    }
+    AtlasOptions opt;
+    opt.max_size = 64;
+    const auto r = pack_atlas(v, opt);
+    REQUIRE(r.atlas.has_value());
+    CHECK(r.atlas->pages.size() >= 3);
+    CHECK(r.atlas->frames.size() == 6);
+
+    opt.max_size = 32;
+    CHECK_FALSE(pack_atlas(v, opt).atlas.has_value());
+    v[1].name = v[0].name;
+    CHECK_FALSE(pack_atlas(v).atlas.has_value());
+}
+
+TEST_CASE("atlas: a lone sprite shrinks to the smallest power-of-two page") {
+    std::vector<AtlasInput> v;
+    v.push_back({"a", solid(10, 5, 1, 1, 1)});
+    const auto r = pack_atlas(v);
+    REQUIRE(r.atlas.has_value());
+    CHECK(r.atlas->pages[0].width == 16);
+    CHECK(r.atlas->pages[0].height == 8);
+}
+
+TEST_CASE("sprite sheet: grid slicing") {
+    GridOptions g;
+    g.frame_w = 16;
+    g.frame_h = 8;
+    g.prefix = "walk";
+    const auto r = slice_grid(48, 16, g);
+    REQUIRE(r.sheet.has_value());
+    REQUIRE(r.sheet->frames.size() == 6);
+    const auto* f4 = r.sheet->find("walk_4");
+    REQUIRE(f4 != nullptr);
+    CHECK(f4->index == 4);
+    CHECK(f4->x == 16);
+    CHECK(f4->y == 8);
+
+    g.margin = 2;
+    g.spacing = 1;
+    g.frame_w = 10;
+    g.frame_h = 10;
+    g.names = {"a", "b", "c", "d"};
+    const auto m = slice_grid(25, 25, g);
+    REQUIRE(m.sheet.has_value());
+    CHECK(m.sheet->frames.size() == 4);
+    CHECK(m.sheet->find("d")->x == 13);
+    CHECK(m.sheet->find("d")->y == 13);
+
+    g.names = {"only"};
+    CHECK_FALSE(slice_grid(25, 25, g).sheet.has_value());
+    GridOptions bad;
+    CHECK_FALSE(slice_grid(10, 10, bad).sheet.has_value());
+}
+
+TEST_CASE("sprite sheet: JSON slicing, array and hash forms") {
+    const auto a = slice_json(R"({"frames":[{"name":"idle","x":0,"y":0,"w":16,"h":16},
+                                            {"name":"run","frame":{"x":16,"y":0,"w":16,"h":16}}],
+                                  "meta":{"app":"x"}})",
+                              32, 16);
+    REQUIRE(a.sheet.has_value());
+    CHECK(a.sheet->frames.size() == 2);
+    CHECK(a.sheet->find("run")->x == 16);
+    CHECK(a.sheet->find("run")->index == 1);
+
+    const auto h = slice_json(R"({"frames":{"b":{"frame":{"x":0,"y":0,"w":8,"h":8}},
+                                            "a":{"frame":{"x":8,"y":0,"w":8,"h":8},"duration":100}}})",
+                              16, 8);
+    REQUIRE(h.sheet.has_value());
+    CHECK(h.sheet->frames[0].name == "b"); // file order is kept
+
+    CHECK_FALSE(slice_json(R"({"frames":[{"name":"x","x":10,"y":0,"w":16,"h":16}]})", 16, 16).sheet.has_value());
+    CHECK_FALSE(slice_json(R"({"frames":[{"name":"x","x":0,"y":0,"w":4,"h":4},{"name":"x","x":4,"y":0,"w":4,"h":4}]})",
+                           16, 16)
+                    .sheet.has_value());
+    CHECK_FALSE(slice_json("{\"frames\":[", 16, 16).sheet.has_value());
+    CHECK_FALSE(slice_json("[]", 16, 16).sheet.has_value());
+    CHECK_FALSE(slice_json(R"({"frames":[{"x":0,"y":0,"w":4,"h":4}]})", 16, 16).sheet.has_value());
+}
+
+TEST_CASE("sprite sheet to atlas: sliced frames pack by name") {
+    const Image sheet = solid(32, 16, 5, 6, 7);
+    GridOptions g;
+    g.frame_w = 16;
+    g.frame_h = 16;
+    const auto s = slice_grid(sheet.width, sheet.height, g);
+    REQUIRE(s.sheet.has_value());
+    std::vector<AtlasInput> in;
+    for (const auto& f : s.sheet->frames) {
+        in.push_back({f.name, solid(f.w, f.h, std::uint8_t(f.index * 100), 0, 0)});
+    }
+    const auto r = pack_atlas(in);
+    REQUIRE(r.atlas.has_value());
+    CHECK(r.atlas->find("frame_1") != nullptr);
+    CHECK(r.atlas->find("nope") == nullptr);
+}
+
+// --- WebP (libwebp decoder subset, CUERVO_WEBP) ---------------------------------------------
+
+#if defined(CUERVO_HAS_WEBP)
+namespace {
+// 8x4 images: left half opaque red, right half blue (top rows alpha 128 where alpha is kept).
+constexpr unsigned char kWebpLossless[] = {0x52,0x49,0x46,0x46,0x2e,0x0,0x0,0x0,0x57,0x45,0x42,0x50,0x56,0x50,0x38,0x4c,0x21,0x0,0x0,0x0,0x2f,0x7,0xc0,0x0,0x10,0x17,0x10,0x2,0x82,0x22,0xff,0x47,0xdb,0x7f,0x1,0x41,0xd1,0x75,0xcb,0x85,0x4f,0x83,0x40,0x20,0x59,0x32,0xc9,0x89,0x23,0xfa,0x1f,0xb6,0x4,0x0};
+constexpr unsigned char kWebpLossyAlpha[] = {0x52,0x49,0x46,0x46,0x8a,0x0,0x0,0x0,0x57,0x45,0x42,0x50,0x56,0x50,0x38,0x58,0xa,0x0,0x0,0x0,0x10,0x0,0x0,0x0,0x7,0x0,0x0,0x3,0x0,0x0,0x41,0x4c,0x50,0x48,0xd,0x0,0x0,0x0,0x1,0xf,0xf0,0xc0,0xff,0x88,0x88,0x30,0xf0,0x11,0xfd,0x8f,0x1,0x0,0x56,0x50,0x38,0x20,0x56,0x0,0x0,0x0,0xb0,0x3,0x0,0x9d,0x1,0x2a,0x8,0x0,0x4,0x0,0x0,0x0,0x0,0x25,0xa8,0x2,0x74,0xba,0x1,0xf8,0x1,0xfa,0x81,0xfc,0x2,0x94,0x7,0xe0,0x5,0x77,0xfe,0xe0,0x0,0x23,0x3,0xb9,0x59,0x80,0x0,0xfe,0xff,0xfe,0xc1,0x1b,0xff,0xf4,0x28,0x46,0x17,0xff,0x95,0x83,0x93,0x17,0xab,0x9f,0x72,0x1c,0xd7,0x3b,0xf9,0x39,0xc,0x5f,0xff,0xc6,0x1b,0x7f,0xfd,0xab,0x26,0x48,0xbb,0xc8,0x95,0xcf,0x5f,0x8d,0x3e,0x7a,0x9e,0xdf,0xfb,0x42,0x0,0x0};
+constexpr unsigned char kWebpLossy[] = {0x52,0x49,0x46,0x46,0x62,0x0,0x0,0x0,0x57,0x45,0x42,0x50,0x56,0x50,0x38,0x20,0x56,0x0,0x0,0x0,0xb0,0x3,0x0,0x9d,0x1,0x2a,0x8,0x0,0x4,0x0,0x0,0x0,0x0,0x25,0xa8,0x2,0x74,0xba,0x1,0xf8,0x1,0xfa,0x81,0xfc,0x2,0x94,0x7,0xe0,0x5,0x77,0xfe,0xe0,0x0,0x23,0x3,0xb9,0x59,0x80,0x0,0xfe,0xff,0xfe,0xc1,0x1b,0xff,0xf4,0x28,0x46,0x17,0xff,0x95,0x83,0x93,0x17,0xab,0x9f,0x72,0x1c,0xd7,0x3b,0xf9,0x39,0xc,0x5f,0xff,0xc6,0x1b,0x7f,0xfd,0xab,0x26,0x48,0xbb,0xc8,0x95,0xcf,0x5f,0x8d,0x3e,0x7a,0x9e,0xdf,0xfb,0x42,0x0,0x0};
+
+std::vector<std::byte> bytes_of(const unsigned char* data, std::size_t size) {
+    std::vector<std::byte> out(size);
+    std::memcpy(out.data(), data, size);
+    return out;
+}
+} // namespace
+
+TEST_CASE("image import: WebP lossless decodes exactly, with alpha") {
+    const auto r = decode_image(as_bytes(kWebpLossless));
+    REQUIRE(r.image.has_value());
+    CHECK(r.image->width == 8);
+    CHECK(r.image->height == 4);
+    const auto px = [&](int x, int y) { return &r.image->rgba[(std::size_t(y) * 8 + std::size_t(x)) * 4]; };
+    CHECK(px(0, 0)[0] == 255);
+    CHECK(px(0, 0)[2] == 0);
+    CHECK(px(0, 0)[3] == 255);
+    CHECK(px(6, 0)[2] == 255);
+    CHECK(px(6, 0)[3] == 128);
+    CHECK(px(6, 3)[3] == 255);
+}
+
+TEST_CASE("image import: WebP lossy and lossy+alpha decode close to the source") {
+    const auto near = [](int a, int b) { return std::abs(a - b) <= 24; };
+    const auto plain = decode_image(as_bytes(kWebpLossy));
+    REQUIRE(plain.image.has_value());
+    CHECK(plain.image->width == 8);
+    CHECK(near(plain.image->rgba[0], 255));
+    CHECK(plain.image->rgba[3] == 255);
+    const auto alpha = decode_image(as_bytes(kWebpLossyAlpha));
+    REQUIRE(alpha.image.has_value());
+    CHECK(near(alpha.image->rgba[(0 * 8 + 6) * 4 + 3], 128));
+    CHECK(alpha.image->rgba[(3 * 8 + 6) * 4 + 3] == 255);
+}
+
+TEST_CASE("image import: malformed WebP never crashes") {
+    // Every truncation and a flip of each byte must fail or decode, never crash.
+    const std::vector<std::vector<std::byte>> files = {bytes_of(kWebpLossless, sizeof(kWebpLossless)),
+                                                       bytes_of(kWebpLossy, sizeof(kWebpLossy)),
+                                                       bytes_of(kWebpLossyAlpha, sizeof(kWebpLossyAlpha))};
+    for (const auto& bytes : files) {
+        for (std::size_t n = 0; n < bytes.size(); ++n) {
+            (void)decode_image(std::span<const std::byte>(bytes.data(), n));
+        }
+        for (std::size_t i = 0; i < bytes.size(); ++i) {
+            auto copy = bytes;
+            copy[i] = static_cast<std::byte>(~std::to_integer<unsigned>(copy[i]));
+            (void)decode_image(copy);
+        }
+    }
+    // A VP8L header declaring a 16384 x 16384 canvas is rejected by the dimension cap.
+    auto huge = files[0];
+    huge[21] = std::byte{0xFF};
+    huge[22] = std::byte{0xFF};
+    huge[23] = std::byte{0xFF};
+    huge[24] = std::byte{0x0F};
+    CHECK_FALSE(decode_image(huge, 4096).image.has_value());
+    CHECK_FALSE(decode_image(files[0], 4).image.has_value()); // 8 wide, cap 4
+}
+#endif

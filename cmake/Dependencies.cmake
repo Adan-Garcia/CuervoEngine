@@ -298,6 +298,68 @@ if(CUERVO_FONT_IMPORT)
     endif()
 endif()
 
+# --- Text shaping and bidi (HarfBuzz + SheenBidi, DESIGN.md 4.19 "11.3") ----------
+# HarfBuzz (Old MIT): complex-script shaping; its single-file build
+# (src/harfbuzz.cc) has no dependencies, so it also builds under Emscripten.
+# SheenBidi (Apache-2.0): the Unicode Bidirectional Algorithm and script runs;
+# chosen over FriBidi (LGPL) so the static link needs no relinking exception.
+# Optional: with CUERVO_TEXT_SHAPING=OFF text keeps the per-codepoint layout.
+option(CUERVO_TEXT_SHAPING "Shape and reorder text with HarfBuzz and SheenBidi" ON)
+if(CUERVO_TEXT_SHAPING)
+    FetchContent_Declare(harfbuzz
+        URL https://github.com/harfbuzz/harfbuzz/releases/download/12.3.2/harfbuzz-12.3.2.tar.xz
+        URL_HASH SHA256=6f6db164359a2da5a84ef826615b448b33e6306067ad829d85d5b0bf936f1bb8
+        SOURCE_SUBDIR _none
+    )
+    FetchContent_Declare(sheenbidi
+        URL https://github.com/Tehreer/SheenBidi/archive/refs/tags/v3.0.0.tar.gz
+        URL_HASH SHA256=86c56014034739ba39a24c23eb00323b0bf6f737354f665786015fca842af786
+        SOURCE_SUBDIR _none
+    )
+    FetchContent_MakeAvailable(harfbuzz sheenbidi)
+
+    add_library(harfbuzz STATIC "${harfbuzz_SOURCE_DIR}/src/harfbuzz.cc")
+    target_include_directories(harfbuzz SYSTEM PUBLIC "${harfbuzz_SOURCE_DIR}/src")
+    # No FreeType/ICU/GLib glue: fonts are read from memory with hb_ot only.
+    target_compile_definitions(harfbuzz PUBLIC HB_NO_PRAGMA_GCC_DIAGNOSTIC_ERROR=1)
+    set_target_properties(harfbuzz PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    if(NOT MSVC)
+        target_compile_options(harfbuzz PRIVATE -w -O2 -fno-exceptions -fno-rtti)
+    endif()
+
+    add_library(sheenbidi STATIC "${sheenbidi_SOURCE_DIR}/Source/SheenBidi.c")
+    target_include_directories(sheenbidi SYSTEM PUBLIC "${sheenbidi_SOURCE_DIR}/Headers")
+    target_include_directories(sheenbidi PRIVATE "${sheenbidi_SOURCE_DIR}/Source")
+    target_compile_definitions(sheenbidi PRIVATE SB_CONFIG_UNITY)
+    set_target_properties(sheenbidi PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    if(NOT MSVC)
+        target_compile_options(sheenbidi PRIVATE -w -O2)
+    endif()
+
+    # Test font for shaping goldens (SIL OFL 1.1, pinned by commit and content
+    # hash). Tests only; exported games bring their own fonts.
+    if(CUERVO_BUILD_TESTS)
+        FetchContent_Declare(noto_sans_arabic
+            URL https://raw.githubusercontent.com/notofonts/notofonts.github.io/e2ec4a11da38a23b1ecebfcb233833a153ecb841/fonts/NotoSansArabic/hinted/ttf/NotoSansArabic-Regular.ttf
+            URL_HASH SHA256=bdff3e5659d67e67def05b33f749683b9376ae819d65d3dd62ac4640b3aaef48
+            DOWNLOAD_NO_EXTRACT TRUE
+        )
+        FetchContent_MakeAvailable(noto_sans_arabic)
+        set(CUERVO_TEST_FONT_ARABIC "${noto_sans_arabic_SOURCE_DIR}/NotoSansArabic-Regular.ttf")
+
+        # Japanese for the fallback chain (Latin -> Arabic -> Japanese) tests and the
+        # EN/AR/JA UI parity test: M+ 1p (SIL OFL 1.1), pinned by the google/fonts
+        # commit and the content hash. Tests only.
+        FetchContent_Declare(mplus1p
+            URL https://raw.githubusercontent.com/google/fonts/6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec/ofl/mplus1p/MPLUS1p-Regular.ttf
+            URL_HASH SHA256=2f294ad496432b1608f070d310e3aa2adcf1de4af429f4901df97ec4bd361ed1
+            DOWNLOAD_NO_EXTRACT TRUE
+        )
+        FetchContent_MakeAvailable(mplus1p)
+        set(CUERVO_TEST_FONT_JAPANESE "${mplus1p_SOURCE_DIR}/MPLUS1p-Regular.ttf")
+    endif()
+endif()
+
 # --- miniaudio (audio decoding + output device) -------------------------------
 # MIT-0 / public domain (DESIGN.md 3, 4.9, 7.2 "Audio formats"). Decoders for
 # WAV, FLAC, MP3 (built in) and OGG Vorbis (stb_vorbis from miniaudio's
@@ -326,6 +388,82 @@ if(CUERVO_FEATURE_AUDIO)
     endif()
     if(NOT WIN32)
         target_link_libraries(miniaudio PRIVATE m)
+    endif()
+endif()
+
+# --- Mbed TLS (wss:// and https:// on desktop, DESIGN.md 4.19, milestone 11.1) -
+# Apache-2.0 OR GPL-2.0-or-later (we take Apache-2.0). Small, portable C that builds the same on
+# Linux, MSVC and MinGW. The web uses the browser's WebSocket/fetch, so wasm never links a TLS
+# library. Release tarball pinned by tag and hash; only the library sources are compiled (no
+# programs, no tests, no net_sockets: cuervo/net/tcp.cpp owns the sockets).
+option(CUERVO_TLS "Build TLS (wss://, https://) into the desktop networking layer with Mbed TLS" ON)
+if(CUERVO_TLS AND NOT EMSCRIPTEN)
+    FetchContent_Declare(mbedtls
+        URL https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.5/mbedtls-3.6.5.tar.bz2
+        URL_HASH SHA256=4a11f1777bb95bf4ad96721cac945a26e04bf19f57d905f241fe77ebeddf46d8
+        SOURCE_SUBDIR _none
+    )
+    FetchContent_MakeAvailable(mbedtls)
+    file(GLOB _mbedtls_sources CONFIGURE_DEPENDS "${mbedtls_SOURCE_DIR}/library/*.c")
+    list(FILTER _mbedtls_sources EXCLUDE REGEX "net_sockets\\.c$")
+    add_library(mbedtls_lib STATIC ${_mbedtls_sources})
+    target_include_directories(mbedtls_lib SYSTEM PUBLIC "${mbedtls_SOURCE_DIR}/include")
+    target_include_directories(mbedtls_lib PRIVATE "${mbedtls_SOURCE_DIR}/library")
+    set_target_properties(mbedtls_lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    if(MSVC)
+        target_compile_options(mbedtls_lib PRIVATE /wd4244 /wd4267 /wd4996 /wd4146 /wd4018 /wd4310
+            /wd4127 /wd4389 /wd4701 /wd4703 /wd4090 /wd4132 /wd4100 /wd4702 /wd4706)
+    else()
+        target_compile_options(mbedtls_lib PRIVATE -w)
+    endif()
+    if(WIN32)
+        target_link_libraries(mbedtls_lib PUBLIC bcrypt crypt32) # entropy + the Windows root store
+    endif()
+endif()
+
+# --- stb_image (PNG/JPEG decoding for raster import, DESIGN.md 4.19 "11.2a") --
+# Public domain / MIT. stb has no release tags, so the header is pinned by commit
+# and content hash. Only cuervo/assets sees it (import-time decoding; shipping
+# builds read the imported CTEX). QOI has its own decoder, WebP is deferred.
+FetchContent_Declare(stb_image
+    URL https://raw.githubusercontent.com/nothings/stb/003501f6d7a8668ce8b6d875e34dd97ad0d5d5b5/stb_image.h
+    URL_HASH SHA256=594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3
+    DOWNLOAD_NO_EXTRACT TRUE
+)
+FetchContent_MakeAvailable(stb_image)
+add_library(stb_image STATIC "${PROJECT_SOURCE_DIR}/cuervo/assets/stb_image_impl.c")
+target_include_directories(stb_image SYSTEM PUBLIC "${stb_image_SOURCE_DIR}")
+set_target_properties(stb_image PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(NOT MSVC)
+    # Third-party code, optimized even in Debug (decoding large sheets).
+    target_compile_options(stb_image PRIVATE -w -O2)
+endif()
+
+# --- libwebp decoder (WebP import, DESIGN.md 4.19 "11.2a") -------------------
+# BSD-3-Clause. Only the decoder subset (src/dec, the decode half of src/dsp and
+# src/utils) is built: lossy VP8, lossless VP8L and alpha. Import-time only, like
+# stb_image. Optional: with CUERVO_WEBP=OFF (or no network) WebP import reports
+# that it is unsupported and everything else is unchanged.
+option(CUERVO_WEBP "Decode WebP images on import with libwebp" ON)
+if(CUERVO_WEBP)
+    FetchContent_Declare(libwebp
+        URL https://github.com/webmproject/libwebp/archive/refs/tags/v1.5.0.tar.gz
+        URL_HASH SHA256=668c9aba45565e24c27e17f7aaf7060a399f7f31dba6c97a044e1feacb930f37
+        SOURCE_SUBDIR _none
+    )
+    FetchContent_MakeAvailable(libwebp)
+    set(_webp "${libwebp_SOURCE_DIR}/src")
+    file(GLOB _webp_srcs "${_webp}/dec/*.c" "${_webp}/dsp/*.c" "${_webp}/utils/*.c")
+    list(FILTER _webp_srcs EXCLUDE REGEX "(_enc|/enc|/cost|/ssim|bit_writer|huffman_encode|quant_levels_utils|filters_utils)")
+    add_library(webp_decoder STATIC ${_webp_srcs})
+    target_include_directories(webp_decoder SYSTEM PUBLIC "${libwebp_SOURCE_DIR}/src")
+    target_include_directories(webp_decoder PRIVATE "${libwebp_SOURCE_DIR}")
+    set_target_properties(webp_decoder PROPERTIES POSITION_INDEPENDENT_CODE ON C_STANDARD 99)
+    if(NOT MSVC)
+        target_compile_options(webp_decoder PRIVATE -w -O2)
+    endif()
+    if(NOT WIN32)
+        target_link_libraries(webp_decoder PRIVATE m)
     endif()
 endif()
 
@@ -389,7 +527,13 @@ endif()
 include(CMakeDependentOption)
 cmake_dependent_option(CUERVO_BUILD_EDITOR "Build the editor (cuervo-editor)" ON
     "CUERVO_FEATURE_DEV;CUERVO_FEATURE_UI;CUERVO_FEATURE_PARTICLES;CUERVO_FEATURE_COLLISION;CUERVO_FEATURE_AUDIO" OFF)
+# The ImGui editor (`cuervo-editor --imgui`) is deprecated and will be removed (DESIGN.md 4.13);
+# the RmlUi editor is the default and needs none of it. OFF: Dear ImGui is not fetched or built
+# and the ImGui-only editor sources, shaders and tests are left out.
+cmake_dependent_option(CUERVO_EDITOR_IMGUI "Build the deprecated ImGui editor (cuervo-editor --imgui)" ON
+    "CUERVO_BUILD_EDITOR" OFF)
 if(CUERVO_BUILD_EDITOR AND NOT EMSCRIPTEN)
+  if(CUERVO_EDITOR_IMGUI)
     FetchContent_Declare(imgui
         URL https://github.com/ocornut/imgui/archive/refs/tags/v1.92.9b-docking.tar.gz
         URL_HASH SHA256=90ded916bd57db2e0e171b6b098940a47c6f5042725dcdc67fb19940ca8bfdcc
@@ -412,6 +556,29 @@ if(CUERVO_BUILD_EDITOR AND NOT EMSCRIPTEN)
     target_link_libraries(imgui PUBLIC SDL3::SDL3)
     if(NOT MSVC)
         target_compile_options(imgui PRIVATE -w)
+    endif()
+  endif()
+
+    # --- RmlUi (editor UI feasibility spike, `--rml-ui`) --------------------------
+    # MIT. Retained HTML/CSS-style UI. Only the core and its default FreeType font engine are
+    # built; rendering goes through our RHI (editor/rml/rml_rhi.cpp) and input through the SDL3
+    # platform file from the same tarball (compiled by the editor target, not edited).
+    # FreeType comes from the font-import block above.
+    FetchContent_Declare(rmlui
+        URL https://github.com/mikke89/RmlUi/archive/refs/tags/6.3.tar.gz
+        URL_HASH SHA256=d977298bb6147610e5984d5db85ddf284020d655a8713913f6982074f1dbdede
+        SYSTEM
+    )
+    set(_cuervo_saved_shared ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF)
+    set(RMLUI_SAMPLES OFF CACHE BOOL "" FORCE)
+    set(RMLUI_PRECOMPILED_HEADERS OFF CACHE BOOL "" FORCE)
+    set(RMLUI_COMPILER_OPTIONS OFF CACHE BOOL "" FORCE)
+    set(RMLUI_INSTALL_LICENSES_AND_BUILD_INFO OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(rmlui)
+    set(BUILD_SHARED_LIBS ${_cuervo_saved_shared})
+    if(TARGET rmlui_core AND NOT MSVC)
+        target_compile_options(rmlui_core PRIVATE -w)
     endif()
 
     # --- Brand fonts (DESIGN.md 4.16, milestone 8.1) -----------------------------

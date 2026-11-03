@@ -382,4 +382,143 @@ std::vector<Token> Lexer::tokenize(std::string_view source) {
     return lexer.tokenize_all();
 }
 
+namespace {
+
+// Scans a nested block comment from `i` with the given depth. Returns the
+// position after the comment end, or line.size() with depth > 0 left in `depth`.
+std::size_t scan_comment(std::string_view line, std::size_t i, std::uint16_t& depth) {
+    while (i < line.size()) {
+        if (line[i] == '/' && i + 1 < line.size() && line[i + 1] == '*') {
+            ++depth;
+            i += 2;
+        } else if (line[i] == '*' && i + 1 < line.size() && line[i + 1] == '/') {
+            i += 2;
+            if (--depth == 0) return i;
+        } else {
+            ++i;
+        }
+    }
+    return line.size();
+}
+
+// Scans the body of a `"""` string from `i`. Returns the position after the
+// closing quotes, or line.size() when the string continues on the next line.
+std::size_t scan_multi_body(std::string_view line, std::size_t i, bool raw, std::uint16_t& interp,
+                            bool& closed) {
+    closed = false;
+    while (i < line.size()) {
+        char c = line[i];
+        if (interp == 0) {
+            if (c == '"' && line.compare(i, 3, "\"\"\"") == 0) {
+                closed = true;
+                return i + 3;
+            }
+            if (raw) { ++i; continue; }
+            if (c == '\\') { i += 2; continue; }
+            if (c == '{' && i + 1 < line.size() && line[i + 1] == '{') { i += 2; continue; }
+            if (c == '{') ++interp;
+            ++i;
+        } else {
+            if (c == '{') {
+                ++interp;
+            } else if (c == '}') {
+                --interp;
+            } else if (c == '"') { // nested single-line string inside the interpolation
+                ++i;
+                while (i < line.size() && line[i] != '"') i += line[i] == '\\' ? 2 : 1;
+            }
+            ++i;
+        }
+    }
+    return line.size();
+}
+
+void add_gap_comments(std::string_view line, std::size_t from, std::size_t to,
+                      std::vector<LineToken>& out) {
+    for (std::size_t i = from; i < to;) {
+        if (line[i] == '/' && i + 1 < to && line[i + 1] == '/') {
+            out.push_back({TokenKind::Eof, true, static_cast<std::uint32_t>(i),
+                           static_cast<std::uint32_t>(to - i)});
+            return;
+        }
+        if (line[i] == '/' && i + 1 < to && line[i + 1] == '*') {
+            std::uint16_t depth = 0;
+            std::size_t e = scan_comment(line.substr(0, to), i, depth);
+            out.push_back({TokenKind::Eof, true, static_cast<std::uint32_t>(i),
+                           static_cast<std::uint32_t>(e - i)});
+            i = e;
+        } else {
+            ++i;
+        }
+    }
+}
+
+} // namespace
+
+LineResult Lexer::tokenize_line(std::string_view line, LineState state) {
+    while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.remove_suffix(1);
+    LineResult result;
+    std::size_t pos = 0; // where Normal lexing resumes
+    auto seg = [&](TokenKind k, bool comment, std::size_t b, std::size_t e) {
+        result.tokens.push_back(
+            {k, comment, static_cast<std::uint32_t>(b), static_cast<std::uint32_t>(e - b)});
+    };
+    if (state.mode == LineState::Mode::BlockComment) {
+        std::uint16_t depth = state.depth;
+        pos = scan_comment(line, 0, depth);
+        if (pos > 0) seg(TokenKind::Eof, true, 0, pos);
+        if (depth > 0) {
+            result.state = {LineState::Mode::BlockComment, depth, false};
+            return result;
+        }
+    } else if (state.mode == LineState::Mode::MultiString) {
+        std::uint16_t interp = state.depth;
+        bool closed = false;
+        pos = scan_multi_body(line, 0, state.raw, interp, closed);
+        if (pos > 0) seg(TokenKind::String, false, 0, pos);
+        if (!closed) {
+            result.state = {LineState::Mode::MultiString, interp, state.raw};
+            return result;
+        }
+    }
+
+    Lexer lexer(line, pos, line.size(), 1, static_cast<std::uint32_t>(pos + 1));
+    std::size_t prev_end = pos;
+    for (;;) {
+        Token t = lexer.next();
+        if (t.kind == TokenKind::Eof) {
+            add_gap_comments(line, prev_end, line.size(), result.tokens);
+            break;
+        }
+        if (t.kind == TokenKind::Newline) continue;
+        add_gap_comments(line, prev_end, t.offset, result.tokens);
+        std::size_t b = t.offset;
+        if (t.kind == TokenKind::Error) {
+            if (t.text == "unterminated block comment") {
+                std::uint16_t depth = 0;
+                scan_comment(line, b, depth);
+                seg(TokenKind::Eof, true, b, line.size());
+                result.state = {LineState::Mode::BlockComment, depth, false};
+                return result;
+            }
+            if (t.length == 3 && t.text.starts_with("unterminated string")) {
+                bool raw = line[b] == 'r';
+                std::uint16_t interp = 0;
+                bool closed = false;
+                scan_multi_body(line, b + (raw ? 4 : 3), raw, interp, closed);
+                seg(TokenKind::String, false, b, line.size());
+                result.state = {LineState::Mode::MultiString, interp, raw};
+                return result;
+            }
+            // Other errors (an unterminated one-line string eats to the line end).
+            seg(TokenKind::Error, false, b, std::max<std::size_t>(b + t.length, lexer.pos_));
+            prev_end = std::max<std::size_t>(b + t.length, lexer.pos_);
+            continue;
+        }
+        seg(t.kind, false, b, b + t.length);
+        prev_end = b + t.length;
+    }
+    return result;
+}
+
 } // namespace pluma

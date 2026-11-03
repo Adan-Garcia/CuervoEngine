@@ -9,7 +9,7 @@
 #include <format>
 
 #include "editor/app.hpp"
-#include "editor/theme.hpp"
+#include "editor/imgui_theme.hpp"
 #include "editor/live_tree.hpp"
 #include "editor/panels.hpp"
 #include "pluma/heap.hpp"

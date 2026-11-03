@@ -11,7 +11,7 @@ file(MAKE_DIRECTORY "${OUT}")
 file(COPY "${PROJECT}/project.toml" "${PROJECT}/level.cmds" "${PROJECT}/scripts" DESTINATION "${OUT}")
 
 execute_process(
-    COMMAND "${EDITOR}" --project "${OUT}" --script-commands "${OUT}/level.cmds"
+    COMMAND "${EDITOR}" ${EDITOR_ARGS} --project "${OUT}" --script-commands "${OUT}/level.cmds"
     RESULT_VARIABLE code OUTPUT_VARIABLE out ERROR_VARIABLE err)
 if(NOT code EQUAL 0)
     message(FATAL_ERROR "cuervo-editor --script-commands failed (${code}):\n${out}\n${err}")

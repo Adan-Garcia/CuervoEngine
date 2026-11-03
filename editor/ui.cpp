@@ -8,7 +8,7 @@
 
 #include "cuervo/vector/flatten.hpp"
 #include "editor/icons.hpp"
-#include "editor/theme.hpp"
+#include "editor/imgui_theme.hpp"
 
 namespace cuervo::editor::ui {
 

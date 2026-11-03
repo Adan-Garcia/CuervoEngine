@@ -15,9 +15,9 @@
 // FreeType + msdfgen + msdf-atlas-gen. Built only with CUERVO_FONT_IMPORT
 // (the default); shipping builds load .efont files instead.
 //
-// Shaping: glyphs are laid out per codepoint with the font's pair kerning
-// (`kern` table). HarfBuzz shaping (GPOS kerning, ligatures, complex scripts)
-// is not part of this step yet.
+// Shaping: by default glyphs are laid out per codepoint with the font's pair
+// kerning (`kern` table). With FontImportOptions::shaping the atlas also holds
+// the glyphs HarfBuzz substitutes and layout draws shaped runs by glyph id.
 namespace cuervo::render {
 
 struct FontImportOptions {
@@ -32,6 +32,12 @@ struct FontImportOptions {
     float distance_range = 8.0f;
     int spacing = 1;   // empty texels between packed glyphs
     int threads = 0;   // generator threads; 0 = hardware concurrency
+    // Complex-script support (needs CUERVO_TEXT_SHAPING): also atlas every
+    // glyph the font's default GSUB features can produce for the ranges
+    // (ligatures, Arabic joining forms) and .notdef, keyed by glyph id, and
+    // keep the font bytes in the atlas so layout can shape with HarfBuzz.
+    // Costs the size of the font file in the .efont; leave off for Latin-only UI fonts.
+    bool shaping = false;
 };
 
 // True if this build can import TTF/OTF (CUERVO_FONT_IMPORT).

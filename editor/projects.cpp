@@ -93,17 +93,26 @@ bool write_text(const fs::path& file, std::string_view text, std::string& error)
 
 // ------------------------------------------------------------ recent projects
 
-void RecentProjects::add(const fs::path& dir) {
+// One key form for add and remove: on Windows a temp dir can be spelled with an 8.3 short name
+// (RUNNER~1) while weakly_canonical gives the long one, so remove() must normalize the same way.
+static std::string recent_key(const fs::path& dir) {
     std::error_code ec;
     fs::path abs = fs::weakly_canonical(dir, ec);
-    if (ec) abs = fs::absolute(dir);
-    const std::string p = platform::utf8(abs);
+    if (ec) abs = fs::absolute(dir, ec);
+    return platform::utf8(abs);
+}
+
+void RecentProjects::add(const fs::path& dir) {
+    const std::string p = recent_key(dir);
     std::erase(paths_, p);
     paths_.insert(paths_.begin(), p);
     if (paths_.size() > max_entries) paths_.resize(max_entries);
 }
 
-void RecentProjects::remove(std::string_view path) { std::erase(paths_, std::string(path)); }
+void RecentProjects::remove(std::string_view path) {
+    std::erase(paths_, std::string(path));
+    std::erase(paths_, recent_key(platform::path_from_utf8(std::string(path))));
+}
 
 std::vector<RecentProject> RecentProjects::list() const {
     std::vector<RecentProject> out;
@@ -233,6 +242,16 @@ bool create_project(std::string_view template_id, const fs::path& dir, std::stri
         return false;
     }
     return true;
+}
+
+std::vector<std::pair<std::string, std::string>> list_example_projects(const fs::path& root) {
+    std::vector<std::pair<std::string, std::string>> out;
+    std::error_code ec;
+    for (const auto& e : fs::directory_iterator(root, ec)) {
+        if (e.is_directory(ec) && fs::is_regular_file(e.path() / "project.toml", ec)) out.emplace_back(platform::utf8(e.path().filename()), platform::utf8(e.path()));
+    }
+    std::sort(out.begin(), out.end());
+    return out;
 }
 
 } // namespace cuervo::editor

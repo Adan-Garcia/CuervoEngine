@@ -214,6 +214,7 @@ VM::VM(VmOptions options) : options_(std::move(options)) {
 }
 
 VM::~VM() {
+    if (hooks_ != nullptr) hooks_->on_vm_destroyed(*this);
     for (Value& v : stack_) release(v);
     for (Value& v : globals) release(v);
     std::vector<CoroObj*> coros;
@@ -290,7 +291,14 @@ void VM::stale_panic(const Value& v, std::string_view what) {
 }
 
 RunResult VM::collect_cycles(std::uint64_t budget, CollectResult* stats) {
-    CollectResult r = pluma::collect_cycles(budget, gc_credit_, options_.check_acyclic);
+    return collect_result(pluma::collect_cycles(budget, gc_credit_, options_.check_acyclic), stats);
+}
+
+RunResult VM::drain_cycles(CollectResult* stats) {
+    return collect_result(pluma::collect_all_cycles(options_.check_acyclic), stats);
+}
+
+RunResult VM::collect_result(const CollectResult& r, CollectResult* stats) {
     if (stats != nullptr) *stats = r;
     RunResult out;
     if (!r.acyclic_violation.empty()) {

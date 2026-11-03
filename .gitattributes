@@ -1,5 +1,8 @@
-# Scene files are binary (DESIGN.md 4.12). `git diff` shows them as text once
-# the textconv driver is configured (see docs/SCENES.md):
+# Scene files are text by default (docs/SCENES.md): `Scene.save` and the editor
+# write the text view, so they diff and merge like source. A scene converted
+# to binary (`cuervo-tools scene migrate <dir> --binary`) still diffs as text
+# once the textconv driver is configured:
 #   git config diff.scene.textconv "build/debug/tools/cuervo_tools/cuervo-tools scene dump"
-*.scene binary diff=scene
+# Merging is the default line-based 3-way merge; see docs/SCENES.md "Merging".
+*.scene text eol=lf diff=scene
 * text=auto eol=lf

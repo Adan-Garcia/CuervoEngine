@@ -1,7 +1,7 @@
 # Support status
 
 What works today, what is experimental, what is planned and what is not supported. Cuervo
-Engine is in **Beta (v0.2)**. This page is the one place that states support; the other
+Engine is in **Beta (v0.3)**. This page is the one place that states support; the other
 documents describe how things work. [DESIGN.md](DESIGN.md) holds the architecture, the
 decisions and the full milestone list (section 6).
 
@@ -49,11 +49,11 @@ The engine is licensed under the [MIT License](../LICENSE.md).
 | Tier migration report (`cuervo-tools tier check`, editor Tier Report) | Stable | Linux, Windows (desktop only) | - | Scans project settings, shaders, scripts, scenes and assets, and checks the claimed tier and target platform against this page. |
 | SDF shapes, MSDF text, SVG import (practical subset) | Stable | Linux, Windows, Web | `compatible` | Unsupported SVG features (filters, masks, CSS, embedded text) are skipped with a warning. |
 | GPU compute visual particles | Planned | - | `full` | Visual particles run on the CPU on every tier today. |
-| Raster processes: images, sprite sheets, atlases, 9-slice, SVG fallback | Planned | - | - | Milestone 11.2a. Art is vector first. |
-| Custom user shaders, post-processing | Planned | - | - | Milestone 11.2b. |
-| SVG rasterized fallback, text shaping (right-to-left, complex scripts) | Planned | - | - | Milestones 11.2a and 11.3. |
+| Raster processes: images, sprite sheets, atlases, 9-slice, SVG fallback | Experimental | Linux, Windows (desktop only) | `compatible` | Milestone 11.2a. Art is vector first. PNG, JPEG and QOI import with mip chains, a deterministic atlas packer, sprite-sheet slicing, mips in the RHI on every backend, an instanced sprite batcher, the `Sprite2D`, `AnimatedSprite2D` and `NinePatchRect` nodes, an SVG raster fallback and `.catlas`/`.ctex` in the pack (checked by the `mips` and `sprites` parity scenes on GL, Vulkan and WebGPU). WebP is decoded through libwebp (animated files are rejected). A Chrome smoke covers WebGL2 and WebGPU. |
+| Custom user shaders, post-processing | Experimental | Linux, Windows, Web | `compatible` | Milestone 11.2b. Offscreen render targets and multi-pass, additive and screen blend modes, built-in post passes (bloom, vignette, LUT, CRT) set by `[render.post]`, `[render] color_space = "linear"`, and user `.glsl` shaders with `@export` uniforms compiled by `cuervo-tools shader build` to `.cshader` (SPIR-V, GLES and WGSL). Mesh gradients and light colors are converted in linear mode. Not yet: the editor inspector for `@export` values. |
+| SVG rasterized fallback, text shaping (right-to-left, complex scripts) | Experimental | Linux, Windows, Web | `compatible` | Milestones 11.2a and 11.3. An own SVG rasterizer draws SVG features the vector path does not support into atlases and reports filters and masks instead of drawing them. Text shaping with HarfBuzz, bidirectional text with SheenBidi, Arabic and Japanese fallback fonts and right-to-left layout mirroring work; fallback fonts come from `[text] fallbacks` in `project.toml`, and `LineEdit` and the Split and Scroll containers follow right-to-left layout. |
 | 2D lighting (`PointLight2D`, `DirectionalLight2D`, `AmbientLight2D`, `LightOccluder2D`) | Stable | Linux, Windows, Web | `compatible` | Milestone 9.7. SDF occluders with raymarched hard and soft shadows, identical on Vulkan and GL; render only (never changes a state hash). Up to 32 lights and 128 occluders per view; see [API.md](API.md). |
-| WebGPU | Experimental | Linux, Web | `compatible` | Milestones 10.1-10.3: the web default where the browser has it (WebGL2 otherwise, in the same build and in web exports), `--backend webgpu` on Linux (wgpu-native, `CUERVO_WEBGPU`). Every Compatible RHI feature; matches GL in every `rhi_parity` scene and Vulkan exactly, all WGSL generated from GLSL; the shmup and `lantern_cave` reach their native state hashes on WebGPU in headless Chrome, and the browser benchtest (100k shapes, 8 threads) runs stably at 390 FPS (milestone 10.4, [PERFORMANCE.md](PERFORMANCE.md) "Web"). Not in desktop exports. See [WEB.md](WEB.md) "WebGPU". |
+| WebGPU | Stable | Linux, Web | `compatible` | Milestones 10.1-10.3: the web default where the browser has it (WebGL2 otherwise, in the same build and in web exports), `--backend webgpu` on Linux (wgpu-native, `CUERVO_WEBGPU`). Every Compatible RHI feature; matches GL in every `rhi_parity` scene and Vulkan exactly, all WGSL generated from GLSL; the shmup and `lantern_cave` reach their native state hashes on WebGPU in headless Chrome, and the browser benchtest (100k shapes, 8 threads) runs stably at 390 FPS (milestone 10.4, [PERFORMANCE.md](PERFORMANCE.md) "Web"). Not in desktop exports. See [WEB.md](WEB.md) "WebGPU". |
 <!-- support-matrix:end rendering -->
 
 ## Render tiers
@@ -111,7 +111,10 @@ Generated from `docs/support.json`; the `support_tiers` test checks it against t
 | points and lines | `compatible` | yes | point lists, line lists and line strips, 1 px wide |
 | MSAA | `compatible` | optional | falls back to 1 sample |
 | frame capture | `compatible` | optional | a debug aid |
+| texture mips | `compatible` | yes | mip chains, per-level data, sRGB RGBA8 |
+| render targets | `compatible` | yes | offscreen color targets, multi-pass |
 | base-vertex draws | `full` | yes | draw_indexed_base_vertex; GLES 3.0 has no base vertex |
+| multiple window surfaces | `compatible` | optional | secondary window swapchains (editor undocked panels); Vulkan and GL only, WebGPU stays single-window |
 <!-- support-matrix:end tiers -->
 
 ## Simulation and gameplay systems
@@ -120,7 +123,7 @@ Generated from `docs/support.json`; the `support_tiers` test checks it against t
 | Feature | Level | Where | Tier | Notes |
 |---|---|---|---|---|
 | Fixed timestep, seeded PCG32 RNG, deterministic math (`dmath`) | Stable | Linux, Windows, Web | - | Bit-identical on the same build and platform. Native Linux and the web build agree on the shmup state hash. |
-| Replays (record, verify, seek) | Stable | Linux, Windows, Web | - | [REPLAYS.md](REPLAYS.md). |
+| Replays (record, verify, seek) | Stable | Linux, Windows, Web | - | [REPLAYS.md](REPLAYS.md). Milestone 11.7a: actions have stable IDs (replay format 3; older files load by action name) and a backward seek in the editor resumes from a snapshot. |
 | Job system and SIMD kernels | Stable | Linux, Windows, Web | - | The same state hash for any thread count and with SIMD on or off. |
 | Particles (gameplay and visual modes) | Stable | Linux, Windows, Web | - | Gameplay mode is deterministic and collidable; see `cuervo/particles/README.md`. |
 | Collision (circles, capsules, spatial hash) | Stable | Linux, Windows, Web | - | AABB and OBB shapes are planned. |
@@ -134,8 +137,8 @@ Generated from `docs/support.json`; the `support_tiers` test checks it against t
 | Tilemaps (`TileMapLayer`, autotiling, paint tool) and navigation (`NavigationRegion2D`, `NavigationAgent2D`) | Stable | Linux, Windows, Web | - | Milestone 9.5. Deterministic A* with strict tie-breaking; see [API.md](API.md). |
 | Physics (Box2D v3 scene-tree bodies) | Stable | Linux, Windows, Web | - | Milestone 9.6. Box2D v3 scene-tree bodies (StaticBody2D, CharacterBody2D, RigidBody2D, Area2D, CollisionShape2D), raycasts, joints; see [API.md](API.md). |
 | General ECS exposed to scripts | Planned | - | - | Milestone 12.4 decides whether to expose it or drop it. |
-| Networking (lockstep, rollback), HTTP and WebSocket | Planned | - | - | Milestone 11.1. |
-| Localization, save and settings API, accessibility features | Planned | - | - | Milestones 11.3, 11.4 and 12.3. Today games save through `Scene.save`. |
+| Networking (lockstep, rollback), HTTP and WebSocket | Experimental | Linux, Windows (desktop only) | `compatible` | Milestone 11.1. Transport interface, seeded loopback, lockstep and rollback with snapshot-hash desync detection, a UDP transport, WebSocket (`ws://` and `wss://`) transports, a relay, the `Net` and `Http` APIs and end-to-end netplay. Games for up to four players run over UDP mesh or a relay. The web transport and the HTTP fetch path are checked in headless Chrome. |
+| Localization, save and settings API, accessibility features | Experimental | Linux, Windows, Web | `compatible` | Milestones 11.3 and 11.4. `Locale` and `tr` for translation tables, plurals and number and date formatting, IME composition in `LineEdit`, typed save slots with versions and migrations, a `Settings` API and a Chrome-trace profiler. Web saves persist through IndexedDB. Accessibility features (12.3) are still to do. |
 <!-- support-matrix:end simulation -->
 
 ## The Pluma language and its tools
@@ -159,7 +162,8 @@ Generated from `docs/support.json`; the `support_tiers` test checks it against t
 <!-- support-matrix:begin tools -->
 | Feature | Level | Where | Tier | Notes |
 |---|---|---|---|---|
-| Editor (`cuervo-editor`) | Stable | Linux, Windows (desktop only) | - | Scene tree, inspector, gizmos, docking layouts, play-in-editor, replays, debugger, profiler. Desktop only; there is no web editor. See [editor/README.md](../editor/README.md). |
+| Editor (`cuervo-editor`, RmlUi) | Stable | Linux (desktop only) | - | The default editor: scene tree, inspector, gizmos, fixed panel layout with named layouts, script editor with debugger, play-in-editor, replays, profiler. Desktop only; there is no web editor. Checked on Linux (Vulkan, GL). The Windows and macOS builds are not yet verified (CI results pending). See [editor/README.md](../editor/README.md). |
+| Dear ImGui editor (`cuervo-editor --imgui`, deprecated) | Stable | Linux, Windows (desktop only) | - | Deprecated and planned for removal: the previous editor, kept behind `--imgui` and compiled out with `-DCUERVO_EDITOR_IMGUI=OFF`. Docking layouts and panels that move to their own OS windows exist only here. See [DESIGN.md 4.13](DESIGN.md). |
 | Export for Linux (source and AOT scripts, stripped players) | Stable | Linux (desktop only) | - | Shared libraries (SDL3, and FreeType for full players) are not bundled. [EXPORT.md](EXPORT.md). |
 | Export for the web | Stable | Web | `compatible` | Needs an emsdk (6.0.12) and a host-tools build. Compatible tier only; a Full project is refused. |
 | Export for Windows (source and AOT scripts, stripped players) | Stable | Windows (desktop only) | - | Ships the GUI-subsystem `cuervo-player.exe` of the build tree or a prebuilt package's export template. The shmup and the tutorial exported with source and AOT scripts reach their dev state hashes from another directory, with MSVC and MinGW-w64 players. Stripped players build on a Windows host (tictak's: -31 %, same hash). [EXPORT.md](EXPORT.md). |
@@ -167,7 +171,7 @@ Generated from `docs/support.json`; the `support_tiers` test checks it against t
 | Documentation site (`docs_site` target) | Stable | Linux, Windows (desktop only) | - | Built from these Markdown files; every link is checked, and the support tables are checked against `docs/support.json`. |
 | Dev-only features (`--demo`, `--svg`, `--bench`) | Stable | Linux, Windows (desktop only) | - | Not in stripped players. |
 | Package registry and `license report` | Stable | Linux, Windows (desktop only) | - | Milestone 10.5d: `cuervo-tools plugin verify\|publish\|install\|list` over a directory registry with SHA-256 checksums, SPDX license checks, engine and ABI version ranges and a conformance state hash for sim-safe plugins; `license report` and exports list the packages' licenses. See [PLUGINS.md](PLUGINS.md). HTTP registries are not built yet. |
-| Signed prebuilt editor and export templates | Experimental | Linux, Windows (desktop only) | - | Milestone 10.5a. The release workflow builds the editor, tools and players on a `v*` tag, with export templates in `templates/<platform>/`, a SHA-256 sum for every file (and a Sigstore attestation once the repository is public), and Authenticode signatures on the Windows executables when the repository has a signing certificate (docs/WINDOWS.md "Prebuilt binaries"). No release has been tagged yet. |
+| Signed prebuilt editor and export templates | Experimental | Linux, Windows (desktop only) | - | Milestone 10.5a. The release workflow builds the editor, tools and players on a `v*` tag, with export templates in `templates/<platform>/`, a SHA-256 sum for every file (and a Sigstore attestation once the repository is public), and Authenticode signatures on the Windows executables when the repository has a signing certificate (docs/WINDOWS.md "Prebuilt binaries"). Released builds are attached to each `v*` tag of the public repository. |
 | Content tools (dialogue, timeline, particle and shader editors), AI tools | Planned | - | - | Milestones 12.1 and 12.2. |
 <!-- support-matrix:end tools -->
 

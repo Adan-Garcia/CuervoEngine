@@ -1,0 +1,37 @@
+# Cuervo Duel: the Phase 11 showcase (DESIGN.md 4.19, 6): a two-player networked duel with a
+# localized HUD (English, Arabic, Japanese), a custom post-process shader and an atlas-based
+# sprite scene. Read README.md for the commands.
+#   host:  cuervo --game examples/showcase_duel --net-host 7777
+#   join:  cuervo --game examples/showcase_duel --net-join 127.0.0.1:7777
+name = "showcase_duel"
+main = "Duel"
+virtual_size = [640, 360]
+tick_rate = 60
+seed = 20261103
+clear_color = "070a14"
+render_tier = "compatible"
+
+[input.actions]
+left = ["Key.A", "Key.Left", "Pad.DpadLeft"]
+right = ["Key.D", "Key.Right", "Pad.DpadRight"]
+up = ["Key.W", "Key.Up", "Pad.DpadUp"]
+down = ["Key.S", "Key.Down", "Pad.DpadDown"]
+shoot = ["Key.Space", "Key.Z", "Pad.South"]
+# Cycles that player's own display language (English, Arabic, Japanese).
+lang = ["Key.L", "Pad.North"]
+
+# Fonts for the scripts the default (Latin) font lacks: shaped runs fall back through this list.
+[text]
+fallbacks = ["assets/fonts/NotoSansArabic-subset.efont", "assets/fonts/MPLUS1p-subset.efont"]
+
+# Built-in bloom and vignette, then the project's own pass (shaders/grade.glsl).
+[render.post]
+bloom = true
+bloom_threshold = 0.7
+bloom_intensity = 0.55
+vignette = 0.35
+shader = "shaders/grade.glsl"
+
+[render.post.params]
+fringe = 0.003
+scan = 0.05

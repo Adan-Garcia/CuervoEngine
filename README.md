@@ -12,19 +12,62 @@
 [![Documentation](https://img.shields.io/badge/docs-website-orange.svg)](https://adan-garcia.github.io/CuervoEngine/)
 
 A 2D, vector-first, deterministic game engine in C++20 with its own statically typed
-scripting language, **Pluma** (`.plm` files). See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design.
+scripting language, **Pluma** (`.plm` files). The same inputs give the same game on every
+thread count and backend, so replays, tests and networked play can check a single state hash.
 
-**Status: Beta (v0.2)** — the renderer has Vulkan and OpenGL/GLES/WebGL2 backends in
-verified parity, with render tiers (`render_tier` in `project.toml`) and a migration report.
-The engine includes the Pluma language and VM (with AOT compilation to C), deterministic
-collections and math/geometry/random libraries, transform hierarchies and the node library,
-particles, collision, audio, UI widgets, binary scenes, replays, the editor, exporting, and
-the shmup example running natively and in the browser ([`docs/WEB.md`](docs/WEB.md)).
-Linux, Windows (MSVC, MinGW-w64 and Clang builds) and the web are supported
-([`docs/WINDOWS.md`](docs/WINDOWS.md)).
+<p align="center">
+  <img src="docs/assets/shmup.gif" alt="The shmup example: a ship fires at waves of enemies that shoot rings of bullets" width="640">
+  <br><sub>The <code>examples/shmup</code> stage, captured headless and deterministically (the frames are the same on every run).</sub>
+</p>
 
-**What is shipped, experimental, planned or unsupported is listed in
-[`docs/STATUS.md`](docs/STATUS.md).** The rest of the documentation describes how things work.
+## Quickstart
+
+```sh
+cmake --preset release && cmake --build --preset release     # Linux; Windows and web: docs/WINDOWS.md, docs/WEB.md
+./build/release/runtime/cuervo --game examples/shmup         # play the shmup (Z shoots, arrows move, Esc pauses)
+./build/release/runtime/cuervo --game examples/tutorial      # Starfall, the game docs/GUIDE.md builds step by step
+./build/release/editor/cuervo-editor --new-project mygame --template walker
+./build/release/runtime/cuervo --game mygame                 # then edit mygame/scripts/*.plm while it runs (hot reload)
+```
+
+Next: the [guide](docs/GUIDE.md) (install, a first game, the editor, debugging, shipping),
+[Pluma in five minutes](docs/PLUMA_GUIDE.md), the [API reference](docs/API.md) and the
+[command-line reference](docs/CLI.md).
+
+## How fast
+
+Release build on a Ryzen 7 5800X3D with an RTX 3060 Ti, 1280x720, 4x MSAA, VSync off, 60 fps
+target ([`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) has the method, the debug builds, the web
+and the spread):
+
+| Workload | Vulkan | OpenGL |
+|---|---|---|
+| Particles drawn at 60 fps (dense scene) | 1.82 million | 1.51 million |
+| Particles drawn at 60 fps (sparse scene) | 1.91 million | 1.55 million |
+| Bullets also tested against hitboxes every tick, at 60 fps | 400 thousand | 400 thousand |
+| 100k particles: frame time p95 | 0.65 ms | 0.85 ms |
+
+Every number is a measurement of one machine and two scenes, not a promise: your game, GPU and
+driver will differ. The state hash of each workload is identical across both backends and any
+thread count.
+
+## What is in it
+
+Rendering on Vulkan and OpenGL (3.3, ES 3.0), WebGL2 and WebGPU backends in verified parity, with
+render tiers (`render_tier` in `project.toml`) and a migration report; vector shapes, SVG
+import, MSDF text, 2D lighting with shadows; sprites, sprite sheets, atlases and 9-slice;
+post-processing (bloom, vignette, LUT, CRT), optional linear color and user shaders; the Pluma language and VM (with AOT compilation to
+C), deterministic collections and math/geometry/random libraries; transform hierarchies and the
+node library, particles, collision, audio, UI widgets; binary and text scenes, replays; localization,
+text shaping and right-to-left container mirroring, and IME input in `LineEdit`; a save and settings API and a trace
+profiler; lockstep and rollback netplay; the editor (scene tree, sprite and particle tooling);
+and exporting for Linux, Windows and the web ([`docs/WEB.md`](docs/WEB.md), [`docs/WINDOWS.md`](docs/WINDOWS.md)).
+
+**Status: Beta (v0.3).** Not everything above is equally finished: **what is shipped,
+experimental, planned or unsupported is listed in [`docs/STATUS.md`](docs/STATUS.md)**, and that
+page wins over this summary. Networking, the raster pipeline and text shaping are the newest
+parts and carry the experimental label until they have had more use. The rest of the
+documentation describes how things work.
 
 <!-- support-matrix:begin summary -->
 | Platform | Level |
@@ -38,7 +81,7 @@ Linux, Windows (MSVC, MinGW-w64 and Clang builds) and the web are supported
 | Windows 10/11 x86-64 | Stable |
 | macOS, iOS, Android, consoles | Unsupported |
 
-56 features are classified (41 stable, 5 experimental, 9 planned, 1 unsupported). The `compatible` render tier runs everywhere; the `full` tier is desktop Vulkan only, and the tier check and the exporter refuse a project that claims more than its target provides. Details, per-feature platforms and the tier guarantees: [docs/STATUS.md](docs/STATUS.md).
+57 features are classified (43 stable, 9 experimental, 4 planned, 1 unsupported). The `compatible` render tier runs everywhere; the `full` tier is desktop Vulkan only, and the tier check and the exporter refuse a project that claims more than its target provides. Details, per-feature platforms and the tier guarantees: [docs/STATUS.md](docs/STATUS.md).
 <!-- support-matrix:end summary -->
 
 
@@ -54,6 +97,7 @@ API reference, search, light and dark): `cmake --build build/debug --target docs
 - [docs/GUIDE.md](docs/GUIDE.md): **start here**: install, build, and make a small game step
   by step (the finished game is [examples/tutorial](examples/tutorial)), then hot reload,
   the editor, debugging and exporting
+- [docs/CLI.md](docs/CLI.md): every flag of `cuervo` and `cuervo-tools` (generated from `--help`)
 - [docs/API.md](docs/API.md): the engine API for scripts (generated from the prelude by
   `cuervo-tools docs`)
 - [docs/PLUMA_GUIDE.md](docs/PLUMA_GUIDE.md): a guide to the Pluma language
@@ -135,6 +179,8 @@ SDL_VIDEO_DRIVER=offscreen ./build/debug/runtime/cuervo --game examples/bench --
 ./build/debug/editor/cuervo-editor --new-project mygame --template walker  # a new project (no window); then --project mygame, cuervo --game mygame, cuervo-tools export mygame
 ./build/debug/editor/cuervo-editor --project examples/shmup     # F5 plays the game in the editor; replays: docs/REPLAYS.md
 ./build/debug/runtime/cuervo --game examples/editor_level  # a level built in the editor without code (examples/editor_level/level.cmds)
+./build/debug/runtime/cuervo --game examples/netduel --net-host 7777   # two players: run the same game with --net-join host:7777 on the other machine
+./build/release/runtime/cuervo --game examples/shmup --trace trace.json --quit-after 10   # Chrome trace for ui.perfetto.dev (--profile logs tables)
 ./build/debug/pluma/plm      # Pluma REPL: type code, see the results
 ```
 
@@ -145,7 +191,11 @@ SDL_VIDEO_DRIVER=offscreen ./build/debug/runtime/cuervo --game examples/bench --
 | `examples/shmup` | the shmup stage: waves, a boss, title/pause/options/game-over menus, audio |
 | `examples/tutorial` | Starfall, the game [`docs/GUIDE.md`](docs/GUIDE.md) builds step by step |
 | `examples/tictak` | a board game with mouse input |
-| `examples/bench` | the SDF shape stress test (1k to 100k shapes) |
+| `examples/lantern_cave` | a physics platformer lit by 2D lights, tiles and animated characters |
+| `examples/netduel` | two players over the network (`--net-host`, `--net-join`, `--net-relay`) |
+| `examples/platformer`, `examples/topdown_nav`, `examples/anim_character` | physics, navigation and animation |
+| `examples/garden`, `examples/plugin_demo` | packages and native plugins (C++, Rust, C#) |
+| `examples/bench`, `examples/bench_spread`, `examples/bench_collide` | the SDF shape stress test (1k to 100k shapes) |
 | `examples/editor_level` | a level built in the editor without code |
 | `examples/node_level` | a level using every built-in node, with no scripts |
 | `examples/ui_menus` | a settings and inventory menu from the UI widgets |
@@ -177,7 +227,7 @@ cuervo/
   script/   project loading, VM host, bindings and engine prelude
 pluma/      Pluma language library (lexer, parser, checker, VM, AOT) + repl/ (`plm`) — never depends on cuervo/
 runtime/    player executable (`cuervo`)
-editor/     the editor (`cuervo-editor`, Dear ImGui on the RHI; desktop only)
+editor/     the editor (`cuervo-editor`, RmlUi on the RHI; desktop only; the deprecated ImGui editor is behind `--imgui`)
 tools/      cuervo-tools (pack/export, scenes, tiers, LSP, API docs), the docs-site generator,
             shader_tool, rhi_parity, web smoke test, the VS Code extension
 web/        the web shell page and pack loader

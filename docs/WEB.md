@@ -120,7 +120,7 @@ keyboard and gamepad, and watch the console.
 | Frame loop | `while (loop->frame())` | `emscripten_set_main_loop_arg`, one `frame()` per animation frame; `run_main_loop` never returns | `cuervo/platform/main_loop.hpp` |
 | Graphics | Vulkan or GL 3.3 core | WebGPU when the browser has it (with `CUERVO_WEBGPU`, the default), else the GL backend on a WebGL2 context (GLES 3.0 path, GLSL ES 300); Vulkan not compiled (see "WebGPU") | `cuervo/platform/window.cpp`, `cmake/Web.cmake`, `web/webgpu_init.js` |
 | Threads | yes | default: none (no `-pthread`, no SharedArrayBuffer, so no COOP/COEP headers needed), job system inline (DESIGN.md 4.14); `CUERVO_WEB_THREADS=ON`: WASM threads, a real job system (see "Threads") | `cuervo/platform/platform.hpp`, `cmake/Web.cmake` |
-| Audio | miniaudio device thread | miniaudio's Web Audio backend (ScriptProcessorNode, main thread); browsers start audio after the first click/key | `cuervo/audio/` |
+| Audio | miniaudio device thread | miniaudio's Web Audio backend: an AudioWorklet in the threads builds, the deprecated main-thread ScriptProcessorNode otherwise; browsers start audio after the first click/key | `cuervo/audio/` |
 | Files | real file system | Emscripten MEMFS: the project at `/game` and the font at `/fonts/default.efont`, or an exported `/game.pak`; writes (e.g. `Scene.save`, which goes to SDL's pref path in release) vanish on reload | `cmake/Web.cmake` |
 | Hot reload | scripts watched by mtime | off (`platform::has_file_watching = false`); F5/F6 still recompile/restart from the bundle | `cuervo/platform/file_watcher.hpp` |
 | Fonts | TTF/OTF import or `.efont` | `.efont` only (no FreeType/msdfgen in the WASM) | `CUERVO_FONT_IMPORT=OFF` |
@@ -163,7 +163,7 @@ above shows no visible cost.
 
 ## WebGPU (experimental)
 
-Milestone 10.3 (DESIGN.md 4.4 "Clarified (Milestone 10.3)"): a web build made
+A web build made
 with `CUERVO_WEBGPU` (the default when the host has naga-cli 29.0.4 and
 spirv-opt) carries both backends in one `.wasm`. The page runs WebGPU when the
 browser has it and WebGL2 otherwise; the game cannot tell (render only: the
@@ -218,8 +218,9 @@ the raymarched soft shadows, where ANGLE's GL and Dawn's Vulkan round differentl
   block): the file lands a frame or so after the log line.
 - The canvas is configured with `COPY_SRC` (emdawnwebgpu reports no surface usages;
   the WebGPU spec allows it) so screenshots work.
-- Firefox and Safari are untested; any browser without WebGPU gets WebGL2.
-- Benchmarks (milestone 10.4): `tools/bench.py record --web <runtime dir> --backends webgpu
+- Chrome is the supported browser. Firefox runs the shmup to the same state hash in an advisory
+  check (experimental); Safari is not supported. Any browser without WebGPU gets WebGL2.
+- Benchmarks: `tools/bench.py record --web <runtime dir> --backends webgpu
   webgl2` ([PERFORMANCE.md](PERFORMANCE.md) "Web"). With the threaded runtime, `examples/bench`
   at 100k shapes runs at 390 FPS on WebGPU and 210 on WebGL2 (Chrome presents WebGL2 at most 240
   times a second); `--bench` (VSync off) runs web frames back to back on `setImmediate`.
@@ -236,14 +237,37 @@ the raymarched soft shadows, where ANGLE's GL and Dawn's Vulkan round differentl
   into its own 4x MSAA renderbuffer and blits, exactly like desktop GL.
 - Release builds only in practice (Debug WASM works but is slow).
 
+## Persistent saves
+
+`SaveStore::for_game` on the web keeps slots in an IDBFS mount at `/persist/<game>/saves`
+behind `save::WriteThroughBackend`: `web/idbfs_saves.js` fills the mount from IndexedDB
+before `main()` (a run dependency), reads and writes are synchronous against the
+in-memory file system, and every successful write or remove schedules one coalesced
+`FS.syncfs(false)`. `node tools/web/persist_smoke.mjs --dir <web build of tools/web/persist_game>`
+runs the game three times in one browser profile and requires the boot counter to read
+1, 2, 3. If IndexedDB is blocked the mount degrades to memory with a console warning.
+
+## Audio
+
+Threads builds (`web-threads`, `web-pack-threads`) define `MA_ENABLE_AUDIO_WORKLETS` and
+link `-sAUDIO_WORKLET=1 -sWASM_WORKERS=1 -sASYNCIFY`, so miniaudio mixes on an
+AudioWorklet's Wasm Worker. That needs shared memory, so the page must be cross-origin
+isolated. `smoke_test.mjs --expect-audio worklet|script` checks which node was created.
+
 ## Limitations
 
 - Compressed downloads: the pack is stored uncompressed (docs/EXPORT.md "Pack
   format"); gzip/brotli is up to the web server.
-- Persistent saves (IDBFS) for `Scene.save` and the planned `Save` API (milestone 11.4) are
-  not implemented: writes vanish on reload.
-- Audio uses the main-thread ScriptProcessorNode backend (deprecated but universal); an
-  AudioWorklet backend (needs WASM threads) is planned.
-- Firefox and Safari are untested (headless Chrome, SwiftShader or the real GPU with `--gpu`).
+- `Scene.save` and other writes outside the `Save` API still go to MEMFS and vanish on reload.
+  The `Save` API persists (see "Persistent saves").
+- The single-threaded build's audio uses the main-thread ScriptProcessorNode backend
+  (deprecated but universal); the threads builds use an AudioWorklet (see "Audio").
+  Building the worklet with `-sASYNCIFY` (miniaudio requires it) warns that ASYNCIFY and
+  `-fwasm-exceptions` do not mix; the smoke runs are fine, but re-check after Emscripten upgrades.
+- Firefox: `tools/web/browser_hash_check.mjs` runs the shmup in headless Chrome and Firefox and
+  requires the same state hash (`a3e57e79964421d3`, verified locally); CI runs it in the advisory
+  `web-browsers` job, which fails on the runners because headless Firefox gets no WebGL2 context
+  there (not a gate; Firefox is Experimental). Safari is dropped. Chrome is otherwise tested headless (SwiftShader, or the
+  real GPU with `--gpu`).
 - The engine's doctest suites are not run under Node (they need the real file
   system: `-sNODERAWFS`); determinism is checked through the state hash instead.

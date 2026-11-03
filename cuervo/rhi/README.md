@@ -30,10 +30,12 @@ see its README for what differs.
 | 32-bit indices | Compatible | yes | yes | yes |
 | uniform buffers with offsets | Compatible | yes | yes | yes (dynamic offsets) |
 | RGBA8 / R8 textures, nearest / linear | Compatible | yes | yes | yes |
+| mip chains, per-level data, sRGB RGBA8 (`Feature::TextureMips`) | Compatible | yes (per-level `glTexImage2D`, `GL_SRGB8_ALPHA8`, `*_MIPMAP_*` min filter) | yes (`mipLevels`, `R8G8B8A8_SRGB`, sampler `maxLod` unclamped) | yes (`mipLevelCount`, `rgba8unorm-srgb`, `writeTexture` per level) |
 | integer vertex attributes (`UInt1`) | Compatible | yes | yes | yes |
 | points, lines, line strips (1 px) | Compatible | yes | yes | yes |
 | MSAA (optional) | Compatible | if `GL_MAX_SAMPLES` >= 2 | if `framebufferColorSampleCounts` >= 2 | 4x only (WebGPU allows 1 or 4; 2x asks round down to 1) |
 | frame capture (optional) | Compatible | yes | if the surface allows `TRANSFER_SRC` | if the surface allows `CopySrc` (always when rendering offscreen) |
+| render targets (`Feature::RenderTargets`) | Compatible | yes (FBO + texture, multisampled renderbuffer resolved with `glBlitFramebuffer`; GLES 3.0 core) | yes (dynamic rendering, resolve attachment) | yes (resolve target) |
 | base-vertex draws (`draw_indexed_base_vertex`) | **Full** | no (GLES 3.0 has none) | yes | no (Compatible only) |
 
 Compatible limits (what the tier promises everywhere): textures 4096 px,
@@ -56,6 +58,9 @@ compares the images; WebGPU must equal Vulkan exactly (milestone 10.2).
 | `create/update/destroy_buffer`, Static/Dynamic/Stream, GL ordering (draws see data as of recording) | same; Stream: GL rotates three buffers behind a bounded frame fence ring, Vulkan writes disjoint ranges in place | `buffer_update_order` |
 | `bind_uniform_buffer` offsets and ranges | same | `uniform_offsets` |
 | `create/update/destroy_texture`, formats, filters, zero-initialized | same | `textures` |
+| `create_texture` mip chains (`mip_levels`, 0 = full), per-level data, `srgb`; Linear is trilinear, Nearest picks the nearest level; `update_texture` writes level 0 only | same | `mips` |
+| `create/destroy_render_target`, `render_target_texture`, `set_render_target` (11.2b): offscreen color of the window's format and MSAA count, transparent black at creation, contents kept across passes, window pass resumes after a detour; viewport/scissor reset to the target | same. GL stores target rows bottom-up (`DeviceInfo::render_target_flip_v`: samplers flip v); Vulkan keeps the multisampled image and resolves per pass; WebGPU resolves per pass | `render_targets` |
+| `BlendMode::Additive` (src.a, then add) and `BlendMode::Screen` (premultiplied `src + dst*(1 - src)`) | same | `blend_modes` |
 | `create_pipeline`: blend modes | same factors | `blend_modes` |
 | `create_pipeline`: triangle list / strip | same | `triangles_and_strip` |
 | `create_pipeline`: points (`gl_PointSize`), lines | **fixed**: GL 3.3 core ignored `gl_PointSize` without `GL_PROGRAM_POINT_SIZE` (always on in GLES and Vulkan). **Unified (10.2)**: points are 1 px on every backend, WGSL has no point size | `points_lines` |

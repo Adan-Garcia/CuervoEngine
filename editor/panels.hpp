@@ -59,6 +59,9 @@ std::unique_ptr<Panel> make_profiler_panel();
 std::unique_ptr<Panel> make_history_panel();
 // Milestone 9.8.
 std::unique_ptr<Panel> make_animation_panel();
+// Milestone 11.7c: image and atlas tools, particle tuning.
+std::unique_ptr<Panel> make_sprites_panel();
+std::unique_ptr<Panel> make_particles_panel();
 
 // Drag-and-drop payload of the asset browser: a project-relative path
 // (NUL-terminated). Inspector text fields and the scene view accept it.

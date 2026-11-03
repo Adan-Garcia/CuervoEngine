@@ -1,0 +1,17 @@
+# A two-player duel over the network (DESIGN.md 4.19)
+#   host:  cuervo --game examples/netduel --net-host 7777
+#   join:  cuervo --game examples/netduel --net-join 127.0.0.1:7777
+name = "netduel"
+main = "Duel"
+virtual_size = [640, 360]
+tick_rate = 60
+seed = 20261101
+clear_color = "070a14"
+render_tier = "compatible"
+
+[input.actions]
+left = ["Key.A", "Key.Left", "Pad.DpadLeft"]
+right = ["Key.D", "Key.Right", "Pad.DpadRight"]
+up = ["Key.W", "Key.Up", "Pad.DpadUp"]
+down = ["Key.S", "Key.Down", "Pad.DpadDown"]
+shoot = ["Key.Space", "Key.Z", "Pad.South"]

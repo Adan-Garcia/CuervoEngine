@@ -69,7 +69,8 @@ There is no `let`: `var` is mutable and `const` is constant. Types are inferred 
 initializer, and you can always write one: `var dir: vec2`. A variable declared without a
 value holds the zero value of its type (`0`, `0.0`, `false`, `""`, `null`).
 
-**Numbers.** `int` is 64-bit, `float` is 32-bit; there are also sized types (`i8` to `i64`,
+**Numbers.** `int` is 32-bit (arithmetic runs in 64 bits and only a result that does not fit panics),
+`float` is 32-bit; there are also sized types (`i8` to `i64`,
 `u8` to `u64`, `f32`, `f64`) when you need them. Literals take the type their context
 expects, so `var x: float = 3` works. Integer overflow panics in development builds and
 wraps in release builds: it finds your bugs without costing you speed later. Convert

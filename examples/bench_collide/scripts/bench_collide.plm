@@ -1,0 +1,108 @@
+// The colliding twin of examples/bench (milestone 11.8, docs/PERFORMANCE.md "Colliding bullets").
+// Four emitters fire rings of size-2 bullets from random points over the whole screen, like a
+// bullet-hell wave. Every bullet joins the collision world (layer 1) and is tested each tick
+// against a field of 96 enemy hitboxes (layer 0) plus the player's; bullets pass through
+// (kill_on_hit = false) so the live count stays at the target and the hit lists stay busy.
+// Draw-only particle counts do not apply to this scene: the collider build and the pair queries
+// are what it measures. Everything is seeded and deterministic.
+
+const COLLIDE_LEVEL = 2 // 50k
+
+class BenchCollide extends Node {
+    var level = COLLIDE_LEVEL
+    var steps = [1000, 10000, 50000, 100000] // target counts
+    var emitters = List<Emitter>()
+    var rings = List<int>()
+    var phases = List<float>()
+    var phase_steps = List<float>()
+    var shot_colors = List<Color>()
+    var hits = 0
+
+    fn ready() {
+        for i in 0..4 {
+            emitters.push(Emitter(tag = #bullets, layer = 1, hits = 1, radius = 2.0, kill_on_hit = false,
+                                  shape = i == 1 ? #capsule : #circle))
+        }
+        shot_colors.push(Color.hex("ff5973"))
+        shot_colors.push(Color.hex("59d9ff"))
+        shot_colors.push(Color.hex("ffcc4d"))
+        shot_colors.push(Color.hex("99ff80d9"))
+        for i in 0..4 {
+            phases.push(Random.range(0.0, TAU))
+            var direction = i % 2 == 0 ? 1.0 : -1.0
+            phase_steps.push(Random.range(0.05, 0.25) * direction)
+            rings.push(Random.range_int(16, 40))
+        }
+    }
+
+    fn target() -> int {
+        return steps[level]
+    }
+
+    fn total() -> int {
+        var n = 0
+        for e in emitters {
+            n += e.count()
+        }
+        return n
+    }
+
+    fn on_hit(tag: name, count: int) {
+        hits += count
+    }
+
+    fn update(dt: float) {
+        if Input.pressed(#more) {
+            level = (level + 1) % steps.len()
+            if total() > target() {
+                for e in emitters {
+                    e.clear()
+                }
+            }
+        }
+        // 12 x 8 enemy hitboxes on a fixed grid (they are re-registered every tick).
+        for gy in 0..8 {
+            for gx in 0..12 {
+                Collision.hitbox(self, vec2(60.0 + (gx as float) * 105.0, 50.0 + (gy as float) * 88.0), 18.0, 0)
+            }
+        }
+        // Refill in about a second so the pool sits near the target.
+        var count = total()
+        var budget = max(target() / 60, 1)
+        for k in 0..4 {
+            var i = (k + Time.tick) % 4
+            var per_emitter = budget / (4 - k)
+            var spawned = 0
+            while spawned < per_emitter && count < target() {
+                var shot = Shot {
+                    speed = Random.range(20.0, 120.0), life = Random.range(2.0, 5.0),
+                    size = 2.0, color = shot_colors[i],
+                }
+                var origin = vec2(Random.range(0.0, Screen.size.x), Random.range(0.0, Screen.size.y))
+                var n = emitters[i].fire(Pattern.Ring(count = rings[i], phase = phases[i]), origin, shot)
+                spawned += n
+                count += n
+                phases[i] = wrap(phases[i] + phase_steps[i], 0.0, TAU)
+            }
+            budget -= spawned
+        }
+    }
+
+    fn draw(g: Canvas) {
+        for e in emitters {
+            e.draw(g)
+        }
+        // Hitbox markers and a HUD with deterministic numbers only.
+        for gy in 0..8 {
+            for gx in 0..12 {
+                g.circle(vec2(60.0 + (gx as float) * 105.0, 50.0 + (gy as float) * 88.0), 18.0,
+                         stroke = Color.hex("6666b380"), width = 2.0)
+            }
+        }
+        g.new_layer()
+        g.rect(vec2(12.0, 12.0), vec2(360.0, 72.0), fill = Color.hex("0d0f1acc"), radius = 6.0)
+        g.text(vec2(24.0, 20.0), "{total()} colliding bullets (target {target()})", size = 20.0)
+        g.text(vec2(24.0, 50.0), "tick {Time.tick}   Space: 1k / 10k / 50k / 100k", size = 14.0,
+               color = Color.hex("9aa3c0"))
+    }
+}

@@ -120,7 +120,7 @@ VkBufferUsageFlags to_vk_usage(rhi::BufferKind kind) {
 
 void image_barrier(VkCommandBuffer cmd, VkImage image, VkImageLayout from, VkImageLayout to,
                    VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
-                   VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access) {
+                   VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, std::uint32_t levels = 1) {
     VkImageMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
     barrier.srcStageMask = src_stage;
     barrier.srcAccessMask = src_access;
@@ -131,7 +131,7 @@ void image_barrier(VkCommandBuffer cmd, VkImage image, VkImageLayout from, VkIma
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = image;
-    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, levels, 0, 1};
 
     VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
     dependency.imageMemoryBarrierCount = 1;
@@ -194,6 +194,20 @@ VkPipelineColorBlendAttachmentState to_vk_blend(rhi::BlendMode mode) {
             state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
             state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
             break;
+        case rhi::BlendMode::AdditivePremultiplied:
+            state.blendEnable = VK_TRUE;
+            state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            break;
+        case rhi::BlendMode::Screen: // src + dst*(1 - src), premultiplied source
+            state.blendEnable = VK_TRUE;
+            state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
+            state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+            break;
     }
     return state;
 }
@@ -247,8 +261,27 @@ struct Texture {
     std::int32_t height = 0;
     rhi::TextureFormat format = rhi::TextureFormat::RGBA8;
     rhi::Filter filter = rhi::Filter::Linear;
+    std::uint32_t levels = 1;
     bool initialized = false;
+    bool is_target = false;      // owned by a RenderTarget (its color image)
+    bool zombie = false;         // destroyed, but its queued initial clear must still be recorded
     std::uint64_t last_used = 0; // submission serial of the last frame that sampled it
+};
+
+// An offscreen color target (rhi::RenderTargetDesc). Its sampled texture lives
+// in `textures_` (`texture`) and rests in SHADER_READ_ONLY_OPTIMAL between
+// passes. With MSAA a persistent multisampled image is drawn into and
+// resolved into the texture at the end of every pass, so a later pass can
+// resume from its samples.
+struct RenderTarget {
+    std::uint32_t texture = 0;
+    std::int32_t width = 0;
+    std::int32_t height = 0;
+    VkImage msaa_image = VK_NULL_HANDLE;
+    VmaAllocation msaa_allocation = VK_NULL_HANDLE;
+    VkImageView msaa_view = VK_NULL_HANDLE;
+    bool drawn = false;             // a pass has run: the contents are defined
+    std::optional<rhi::Color> pending_clear;
 };
 
 // A texture write waiting for the next submitted frame: a copy from a staging
@@ -258,6 +291,8 @@ struct PendingUpload {
     rhi::Rect region{};
     VkBuffer staging = VK_NULL_HANDLE;
     VmaAllocation staging_allocation = VK_NULL_HANDLE;
+    std::uint32_t level = 0;
+    bool clear_all = false; // creation write: zero every level first
 };
 
 // A resource the GPU may still be using; freed once submission `serial` has completed.
@@ -270,9 +305,9 @@ struct PendingDelete {
     VkImageView view = VK_NULL_HANDLE;
 };
 
-VkFormat to_vk_format(rhi::TextureFormat format) {
+VkFormat to_vk_format(rhi::TextureFormat format, bool srgb = false) {
     switch (format) {
-        case rhi::TextureFormat::RGBA8: return VK_FORMAT_R8G8B8A8_UNORM;
+        case rhi::TextureFormat::RGBA8: return srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
         case rhi::TextureFormat::R8:    return VK_FORMAT_R8_UNORM;
     }
     return VK_FORMAT_R8G8B8A8_UNORM;
@@ -339,6 +374,12 @@ public:
             for (auto& [id, pipeline] : pipelines_) {
                 vkDestroyPipeline(device_, pipeline.pipeline, nullptr);
             }
+            for (auto& [id, target] : targets_) {
+                if (target.msaa_view) {
+                    vkDestroyImageView(device_, target.msaa_view, nullptr);
+                    vmaDestroyImage(allocator_, target.msaa_image, target.msaa_allocation);
+                }
+            }
             for (auto& [id, texture] : textures_) {
                 vkDestroyImageView(device_, texture.view, nullptr);
                 vmaDestroyImage(allocator_, texture.image, texture.allocation);
@@ -356,6 +397,13 @@ public:
             vkDestroyPipelineLayout(device_, pipeline_layout_, nullptr);
             vkDestroyDescriptorSetLayout(device_, set_layout_, nullptr);
             vkDestroyDescriptorSetLayout(device_, texture_set_layout_, nullptr);
+            for (auto& [id, slot] : surfaces_) {
+                destroy_swapchain(slot.swapchain);
+                if (slot.surface) {
+                    SDL_Vulkan_DestroySurface(instance_, slot.surface, nullptr);
+                }
+            }
+            surfaces_.clear();
             destroy_swapchain(swapchain_);
             for (Frame& frame : frames_) {
                 for (VkDescriptorPool pool : frame.descriptor_pools) {
@@ -451,6 +499,8 @@ public:
         frame_active_ = true;
         rendering_ = false;
         pending_clear_.reset();
+        current_target_ = 0;
+        window_drawn_ = false;
 
         // Reset draw state (rhi.hpp: state resets at every begin_frame).
         current_pipeline_ = 0;
@@ -472,7 +522,7 @@ public:
         }
         if (!rendering_ && scissor_ == full_rect()) {
             // Folded into the render pass's load op: free on tiled GPUs.
-            pending_clear_ = color;
+            pending_clear() = color;
             return;
         }
         begin_rendering();
@@ -495,9 +545,17 @@ public:
             return;
         }
         Frame& frame = frames_[frame_index_];
-        begin_rendering(); // applies a pending clear even if nothing was drawn
-        vkCmdEndRendering(frame.cmd);
-        rendering_ = false;
+        leave_pass();
+        current_target_ = 0;
+        // Applies a pending clear even if nothing was drawn; a window already
+        // drawn this frame needs no extra empty pass.
+        if (!window_drawn_ || pending_clear_) {
+            begin_rendering();
+        }
+        if (rendering_) {
+            vkCmdEndRendering(frame.cmd);
+            rendering_ = false;
+        }
 
         Allocation readback{};
         const bool capture = !capture_path_.empty() && record_readback(frame.cmd, readback);
@@ -569,8 +627,205 @@ public:
         frame_active_ = false;
     }
 
+    // --- secondary window surfaces (Feature::MultiSurface) -------------------
+    // A secondary surface owns a VkSurfaceKHR, a swapchain (with its per-image
+    // render-finished semaphores and MSAA image) and its dirty flag. Everything
+    // else -- command buffers, frame fences, the acquire semaphore, buffers,
+    // pipelines, textures -- is the device's and shared, so a surface frame is
+    // an ordinary frame: begin_frame_surface swaps the surface's state into
+    // the members begin_frame/end_frame use, end_frame_surface swaps it back.
+    // The main-window path therefore runs unchanged. Surface frames take turns
+    // in the same frames_in_flight slots as the main window's.
+    rhi::SurfaceHandle create_window_surface(SDL_Window* window) override {
+        if (!window) {
+            return {};
+        }
+        SurfaceSlot slot;
+        slot.window = window;
+        if (!SDL_Vulkan_CreateSurface(window, instance_, nullptr, &slot.surface)) {
+            LOG_ERROR("create_window_surface: SDL_Vulkan_CreateSurface failed: {}", SDL_GetError());
+            return {};
+        }
+        VkBool32 present = VK_FALSE;
+        vkGetPhysicalDeviceSurfaceSupportKHR(gpu_, queue_family_, slot.surface, &present);
+        std::uint32_t format_count = 0;
+        vkGetPhysicalDeviceSurfaceFormatsKHR(gpu_, slot.surface, &format_count, nullptr);
+        std::vector<VkSurfaceFormatKHR> formats(format_count);
+        vkGetPhysicalDeviceSurfaceFormatsKHR(gpu_, slot.surface, &format_count, formats.data());
+        bool same_format = false;
+        for (const VkSurfaceFormatKHR& f : formats) {
+            same_format = same_format || (f.format == surface_format_.format && f.colorSpace == surface_format_.colorSpace);
+        }
+        // Pipelines are built for the main window's color format.
+        if (!present || !same_format) {
+            LOG_ERROR("create_window_surface: the window can't present with the device's queue and color format");
+            SDL_Vulkan_DestroySurface(instance_, slot.surface, nullptr);
+            return {};
+        }
+        const std::uint32_t id = next_surface_id_++;
+        surfaces_.emplace(id, std::move(slot));
+        return {id};
+    }
+
+    void destroy_window_surface(rhi::SurfaceHandle surface) override {
+        auto it = surfaces_.find(surface.id);
+        if (it == surfaces_.end()) {
+            return;
+        }
+        if (active_surface_ == surface.id) {
+            LOG_WARN("destroy_window_surface: surface is mid-frame; ending the frame first");
+            end_frame_surface();
+        }
+        vkDeviceWaitIdle(device_);
+        destroy_swapchain(it->second.swapchain);
+        SDL_Vulkan_DestroySurface(instance_, it->second.surface, nullptr);
+        surfaces_.erase(it);
+    }
+
+    void begin_frame_surface(rhi::SurfaceHandle surface, ivec2 framebuffer_size) override {
+        auto it = surfaces_.find(surface.id);
+        if (it == surfaces_.end() || frame_active_ || active_surface_ != 0) {
+            LOG_ERROR("begin_frame_surface: unknown surface or a frame is already active");
+            return;
+        }
+        swap_surface_state(it->second);
+        active_surface_ = surface.id;
+        begin_frame(framebuffer_size);
+    }
+
+    void end_frame_surface() override {
+        auto it = surfaces_.find(active_surface_);
+        if (it == surfaces_.end()) {
+            return;
+        }
+        end_frame();
+        swap_surface_state(it->second);
+        active_surface_ = 0;
+    }
+
     ivec2 framebuffer_size() const override {
-        return {static_cast<std::int32_t>(swapchain_.extent.width), static_cast<std::int32_t>(swapchain_.extent.height)};
+        const rhi::Rect full = full_rect();
+        return {full.width, full.height};
+    }
+
+    rhi::RenderTargetHandle create_render_target(const rhi::RenderTargetDesc& desc) override {
+        if (!rhi::detail::render_target_allowed(info_, desc)) {
+            return {};
+        }
+        Texture texture;
+        texture.levels = 1;
+        texture.width = desc.width;
+        texture.height = desc.height;
+        texture.filter = desc.filter;
+        texture.is_target = true;
+
+        // The window's color format, so pipelines built for the window fit.
+        const VkFormat format = surface_format_.format;
+        VkImageCreateInfo image_info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        image_info.imageType = VK_IMAGE_TYPE_2D;
+        image_info.format = format;
+        image_info.extent = {static_cast<std::uint32_t>(desc.width), static_cast<std::uint32_t>(desc.height), 1};
+        image_info.mipLevels = 1;
+        image_info.arrayLayers = 1;
+        image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+        image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+        image_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                           VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        VmaAllocationCreateInfo alloc_info{};
+        alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+        alloc_info.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+        if (VkResult r = vmaCreateImage(allocator_, &image_info, &alloc_info, &texture.image, &texture.allocation,
+                                        nullptr);
+            r != VK_SUCCESS) {
+            LOG_ERROR("create_render_target '{}': vmaCreateImage failed: {}", desc.debug_name, string_VkResult(r));
+            return {};
+        }
+        VkImageViewCreateInfo view_info{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        view_info.image = texture.image;
+        view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view_info.format = format;
+        view_info.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        RenderTarget target;
+        target.width = desc.width;
+        target.height = desc.height;
+        bool ok = vkCreateImageView(device_, &view_info, nullptr, &texture.view) == VK_SUCCESS;
+        if (ok && samples_ != VK_SAMPLE_COUNT_1_BIT) {
+            image_info.samples = samples_;
+            image_info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+            ok = vmaCreateImage(allocator_, &image_info, &alloc_info, &target.msaa_image, &target.msaa_allocation,
+                                nullptr) == VK_SUCCESS;
+            if (ok) {
+                view_info.image = target.msaa_image;
+                ok = vkCreateImageView(device_, &view_info, nullptr, &target.msaa_view) == VK_SUCCESS;
+                if (!ok) {
+                    vmaDestroyImage(allocator_, target.msaa_image, target.msaa_allocation);
+                }
+            }
+        }
+        if (!ok) {
+            LOG_ERROR("create_render_target '{}': could not create the image views", desc.debug_name);
+            if (texture.view) {
+                vkDestroyImageView(device_, texture.view, nullptr);
+            }
+            vmaDestroyImage(allocator_, texture.image, texture.allocation);
+            return {};
+        }
+
+        const rhi::TextureHandle texture_handle{next_id_++};
+        textures_.emplace(texture_handle.id, texture);
+        // Transparent black, and in SHADER_READ_ONLY_OPTIMAL before any pass.
+        pending_uploads_.push_back({texture_handle.id, {0, 0, desc.width, desc.height}, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                    0, true});
+        target.texture = texture_handle.id;
+        const rhi::RenderTargetHandle handle{next_id_++};
+        targets_.emplace(handle.id, target);
+        return handle;
+    }
+
+    rhi::TextureHandle render_target_texture(rhi::RenderTargetHandle handle) const override {
+        auto it = targets_.find(handle.id);
+        return it == targets_.end() ? rhi::TextureHandle{} : rhi::TextureHandle{it->second.texture};
+    }
+
+    void destroy_render_target(rhi::RenderTargetHandle handle) override {
+        auto it = targets_.find(handle.id);
+        if (it == targets_.end()) {
+            return;
+        }
+        if (current_target_ == handle.id) {
+            set_render_target({});
+        }
+        const RenderTarget target = it->second;
+        targets_.erase(it);
+        if (target.msaa_view) {
+            // The multisampled image was last used by a recorded pass at most.
+            pending_deletes_.push_back({submitted_serial_ + (frame_active_ ? 1 : 0), VK_NULL_HANDLE,
+                                        target.msaa_allocation, VK_NULL_HANDLE, target.msaa_image, target.msaa_view});
+        }
+        destroying_target_ = true;
+        destroy_texture(rhi::TextureHandle{target.texture});
+        destroying_target_ = false;
+    }
+
+    void set_render_target(rhi::RenderTargetHandle handle) override {
+        if (!frame_active_) {
+            LOG_ERROR("set_render_target outside begin_frame/end_frame");
+            return;
+        }
+        if (handle.id && !targets_.contains(handle.id)) {
+            LOG_ERROR("set_render_target: invalid render target {}", handle.id);
+            return;
+        }
+        if (handle.id == current_target_) {
+            return;
+        }
+        leave_pass();
+        current_target_ = handle.id;
+        const rhi::Rect full = full_rect();
+        set_viewport(full);
+        set_scissor(full);
     }
 
     // TODO(phase 2b): Static buffers should go through a staging copy into
@@ -682,10 +937,12 @@ public:
     }
 
     rhi::TextureHandle create_texture(const rhi::TextureDesc& desc) override {
-        if (!rhi::detail::texture_size_allowed(info_, desc)) {
+        const std::uint32_t levels = rhi::detail::texture_levels(info_, desc);
+        if (levels == 0) {
             return {};
         }
         Texture texture;
+        texture.levels = levels;
         texture.width = desc.width;
         texture.height = desc.height;
         texture.format = desc.format;
@@ -693,9 +950,9 @@ public:
 
         VkImageCreateInfo image_info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
         image_info.imageType = VK_IMAGE_TYPE_2D;
-        image_info.format = to_vk_format(desc.format);
+        image_info.format = to_vk_format(desc.format, desc.srgb);
         image_info.extent = {static_cast<std::uint32_t>(desc.width), static_cast<std::uint32_t>(desc.height), 1};
-        image_info.mipLevels = 1;
+        image_info.mipLevels = levels;
         image_info.arrayLayers = 1;
         image_info.samples = VK_SAMPLE_COUNT_1_BIT;
         image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
@@ -714,7 +971,7 @@ public:
         view_info.image = texture.image;
         view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
         view_info.format = image_info.format;
-        view_info.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        view_info.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, levels, 0, 1};
         if (VkResult r = vkCreateImageView(device_, &view_info, nullptr, &texture.view); r != VK_SUCCESS) {
             LOG_ERROR("create_texture '{}': vkCreateImageView failed: {}", desc.debug_name, string_VkResult(r));
             vmaDestroyImage(allocator_, texture.image, texture.allocation);
@@ -725,13 +982,16 @@ public:
         textures_.emplace(handle.id, texture);
         // Every texture gets an initial write (data or a clear) queued, so it is
         // in SHADER_READ_ONLY_OPTIMAL before any draw of the same submission samples it.
-        const rhi::Rect full{0, 0, desc.width, desc.height};
-        if (desc.initial_data) {
-            const std::size_t size = static_cast<std::size_t>(desc.width) * static_cast<std::size_t>(desc.height) *
-                                     rhi::texture_format_size(desc.format);
-            queue_upload(handle.id, full, {static_cast<const std::byte*>(desc.initial_data), size});
-        } else {
-            pending_uploads_.push_back({handle.id, full, VK_NULL_HANDLE, VK_NULL_HANDLE});
+        // Level 0's write zeroes the whole chain; later levels follow as copies.
+        for (std::uint32_t level = 0; level < levels; ++level) {
+            const rhi::Rect full{0, 0, rhi::detail::mip_extent(desc.width, level),
+                                 rhi::detail::mip_extent(desc.height, level)};
+            const std::span<const std::byte> data = rhi::detail::texture_level_data(desc, level);
+            if (!data.empty()) {
+                queue_upload(handle.id, full, data, level, level == 0);
+            } else if (level == 0) {
+                pending_uploads_.push_back({handle.id, full, VK_NULL_HANDLE, VK_NULL_HANDLE, 0, true});
+            }
         }
         return handle;
     }
@@ -755,6 +1015,24 @@ public:
     void destroy_texture(rhi::TextureHandle handle) override {
         auto it = textures_.find(handle.id);
         if (it == textures_.end()) {
+            return;
+        }
+        if (it->second.is_target && !destroying_target_) {
+            LOG_ERROR("destroy_texture: texture {} belongs to a render target; destroy the target", handle.id);
+            return;
+        }
+        if (it->second.is_target &&
+            std::any_of(pending_uploads_.begin(), pending_uploads_.end(),
+                        [&](const PendingUpload& upload) { return upload.texture == handle.id; })) {
+            // Its first clear is still queued, and this frame's recorded passes
+            // already expect the image in SHADER_READ_ONLY_OPTIMAL after it: let
+            // record_uploads write it, then free the image.
+            for (std::uint32_t& bound : texture_bindings_) {
+                if (bound == handle.id) {
+                    bound = 0;
+                }
+            }
+            it->second.zombie = true;
             return;
         }
         // Uploads not recorded yet never reach the GPU: drop them now.
@@ -1021,15 +1299,35 @@ private:
         VkImageView msaa_view = VK_NULL_HANDLE;
     };
 
+    struct SurfaceSlot {
+        SDL_Window* window = nullptr;
+        VkSurfaceKHR surface = VK_NULL_HANDLE;
+        Swapchain swapchain;
+        bool dirty = false;
+        std::uint32_t image_index = 0;
+    };
+
+    void swap_surface_state(SurfaceSlot& slot) {
+        std::swap(surface_, slot.surface);
+        std::swap(swapchain_, slot.swapchain);
+        std::swap(swapchain_dirty_, slot.dirty);
+        std::swap(image_index_, slot.image_index);
+    }
+
     rhi::Rect full_rect() const {
+        if (current_target_) {
+            const RenderTarget& target = targets_.find(current_target_)->second;
+            return {0, 0, target.width, target.height};
+        }
         return {0, 0, static_cast<std::int32_t>(swapchain_.extent.width),
                 static_cast<std::int32_t>(swapchain_.extent.height)};
     }
 
     // Vulkan rejects scissors outside the framebuffer; GL just clips them.
     VkRect2D clamped_scissor() const {
-        const std::int32_t w = static_cast<std::int32_t>(swapchain_.extent.width);
-        const std::int32_t h = static_cast<std::int32_t>(swapchain_.extent.height);
+        const rhi::Rect full = full_rect();
+        const std::int32_t w = full.width;
+        const std::int32_t h = full.height;
         const std::int32_t x0 = std::clamp(scissor_.x, 0, w);
         const std::int32_t y0 = std::clamp(scissor_.y, 0, h);
         const std::int32_t x1 = std::clamp(scissor_.x + std::max(scissor_.width, 0), x0, w);
@@ -1110,14 +1408,15 @@ private:
 
     // Copies `data` into a fresh staging buffer; the copy into the image is
     // recorded at the next end_frame (record_uploads).
-    void queue_upload(std::uint32_t texture, rhi::Rect region, std::span<const std::byte> data) {
+    void queue_upload(std::uint32_t texture, rhi::Rect region, std::span<const std::byte> data,
+                      std::uint32_t level = 0, bool clear_all = false) {
         VkBufferCreateInfo buffer_info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
         buffer_info.size = data.size();
         buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
         VmaAllocationCreateInfo alloc_info{};
         alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
         alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
-        PendingUpload upload{texture, region, VK_NULL_HANDLE, VK_NULL_HANDLE};
+        PendingUpload upload{texture, region, VK_NULL_HANDLE, VK_NULL_HANDLE, level, clear_all};
         VmaAllocationInfo allocated{};
         if (VkResult r = vmaCreateBuffer(allocator_, &buffer_info, &alloc_info, &upload.staging,
                                          &upload.staging_allocation, &allocated);
@@ -1153,29 +1452,42 @@ private:
                           texture.initialized ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, texture_read_stages, 0,
                           VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_CLEAR_BIT,
-                          VK_ACCESS_2_TRANSFER_WRITE_BIT);
+                          VK_ACCESS_2_TRANSFER_WRITE_BIT, texture.levels);
+            if (upload.clear_all) {
+                const VkClearColorValue black{};
+                const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, texture.levels, 0, 1};
+                vkCmdClearColorImage(cmd, texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &range);
+                if (upload.staging) {
+                    // Clear then copy touch the same texels: order the copy after it.
+                    image_barrier(cmd, texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_CLEAR_BIT,
+                                  VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT,
+                                  VK_ACCESS_2_TRANSFER_WRITE_BIT, texture.levels);
+                }
+            }
             if (upload.staging) {
                 VkBufferImageCopy region{};
-                region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+                region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, upload.level, 0, 1};
                 region.imageOffset = {upload.region.x, upload.region.y, 0};
                 region.imageExtent = {static_cast<std::uint32_t>(upload.region.width),
                                       static_cast<std::uint32_t>(upload.region.height), 1};
                 vkCmdCopyBufferToImage(cmd, upload.staging, texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
                                        &region);
                 recorded_staging_.push_back({0, upload.staging, upload.staging_allocation});
-            } else {
-                const VkClearColorValue black{};
-                const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-                vkCmdClearColorImage(cmd, texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &range);
             }
             image_barrier(cmd, texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                           VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                          texture_read_stages, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+                          texture_read_stages, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, texture.levels);
             texture.initialized = true;
             // The upload itself uses the image: destroy_texture must wait for
             // this submission even if no draw ever samples the texture.
             texture.last_used = submitted_serial_ + 1;
+            if (texture.zombie) {
+                pending_deletes_.push_back({texture.last_used, VK_NULL_HANDLE, texture.allocation, VK_NULL_HANDLE,
+                                            texture.image, texture.view});
+                textures_.erase(it);
+            }
         }
         pending_uploads_.clear();
         vkEndCommandBuffer(cmd);
@@ -1227,17 +1539,20 @@ private:
         VK_TRY(vkCreatePipelineLayout(device_, &layout_info, nullptr, &pipeline_layout_));
 
         // One immutable-state sampler per filter; addressing is always clamp
-        // to edge and there is one mip level (rhi.hpp TextureDesc).
+        // to edge; Linear is trilinear across a texture's mip chain, Nearest
+        // picks the nearest level (rhi.hpp TextureDesc). A single-level view
+        // clamps the LOD to 0 by itself.
         for (const rhi::Filter filter : {rhi::Filter::Nearest, rhi::Filter::Linear}) {
             const VkFilter vk_filter = filter == rhi::Filter::Nearest ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
             VkSamplerCreateInfo sampler_info{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
             sampler_info.magFilter = vk_filter;
             sampler_info.minFilter = vk_filter;
-            sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+            sampler_info.mipmapMode = filter == rhi::Filter::Nearest ? VK_SAMPLER_MIPMAP_MODE_NEAREST
+                                                                     : VK_SAMPLER_MIPMAP_MODE_LINEAR;
             sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
             sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
             sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-            sampler_info.maxLod = 0.0f;
+            sampler_info.maxLod = VK_LOD_CLAMP_NONE;
             VK_TRY(vkCreateSampler(device_, &sampler_info, nullptr, &samplers_[static_cast<std::size_t>(filter)]));
         }
 
@@ -1260,9 +1575,11 @@ private:
         vkGetPhysicalDeviceSurfaceCapabilitiesKHR(gpu_, surface_, &caps);
         using rhi::Feature;
         for (Feature f : {Feature::InstancedDraws, Feature::IndexUInt32, Feature::UniformBuffers, Feature::Textures,
-                          Feature::IntegerAttributes, Feature::PointsAndLines, Feature::BaseVertexDraws}) {
+                          Feature::IntegerAttributes, Feature::PointsAndLines, Feature::BaseVertexDraws,
+                          Feature::TextureMips, Feature::RenderTargets}) {
             info_.hardware_features.set(f);
         }
+        info_.hardware_features.set(Feature::MultiSurface);
         info_.hardware_features.set(Feature::Msaa, limits.max_msaa_samples >= 2);
         info_.hardware_features.set(Feature::FrameCapture, (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0);
         rhi::detail::apply_tier_gate(info_, options_.tier);
@@ -1505,8 +1822,24 @@ private:
         // UNORM, not SRGB: matches the GL backend's default framebuffer so both
         // backends show identical colors. Color management is a later decision.
         surface_format_ = formats[0];
+        bool found = false;
+        if (options_.linear_color) {
+            // Linear color: an sRGB surface encodes on write, so blending stays linear.
+            for (const VkSurfaceFormatKHR& f : formats) {
+                if ((f.format == VK_FORMAT_B8G8R8A8_SRGB || f.format == VK_FORMAT_R8G8B8A8_SRGB) &&
+                    f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+                    surface_format_ = f;
+                    found = true;
+                    info_.linear_color = info_.window_srgb = true;
+                    break;
+                }
+            }
+            if (!found) {
+                LOG_WARN("Vulkan: no sRGB surface format; linear color is unavailable");
+            }
+        }
         for (const VkSurfaceFormatKHR& f : formats) {
-            if ((f.format == VK_FORMAT_B8G8R8A8_UNORM || f.format == VK_FORMAT_R8G8B8A8_UNORM) &&
+            if (!found && (f.format == VK_FORMAT_B8G8R8A8_UNORM || f.format == VK_FORMAT_R8G8B8A8_UNORM) &&
                 f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
                 surface_format_ = f;
                 break;
@@ -1839,8 +2172,9 @@ private:
         image_info.arrayLayers = 1;
         image_info.samples = samples_;
         image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
-        // Transient: only ever resolved, never stored, so tilers can keep it on chip.
-        image_info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
+        // Not transient: a pass on the window may be suspended (a detour through
+        // a render target) and resumed from the stored samples.
+        image_info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         VmaAllocationCreateInfo alloc_info{};
@@ -1876,36 +2210,112 @@ private:
         swapchain = {};
     }
 
+    // The pending clear of the current target (the window's lives in the device).
+    std::optional<rhi::Color>& pending_clear() {
+        return current_target_ ? targets_.find(current_target_)->second.pending_clear : pending_clear_;
+    }
+
+    // Ends the open pass, if any, and hands a target's image back to samplers.
+    // Contents survive: the next pass on the same target loads them.
+    void leave_pass() {
+        if (!rendering_) {
+            return;
+        }
+        VkCommandBuffer cmd = frames_[frame_index_].cmd;
+        vkCmdEndRendering(cmd);
+        rendering_ = false;
+        if (current_target_) {
+            const RenderTarget& target = targets_.find(current_target_)->second;
+            image_barrier(cmd, textures_.find(target.texture)->second.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                          VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, texture_read_stages,
+                          VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+        }
+    }
+
     void begin_rendering() {
         if (rendering_) {
             return;
         }
+        VkCommandBuffer cmd = frames_[frame_index_].cmd;
+        constexpr VkPipelineStageFlags2 attachment_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        constexpr VkAccessFlags2 attachment_rw =
+            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT;
+        RenderTarget* target = current_target_ ? &targets_.find(current_target_)->second : nullptr;
+        std::optional<rhi::Color>& clear_color = pending_clear();
+
+        VkImageView single_view = VK_NULL_HANDLE;
+        VkImageView msaa_view = VK_NULL_HANDLE;
+        VkExtent2D extent = swapchain_.extent;
+        bool defined = false; // the attachment holds contents to load
+        if (target) {
+            Texture& texture = textures_.find(target->texture)->second;
+            texture.last_used = submitted_serial_ + 1;
+            single_view = texture.view;
+            msaa_view = target->msaa_view;
+            extent = {static_cast<std::uint32_t>(target->width), static_cast<std::uint32_t>(target->height)};
+            defined = target->drawn;
+            // Samplers of earlier frames and passes finish before the writes.
+            image_barrier(cmd, texture.image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, texture_read_stages, 0, attachment_stage,
+                          attachment_rw);
+            if (msaa_view) {
+                image_barrier(cmd, target->msaa_image,
+                              target->drawn ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
+                              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, attachment_stage, attachment_rw,
+                              attachment_stage, attachment_rw);
+            }
+            target->drawn = true;
+        } else {
+            single_view = swapchain_.views[image_index_];
+            msaa_view = swapchain_.msaa_view;
+            defined = window_drawn_;
+            if (window_drawn_) {
+                // Resuming after a detour through a render target.
+                image_barrier(cmd, swapchain_.images[image_index_], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, attachment_stage, attachment_rw,
+                              attachment_stage, attachment_rw);
+                if (swapchain_.msaa_image) {
+                    image_barrier(cmd, swapchain_.msaa_image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, attachment_stage, attachment_rw,
+                                  attachment_stage, attachment_rw);
+                }
+            }
+            window_drawn_ = true;
+        }
+
         VkRenderingAttachmentInfo color{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-        color.imageView = swapchain_.views[image_index_];
+        color.imageView = single_view;
         color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        color.loadOp = pending_clear_ ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        // A target starts transparent black (its multisampled image is new:
+        // clear it); the window's first pass has no defined contents (callers
+        // clear first), later ones load.
+        const bool fresh_samples = target && !defined && msaa_view;
+        color.loadOp = (clear_color || fresh_samples) ? VK_ATTACHMENT_LOAD_OP_CLEAR
+                       : (defined || target)          ? VK_ATTACHMENT_LOAD_OP_LOAD
+                                                      : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        if (swapchain_.msaa_view) {
-            // Render multisampled, resolve (average) into the swapchain image
-            // when rendering ends; the samples themselves are never stored.
-            color.imageView = swapchain_.msaa_view;
-            color.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        if (msaa_view) {
+            // Render multisampled, resolve (average) into the single-sample
+            // image when the pass ends. The samples are stored: a later pass
+            // may resume from them (a detour through a render target).
+            color.imageView = msaa_view;
             color.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
-            color.resolveImageView = swapchain_.views[image_index_];
+            color.resolveImageView = single_view;
             color.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         }
-        if (pending_clear_) {
-            color.clearValue.color = {{pending_clear_->r, pending_clear_->g, pending_clear_->b, pending_clear_->a}};
+        if (clear_color) {
+            color.clearValue.color = {{clear_color->r, clear_color->g, clear_color->b, clear_color->a}};
         }
 
         VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};
-        rendering.renderArea = {{0, 0}, swapchain_.extent};
+        rendering.renderArea = {{0, 0}, extent};
         rendering.layerCount = 1;
         rendering.colorAttachmentCount = 1;
         rendering.pColorAttachments = &color;
-        vkCmdBeginRendering(frames_[frame_index_].cmd, &rendering);
+        vkCmdBeginRendering(cmd, &rendering);
         rendering_ = true;
-        pending_clear_.reset();
+        clear_color.reset();
     }
 
     void collect_garbage() {
@@ -1941,6 +2351,9 @@ private:
 
     Swapchain swapchain_;
     bool swapchain_dirty_ = false;
+    std::unordered_map<std::uint32_t, SurfaceSlot> surfaces_;
+    std::uint32_t next_surface_id_ = 1;
+    std::uint32_t active_surface_ = 0; // surface whose state is swapped in, 0 = the main window
     std::array<Frame, frames_in_flight> frames_{};
     std::size_t bar_budget_ = 0; // bytes of CPU-writable device-local memory (see allocate)
     std::uint32_t frame_index_ = 0;
@@ -1959,6 +2372,10 @@ private:
     std::unordered_map<std::uint32_t, Buffer> buffers_;
     std::unordered_map<std::uint32_t, Pipeline> pipelines_;
     std::unordered_map<std::uint32_t, Texture> textures_;
+    std::unordered_map<std::uint32_t, RenderTarget> targets_;
+    std::uint32_t current_target_ = 0; // 0 = the window
+    bool window_drawn_ = false;        // the window's pass has begun this frame
+    bool destroying_target_ = false;
     std::vector<PendingUpload> pending_uploads_;
     std::vector<PendingDelete> recorded_staging_; // staging buffers of the frame being submitted
     std::uint32_t next_id_ = 1;

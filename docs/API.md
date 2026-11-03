@@ -15,8 +15,12 @@ the guide is [GUIDE.md](GUIDE.md). Names starting with `_` are private and not l
 
 - [math.plm](#mathplm): `PI`, `TAU`, `E`, `SQRT2`, `INF`, `NAN`, `FLOAT_EPSILON`, `INT_MAX`, `INT_MIN`, `trunc`, `fract`, `fposmod`, `hypot`, `copysign`, `snapped`, `pingpong`, `angle_difference`, `lerp_angle`, `rotate_toward`, `is_nan`, `is_inf`, `is_finite`, `is_equal_approx`, `bezier`, `bezier_quad`, `bezier_vec2`, `bezier_quad_vec2`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`, `cbrt`, [`Ease`](#ease), `ease_in`, `ease_out`, `ease_in_out`, `ease`, `gcd`, `lcm`, `ipow`, `isqrt`, [`DivMod`](#divmod), `divmod`, `floor_div`, `floor_mod`, `popcount`, `clz`, `ctz`, [`ivec2`](#ivec2), [`ivec3`](#ivec3), [`ivec4`](#ivec4), [`Rect2`](#rect2), [`Transform2D`](#transform2d), `cross3`, `closest_point_on_segment`, `point_in_polygon`, `segment_intersection`, `ray_circle_intersection`, `polygon_signed_area`, `polygon_area`, `convex_hull`, `triangulate`, `hash`, `hash2`, `hash3`, `hash_str`, `hash_float`, `perlin1`, `perlin2`, `perlin3`, `simplex2`, `fractal_perlin2`, [`Rng`](#rng)
 - [core.plm](#coreplm): [`Color`](#color), [`Time`](#time), [`Screen`](#screen), [`Random`](#random), [`Input`](#input), [`Canvas`](#canvas)
+- [save.plm](#saveplm): [`Save`](#save), [`Settings`](#settings)
+- [locale.plm](#localeplm): [`Locale`](#locale), `tr`
+- [net.plm](#netplm): [`Net`](#net)
+- [http.plm](#httpplm): [`Http`](#http)
 - [scene.plm](#sceneplm): [`Node`](#node), [`NodeTransform`](#nodetransform), [`Node2D`](#node2d), [`SceneInstance`](#sceneinstance), [`CanvasLayer`](#canvaslayer), [`Scene`](#scene)
-- [nodes.plm](#nodesplm): [`ShapeKind`](#shapekind), [`Shape`](#shape), [`PathCurve`](#pathcurve), [`Path`](#path), [`Sprite`](#sprite), [`Text`](#text), [`Camera2D`](#camera2d), [`Timer`](#timer), [`LineJoin`](#linejoin), [`LineCap`](#linecap), [`Line2D`](#line2d), [`Polygon2D`](#polygon2d), [`Marker2D`](#marker2d), [`VisibleOnScreenNotifier2D`](#visibleonscreennotifier2d)
+- [nodes.plm](#nodesplm): [`ShapeKind`](#shapekind), [`Shape`](#shape), [`PathCurve`](#pathcurve), [`Path`](#path), [`Sprite`](#sprite), [`Sprite2D`](#sprite2d), [`AnimatedSprite2D`](#animatedsprite2d), [`NinePatchRect`](#ninepatchrect), [`Text`](#text), [`Camera2D`](#camera2d), [`Timer`](#timer), [`LineJoin`](#linejoin), [`LineCap`](#linecap), [`Line2D`](#line2d), [`Polygon2D`](#polygon2d), [`Marker2D`](#marker2d), [`VisibleOnScreenNotifier2D`](#visibleonscreennotifier2d)
 - [animation.plm](#animationplm): [`Anim`](#anim), [`AnimInterp`](#animinterp), [`AnimLoop`](#animloop), [`AnimTrackKind`](#animtrackkind), `anim_shape`, [`AnimKey`](#animkey), [`AnimPose`](#animpose), [`AnimTrack`](#animtrack), [`Animation`](#animation), [`AnimFired`](#animfired), [`AnimPlayhead`](#animplayhead), `anim_resolve`, [`AnimBinding`](#animbinding), [`AnimBinder`](#animbinder), `anim_blend`, [`AnimationPlayer`](#animationplayer), [`Tweener`](#tweener), [`TweenStep`](#tweenstep), [`Tween`](#tween), [`AnimCondOp`](#animcondop), [`AnimCondition`](#animcondition), [`AnimStateDef`](#animstatedef), [`AnimTransition`](#animtransition), [`AnimationTree`](#animationtree)
 - [tilemap.plm](#tilemapplm): [`TileDef`](#tiledef), [`TileSet`](#tileset), [`TileCell`](#tilecell), `tile_pack_coord`, `tile_unpack_x`, `tile_unpack_y`, `autotile_mask`, [`TileMapLayer`](#tilemaplayer)
 - [lighting.plm](#lightingplm): [`PointLight2D`](#pointlight2d), [`DirectionalLight2D`](#directionallight2d), [`AmbientLight2D`](#ambientlight2d), [`OccluderShape`](#occludershape), [`LightOccluder2D`](#lightoccluder2d)
@@ -1050,6 +1054,19 @@ actions, never raw devices.
 
   True only on the tick the action went up.
 
+- `static fn held_by(player: int, action: name) -> bool`
+
+  `held` for another player's input frame (player 0 is the plain `held`); false for a
+  player the host has no frame for.
+
+- `static fn pressed_by(player: int, action: name) -> bool`
+
+  `pressed` for another player's input frame.
+
+- `static fn released_by(player: int, action: name) -> bool`
+
+  `released` for another player's input frame.
+
 - `static fn axis(axis: name) -> vec2`
 
   A 2D axis (e.g. `move = ["Keys.Arrows", "Pad.LeftStick"]`), length <= 1.
@@ -1066,6 +1083,17 @@ actions, never raw devices.
 
   The character typed this tick ("" if none): one Unicode code point, from
   the input frame, so it replays. Text fields read it (UI.wants_text).
+
+- `static fn composition() -> str`
+
+  The IME composition being built (text typed but not yet committed), or "".
+  Live window input for drawing only: it is not in the input frame, so it is
+  always "" in a replay and must not influence game state. The committed
+  result arrives through text().
+
+- `static fn composition_cursor() -> int`
+
+  Caret inside the composition, in characters (-1: none).
 
 ### Canvas
 
@@ -1110,7 +1138,8 @@ Without `fill` or `stroke` a shape is filled white.
 
 - `fn text(pos: vec2, text: str, size = 16.0, color: Color = Color {}, align = #left, baseline = #top, max_width = 0.0)`
 
-  align: #left, #center, #right; baseline: #top, #middle, #bottom.
+  align: #left, #center, #right, or #start / #end (the text's reading direction:
+  Arabic text at #start extends leftwards from `pos`); baseline: #top, #middle, #bottom.
   `max_width` > 0 wraps lines at that width.
 
 - `fn polygon(points: List<vec2>, fill: Color? = null, stroke: Color? = null, width = 1.0, pos = vec2(0.0, 0.0), rotation = 0.0, scale = vec2(1.0, 1.0))`
@@ -1132,6 +1161,23 @@ Without `fill` or `stroke` a shape is filled white.
   centered there, or with its top-left corner there, then turned and
   scaled about `pos`. `tint` multiplies its colors. Loaded on first use;
   a missing or broken file is logged once and draws nothing.
+
+- `fn sprite(asset: str, pos: vec2, frame = "", rotation = 0.0, scale = vec2(1.0, 1.0), centered = true, flip_h = false, flip_v = false, tint: Color = Color {}, filter = #default, size = vec2(0.0, 0.0))`
+
+  A raster image (PNG, JPEG, QOI), an atlas frame (`asset` is an `.atlas`
+  file, `frame` a name in it) or an SVG rasterized at the zoom it is drawn
+  at, at `pos` (centered there, or with its top-left corner there), turned
+  and scaled about `pos`. `size` > 0 overrides the natural size (texels,
+  SVG document units). `filter` is #default (the project scale mode:
+  nearest under integer scaling), #nearest or #linear. Batched by texture;
+  a missing file is logged once and draws nothing. Used by Sprite2D.
+
+- `fn nine_patch(asset: str, pos: vec2, size: vec2, frame = "", margin_left = 0.0, margin_top = 0.0, margin_right = 0.0, margin_bottom = 0.0, rotation = 0.0, scale = vec2(1.0, 1.0), centered = false, draw_center = true, tint: Color = Color {}, filter = #default)`
+
+  A 9-slice: the image (or atlas frame) stretched over `size` (times
+  `scale`), its four borders (`margin_*`, in the image's own units) kept
+  at their natural size. Placed like sprite(); `draw_center` false leaves
+  the middle empty. Used by NinePatchRect.
 
 - `fn set_view(center: vec2, zoom = 1.0, rotation = 0.0)`
 
@@ -1210,6 +1256,446 @@ Without `fill` or `stroke` a shape is filled white.
   Shades everything drawn so far with the queued lights (in the current
   view), then forgets them. Without an ambient light, lights add to the
   scene; with one, the scene darkens except where they reach.
+
+## save.plm
+
+Source: `cuervo/script/prelude/save.plm`
+
+### Save
+
+```pluma
+class Save
+```
+
+Engine API: save data and player settings (DESIGN.md 7.2 "Save data").
+
+A save slot is a named bag of typed values stored in the per-user directory
+(~/.local/share/Cuervo/&lt;game>/saves on Linux, %APPDATA%/Cuervo/&lt;game>/saves
+on Windows, IndexedDB on the web). Slot names use letters, digits, `_` and `-`.
+
+Saving is outside the simulation: it is never hashed or replayed. Read a
+slot into your own state during startup or from a UI action, not from code
+whose result a replay must reproduce unless the loaded values are also in
+the recorded state.
+
+Usage: `Save.set_int("slot1", "level", 3); Save.commit("slot1", 2)` then
+later `if Save.load("slot1") { let level = Save.get_int("slot1", "level", 1) }`.
+Every slot file carries a version (the argument of `commit`, default 1);
+`Save.version(slot)` tells what a loaded file had so the script can migrate
+older data itself before committing it again at the new version. The
+loaded copy and later `set_*` calls live in memory until `commit`.
+
+**Methods**
+
+- `static fn load(slot: str) -> bool`
+
+  Reads a slot from disk into memory. False if it is missing or corrupt.
+
+- `static fn commit(slot: str, version: int = 1) -> bool`
+
+  Writes the in-memory slot to disk with the given format version. False on failure.
+
+- `static fn exists(slot: str) -> bool`
+
+  True if a saved file exists for the slot.
+
+- `static fn version(slot: str) -> int`
+
+  The version stored in the slot's file as last loaded or committed (0 if neither).
+
+- `static fn delete(slot: str) -> bool`
+
+  Deletes the slot's file and its in-memory copy.
+
+- `static fn discard(slot: str)`
+
+  Forgets the in-memory copy without touching the file.
+
+- `static fn has(slot: str, key: str) -> bool`
+
+  True if the in-memory slot has `key`.
+
+- `static fn remove_key(slot: str, key: str)`
+
+  Removes `key` from the in-memory slot.
+
+- `static fn set_int(slot: str, key: str, value: int)`
+
+  Stores a typed value under the key in the in-memory slot.
+
+- `static fn set_float(slot: str, key: str, value: float)`
+
+  Stores a float (kept as f64 on disk).
+
+- `static fn set_bool(slot: str, key: str, value: bool)`
+
+  Stores a bool.
+
+- `static fn set_str(slot: str, key: str, value: str)`
+
+  Stores a string.
+
+- `static fn get_int(slot: str, key: str, fallback: int = 0) -> int`
+
+  Getters return `fallback` when the key is missing or holds another type.
+
+- `static fn get_float(slot: str, key: str, fallback: float = 0.0) -> float`
+
+  The float stored under the key.
+
+- `static fn get_bool(slot: str, key: str, fallback: bool = false) -> bool`
+
+  The bool stored under the key.
+
+- `static fn get_str(slot: str, key: str, fallback: str = "") -> str`
+
+  The string stored under the key.
+
+### Settings
+
+```pluma
+class Settings
+```
+
+Player settings: graphics, audio and input choices kept in the save slot
+"settings". `apply` pushes them to the window, the mixer and the input map;
+`Settings.set_*` change the in-memory values and apply them right away.
+Buses are #master, #music, #sfx, #ui and #voice.
+
+**Methods**
+
+- `static fn load() -> bool`
+
+  Loads the saved settings (defaults if none) and applies them.
+
+- `static fn save() -> bool`
+
+  Writes the current settings to disk.
+
+- `static fn apply()`
+
+  Applies the current values again.
+
+- `static fn reset()`
+
+  Back to defaults (applied, not saved).
+
+- `static fn fullscreen() -> bool`
+
+  Whether the window should be fullscreen.
+
+- `static fn set_fullscreen(on: bool)`
+
+  Sets and applies fullscreen.
+
+- `static fn vsync() -> bool`
+
+  Whether presentation waits for the display refresh.
+
+- `static fn set_vsync(on: bool)`
+
+  Sets and applies vsync.
+
+- `static fn ui_scale() -> float`
+
+  UI scale factor, 0.5 to 3.
+
+- `static fn set_ui_scale(scale: float)`
+
+  Sets and applies the UI scale (clamped).
+
+- `static fn volume(bus: name) -> float`
+
+  Linear gain of a bus, 0 to 1.
+
+- `static fn set_volume(bus: name, volume: float)`
+
+  Sets and applies a bus gain (clamped to 0..1).
+
+- `static fn muted() -> bool`
+
+  Whether master is muted.
+
+- `static fn set_muted(on: bool)`
+
+  Mutes or unmutes master and applies it.
+
+- `static fn set_binding(action: name, binding: str) -> bool`
+
+  Replaces an action's bindings with `binding` text (for example "key:Space"); false if refused.
+
+- `static fn binding(action: name) -> str`
+
+  The replacement binding saved for `action`, or "".
+
+## locale.plm
+
+Source: `cuervo/script/prelude/locale.plm`
+
+### Constants and functions
+
+- `fn tr(key: name) -> str`
+
+  Shorthand for Locale.tr.
+
+### Locale
+
+```pluma
+class Locale
+```
+
+Engine API: localization (DESIGN.md 4.19, 11.3).
+
+String tables map a key (a name such as `#start_game`) to the text of each
+locale. Load a CSV from the project with `Locale.load("locale/strings.csv")`:
+the first row is `key,en,ar,ja`, then one row per key; a plural form is a key
+with a category suffix (`items.one`, `items.other`; Arabic also uses
+`.zero`, `.two`, `.few`, `.many`). Quote cells that contain commas.
+
+The locale is display state, outside the simulation: it is never hashed or
+replayed, so do not branch game logic on translated text, formatted numbers
+or `Locale.current()`. Use `Locale.revision()` to know when a UI should
+rebuild its text after a switch.
+
+Usage: `Locale.set_locale("ar")`, `tr(#start_game)`,
+`Locale.tr_plural(#items, 3, [Locale.format_int(3)])` with the table text
+`You have {0} items`.
+
+**Methods**
+
+- `static fn load(path: str) -> bool`
+
+  Reads a CSV string table from a project file; false (and a warning) on failure.
+
+- `static fn add(locale: str, key: str, text: str)`
+
+  Adds or replaces one entry.
+
+- `static fn set_locale(locale: str) -> bool`
+
+  Switches the active locale ("ar", "ja", "pt-BR"); false if no table has it.
+
+- `static fn set_fallback(locale: str)`
+
+  The locale used for keys the active one lacks (default "en").
+
+- `static fn current() -> str`
+
+  The active locale id.
+
+- `static fn has_locale(locale: str) -> bool`
+
+  True if a table exists for the locale.
+
+- `static fn locales() -> List<str>`
+
+  Every locale with a table, sorted.
+
+- `static fn is_rtl() -> bool`
+
+  True for right-to-left locales: mirror your layout.
+
+- `static fn revision() -> int`
+
+  Changes whenever the locale or a table changes.
+
+- `static fn has(key: name) -> bool`
+
+  True if the active locale or a fallback has text for the key.
+
+- `static fn tr(key: name) -> str`
+
+  The text of `key` (the key itself if missing).
+
+- `static fn tr_args(key: name, args: List<str>) -> str`
+
+  As tr(), replacing {0}, {1} ... with the arguments.
+
+- `static fn tr_plural(key: name, n: int, args: List<str> = []) -> str`
+
+  The plural form of `key` for `n` (`key.one`, `key.other` ...), with arguments.
+
+- `static fn format_int(n: int) -> str`
+
+  Number and date formatting for the active locale (digits, separators, field order).
+
+- `static fn format_float(x: float, decimals: int = 2) -> str`
+
+  Decimal with `decimals` places, e.g. "1,234.50" (en) or "1.234,50" (de).
+
+- `static fn format_date(year: int, month: int, day: int) -> str`
+
+  Short numeric date in the locale's field order.
+
+- `static fn format_time(hour: int, minute: int) -> str`
+
+  12 or 24 hour time per locale.
+
+## net.plm
+
+Source: `cuervo/script/prelude/net.plm`
+
+### Net
+
+```pluma
+class Net
+```
+
+Engine API: networked play (DESIGN.md 4.19).
+
+The game owns one network session. It never exposes sockets or packets: the only
+thing the network gives the simulation is each player's input for each tick, delivered
+through `Input.held_by(player, action)` (player 0 is also the plain `Input.held`), so a
+networked match records and replays exactly like local input. Connection state
+(`connected`, `peers`, `peer_joined`, ...) is outside the simulation and is not part of
+the state hash: use it for lobby and HUD code, and do not let it change simulation state.
+Events are polled booleans rather than callbacks for the same reason.
+
+Usage: `Net.host(7777)` on one machine and `Net.join("192.168.1.5:7777")` on the other
+(UDP, two players; `Net.mesh` for up to four); or `Net.relay("ws://relay.example:9000", "room1", 2)` for browsers and
+NAT (players are numbered in join order). The runner then advances the simulation only when
+every player's input for the next tick has arrived (lockstep) or from predicted input with
+rollback (`Net.set_mode(#rollback)`), so `update` is called the same number of times on
+every machine. Call `Net.set_mode` and `Net.set_input_delay` before connecting.
+
+**Methods**
+
+- `static fn host(port: int) -> bool`
+
+  Waits for one peer on UDP `port` and makes this machine player 0. False if the port cannot be bound.
+
+- `static fn join(address: str) -> bool`
+
+  Connects to a host at "address:port" (UDP) and makes this machine player 1.
+
+- `static fn mesh(addresses: str, index: int) -> bool`
+
+  UDP with 2 to 4 players and no server: `addresses` is every player's "host:port" in player order,
+  comma separated ("10.0.0.1:7001,10.0.0.2:7001,10.0.0.3:7001"), `index` this machine's position in it.
+  Binds our own port and sends to the others, so every machine passes the same list. False if
+  the port cannot be bound or an address cannot be resolved.
+
+- `static fn relay(url: str, room: str, players: int = 2) -> bool`
+
+  Joins `room` on a WebSocket relay (ws:// URL; wss:// is not supported yet). The relay assigns the
+  player number in join order. False if the relay cannot be reached or the room is full.
+
+- `static fn stop()`
+
+  Leaves the session; the game goes back to ordinary local ticks.
+
+- `static fn set_mode(mode: name)`
+
+  `#lockstep` (default: wait for every player's input, fixed input delay) or `#rollback`
+  (predict missing input, re-simulate when the real input differs).
+
+- `static fn is_rollback() -> bool`
+
+  True when the mode is `#rollback`.
+
+- `static fn set_input_delay(ticks: int)`
+
+  Lockstep input delay in ticks (0..30, default 2): higher hides latency, costs responsiveness.
+
+- `static fn player() -> int`
+
+  This machine's player number (0 when not networked).
+
+- `static fn players() -> int`
+
+  Players in the match (1 when not networked).
+
+- `static fn peers() -> int`
+
+  Remote players heard from recently.
+
+- `static fn connected() -> bool`
+
+  True once every other player has been heard from.
+
+- `static fn desynced() -> bool`
+
+  True once a state-hash mismatch with a peer was detected (sticky).
+
+- `static fn peer_joined() -> bool`
+
+  True once for each newly seen peer.
+
+- `static fn peer_left() -> bool`
+
+  True once for each peer that went silent.
+
+## http.plm
+
+Source: `cuervo/script/prelude/http.plm`
+
+### Http
+
+```pluma
+class Http
+```
+
+Engine API: HTTP and HTTPS requests to game services (DESIGN.md 4.19).
+
+A request runs outside the simulation (a worker thread on desktop, the browser's fetch on the
+web). `Http.get` and `Http.post` return a handle at once; poll it with `done`, then read
+`status` and `body`. There are no callbacks into the game, and a response is never part of the
+state hash or the replay: a script that lets a response change simulation state must copy it
+into recorded state itself, and a replay will not reproduce a different answer. Use it for
+leaderboards, lobbies, patch notes and the like, and for results the game only displays.
+
+Usage: `h = Http.get("https://example.com/scores.json")` once, then each frame
+`if h != 0 and Http.done(h) { if Http.status(h) == 200 { show(Http.body(h)) }; Http.close(h); h = 0 }`.
+Headers are given as one string of `Name: value` lines separated by `\n`.
+
+https:// is verified against the system trust store (desktop) or the browser (web); a private
+certificate authority is trusted with `Http.set_ca_file` (desktop only). Redirects are followed
+(at most five on desktop; https is never downgraded to http); a response over 4 MiB or a request
+over the timeout fails. On the web the browser's rules apply: the server must allow
+cross-origin requests (CORS).
+
+**Methods**
+
+- `static fn get(url: str, headers: str = "") -> int`
+
+  Starts a GET. Returns a handle (1 or more), or 0 when the URL is not http(s), a header is
+  malformed or too many requests are open (a warning says which).
+
+- `static fn post(url: str, body: str, headers: str = "") -> int`
+
+  Starts a POST with `body` (send a `Content-Type` header for anything but raw bytes).
+
+- `static fn done(handle: int) -> bool`
+
+  True once the request finished, failed, timed out or was cancelled.
+
+- `static fn status(handle: int) -> int`
+
+  The HTTP status (200, 404, ...), or 0 while pending and when the request failed (see `error`).
+
+- `static fn body(handle: int) -> str`
+
+  The response body, empty until `done`.
+
+- `static fn error(handle: int) -> str`
+
+  Why the request failed, or "" (also set for "too many redirects" and "response too large").
+
+- `static fn header(handle: int, name: str) -> str`
+
+  One response header by case-insensitive name, or "".
+
+- `static fn close(handle: int)`
+
+  Cancels a pending request and frees the handle. Always close handles you are done with.
+
+- `static fn set_timeout(ms: int)`
+
+  Per-request time budget in milliseconds for later requests (100..120000, default 10000).
+
+- `static fn set_ca_file(path: str)`
+
+  Trusts the PEM certificate bundle at `path` instead of the system store (desktop; "" resets).
 
 ## scene.plm
 
@@ -1615,6 +2101,10 @@ Access to the running scene tree: the root and tree-wide operations.
   Saves `node` and its (non-transient) descendants. Returns false (and
   logs why) if the file can't be written.
 
+- `static fn save_binary(node: Node, path: str) -> bool`
+
+  Like `save`, but writes the compact binary form instead of text.
+
 - `static fn quit()`
 
   Asks the runner to close the game after this tick.
@@ -1843,6 +2333,218 @@ works). The document's own units are pixels at `scale` 1.
 - `@export var tint = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }`
 
   Multiplies every color of the image (alpha included).
+
+**Methods**
+
+- `fn draw(g: Canvas)`
+
+  Draws the node (render only).
+
+### Sprite2D
+
+```pluma
+class Sprite2D extends Node2D
+```
+
+A raster image in the world (DESIGN.md 4.4 "Raster pipeline"): a PNG, JPEG
+or QOI file, a frame of an atlas (`asset` = "art/ui.atlas", `frame` = a
+name in it) or an SVG, which is rasterized at the zoom it is drawn at when
+you want it pixel-exact. Sprites sharing an atlas page draw in one batch.
+(`Sprite` is the live-tessellated vector image; this is the raster one.)
+
+**Fields**
+
+- `@export var asset = ""`
+
+  The image, atlas (.atlas / .catlas) or SVG file, relative to the project.
+
+- `@export var frame = ""`
+
+  The frame to draw when `asset` is an atlas ("" = its first frame).
+
+- `@export var centered = true`
+
+  Centered on `position`; false puts the top-left corner there.
+
+- `@export var flip_h = false`
+
+  Mirrors the image left-right.
+
+- `@export var flip_v = false`
+
+  Mirrors the image top-bottom.
+
+- `@export var tint = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }`
+
+  Multiplies every color (alpha included).
+
+- `@export var filter = #default`
+
+  \#default (the project's scale mode: nearest under integer scaling),
+  \#nearest (pixel art) or #linear (smooth).
+
+- `@export var size = vec2(0.0, 0.0)`
+
+  > 0 draws the image at this size instead of its own (before `scale`).
+
+**Methods**
+
+- `fn draw(g: Canvas)`
+
+  Draws the node (render only).
+
+### AnimatedSprite2D
+
+```pluma
+class AnimatedSprite2D extends Node2D
+```
+
+A flipbook: the named frames of an atlas played in order at `fps`,
+advanced in whole simulation ticks (like Timer), so the frame shown is part
+of the deterministic state and replays see the same animation.
+
+**Signals**
+
+- `signal animation_finished`
+
+  Emitted on the tick a non-looping animation shows its last frame for the full duration.
+
+**Fields**
+
+- `@export var asset = ""`
+
+  The atlas (.atlas / .catlas) the frames are named in.
+
+- `@export var frames = List<str>()`
+
+  The frame names, in play order.
+
+- `@export var fps = 12.0`
+
+  Frames per second.
+
+- `@export var looping = true`
+
+  Starts over after the last frame.
+
+- `@export var playing = true`
+
+  Plays from the moment the node enters the tree.
+
+- `@export var frame = 0`
+
+  Index of the frame shown (into `frames`).
+
+- `@export var centered = true`
+
+  Centered on `position`; false puts the top-left corner there.
+
+- `@export var flip_h = false`
+
+  Mirrors the image left-right.
+
+- `@export var flip_v = false`
+
+  Mirrors the image top-bottom.
+
+- `@export var tint = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }`
+
+  Multiplies every color (alpha included).
+
+- `@export var filter = #default`
+
+  \#default, #nearest or #linear (see Sprite2D).
+
+- `var ticks = 0`
+
+  Ticks the current frame has been shown.
+
+**Methods**
+
+- `static fn sequence(prefix: str, count: int) -> List<str>`
+
+  The names "&lt;prefix>_0" ... "&lt;prefix>_&lt;count - 1>" (what a grid sheet in an .atlas file produces).
+
+- `fn play()`
+
+  Plays from the first frame.
+
+- `fn stop()`
+
+  Stops on the current frame.
+
+- `fn set_frame(i: int)`
+
+  Shows frame `i` (clamped) and restarts its timer.
+
+- `fn ticks_per_frame() -> int`
+
+  `fps` in whole ticks per frame, at least 1.
+
+- `fn update_tree(dt: float)`
+
+  Engine-internal: advances the frame before the node's update().
+
+- `fn draw(g: Canvas)`
+
+  Draws the node (render only).
+
+### NinePatchRect
+
+```pluma
+class NinePatchRect extends Node2D
+```
+
+A 9-slice panel: the image (or atlas frame) stretched to `size` with its
+four borders kept at their natural size, so frames, buttons and speech
+bubbles scale without distorting their corners. `position` is the top-left
+corner unless `centered`. `scale` stretches the rectangle, not the borders.
+
+**Fields**
+
+- `@export var asset = ""`
+
+  The image, atlas (.atlas / .catlas) or SVG file, relative to the project.
+
+- `@export var frame = ""`
+
+  The atlas frame ("" = the whole image / the atlas's first frame).
+
+- `@export var size = vec2(64.0, 64.0)`
+
+  The rectangle to fill, in world units.
+
+- `@export var margin_left = 8.0`
+
+  Border widths, in the image's own units (texels; SVG document units).
+
+- `@export var margin_top = 8.0`
+
+  The top border's height.
+
+- `@export var margin_right = 8.0`
+
+  The right border's width.
+
+- `@export var margin_bottom = 8.0`
+
+  The bottom border's height.
+
+- `@export var draw_center = true`
+
+  false leaves the middle empty (a frame).
+
+- `@export var centered = false`
+
+  Centered on `position` instead of top-left.
+
+- `@export var tint = Color { r = 1.0, g = 1.0, b = 1.0, a = 1.0 }`
+
+  Multiplies every color (alpha included).
+
+- `@export var filter = #default`
+
+  \#default, #nearest or #linear (see Sprite2D).
 
 **Methods**
 
@@ -5358,6 +6060,32 @@ class Container extends Control
 
 A control that arranges its children; the base of VBox, HBox, Margin, Panel and Center.
 
+Right-to-left locales (DESIGN.md 4.19 "11.3"): when `Locale.is_rtl()` and
+`UI.x.mirror_rtl` are both true, Box, Margin, Grid, Flow and AspectRatio
+containers lay their children out mirrored left to right (an HBox stacks
+right to left, a Margin's left margin sits at the right). Set `mirror` to
+false on a container whose order is not text-like (a numeric keypad, a
+timeline). A horizontal SplitContainer puts its first child on the right
+(the bar still follows the pointer and the arrow keys physically), and a
+ScrollContainer draws its vertical bar on the left and starts horizontal
+scrolling at the right edge.
+
+**Fields**
+
+- `@export var mirror = true`
+
+  False keeps this container's children in left-to-right order in right-to-left locales.
+
+**Methods**
+
+- `fn is_mirrored() -> bool`
+
+  True when this container's layout is mirrored: a right-to-left locale, UI.x.mirror_rtl and `mirror` all on.
+
+- `fn place_child(k: Control, pos: vec2, sz: vec2)`
+
+  Places a child like set_rect, mirrored inside this container's rect when the locale reads right to left.
+
 ### BoxContainer
 
 ```pluma
@@ -5643,6 +6371,10 @@ minimum size.
 
   Sets `split` (clamped to 0..1), emitting `split_changed` when it changed.
 
+- `fn flipped() -> bool`
+
+  True when the first child is on the right: a horizontal split in a right-to-left locale.
+
 - `fn bar_rect_pos() -> vec2`
 
   Top-left corner of the bar.
@@ -5825,7 +6557,7 @@ the view is clipped and can't be clicked.
 
   The control to scroll for `dir` when the pointer position doesn't matter (focus scrolling): an inner scroller first, else self if it can move that way.
 
-- `fn reveal(rel_pos: vec2, rel_size: vec2)`
+- `fn reveal(rel_pos0: vec2, rel_size: vec2)`
 
   Scrolls so the rectangle (relative to the content's top-left) is inside the view.
 
@@ -5886,7 +6618,7 @@ A line of text. `style` picks the size and color from the theme.
 
 - `@export var align = #left`
 
-  \#left, #center, #right
+  \#left, #center, #right, #start, #end (start/end follow the locale's reading direction)
 
 **Methods**
 
@@ -6311,9 +7043,17 @@ on the tick of a ui_* press cancels that press.
 
   Wide enough for about twelve characters, plus padding.
 
+- `fn text_is_rtl() -> bool`
+
+  Whether the field's text reads right to left (it is then right-aligned, and the caret scrolls the other way).
+
 - `fn text_offset() -> float`
 
-  Pixels the text is shifted left so the caret stays inside the field.
+  Pixels the text is shifted so the caret stays inside the field: left for left-to-right text, right for right-to-left.
+
+- `fn text_origin() -> float`
+
+  Where the text's layout origin sits: the inner left edge, or the inner right edge for right-to-left text.
 
 - `fn draw(g: Canvas)`
 
@@ -6791,6 +7531,11 @@ every numeric static, and widgets added after the first UI (DESIGN.md 4.17,
 
   Ticks ui_delete has been held.
 
+- `var mirror_rtl = true`
+
+  Mirror container layout and #start text alignment in right-to-left
+  locales (Locale.is_rtl()). Display state: not hashed, not replayed.
+
 ### UI
 
 ```pluma
@@ -6849,10 +7594,34 @@ Focus, modal state and input handling shared by every UI tree; all static.
   The natural size of a vector image file in the project (Image), or
   (0, 0) if it can't be read.
 
+- `static fn text_rtl(text: str) -> bool`
+
+  Caret geometry for editable text, in bidirectional order (DESIGN.md 4.19 "11.3"). Positions
+  are in layout space of a line whose origin is its left edge for left-to-right text and its
+  right edge for right-to-left text. `index` counts characters.
+  True when the text's paragraph reads right to left (its first strong character).
+
+- `static fn caret_x(text: str, size: float, index: int) -> float`
+
+  The caret's x at character `index`.
+
+- `static fn caret_at(text: str, size: float, x: float) -> int`
+
+  The character index whose caret is nearest to `x`.
+
+- `static fn caret_step(text: str, size: float, index: int, dir: int) -> int`
+
+  The index after moving the caret one stop left (dir < 0) or right on screen.
+
 - `static fn wants_text(on: bool)`
 
   Called while a text field is being edited, every tick: the window then
   delivers typed text (and raises an on-screen keyboard where there is one).
+
+- `static fn text_area(pos: vec2, size: vec2, caret_x: float)`
+
+  Where the field being edited is (layout space, from a draw): the IME opens its candidate
+  list there. `caret_x` is the caret's offset inside the rectangle. Display only.
 
 - `static fn modal_allows(n: Node) -> bool`
 

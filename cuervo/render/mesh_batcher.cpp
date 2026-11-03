@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "cuervo/core/log.hpp"
+#include "cuervo/render/post_fx.hpp" // srgb_to_linear
 #include "cuervo/render/sdf_batcher.hpp" // pack_rgba8
 #include "shaders/mesh_frag.hpp"
 #include "shaders/mesh_vert.hpp"
@@ -94,6 +95,30 @@ void MeshBatcher::release(GpuMesh& gpu) {
     gpu.vertices = gpu.indices = gpu.paints = {};
 }
 
+void linearize_paint_window(std::vector<std::array<float, 4>>& window) {
+    // Blocks: 4 header rows, n premultiplied stop colors, ceil(n / 4) offset rows
+    // (vector/mesh.hpp). Stops are interpolated in linear space, like the
+    // vertex colors the shader converts (DESIGN.md 4.19).
+    std::size_t base = 0;
+    while (base + 4 <= window.size()) {
+        const auto n = static_cast<std::size_t>(std::max(window[base + 3][1] + 0.5f, 0.0f));
+        const std::size_t colors = base + 4;
+        if (n == 0 || colors + n > window.size()) {
+            break;
+        }
+        for (std::size_t i = 0; i < n; ++i) {
+            auto& c = window[colors + i];
+            const float a = c[3];
+            if (a <= 0.0f) {
+                continue;
+            }
+            const rhi::Color lin = srgb_to_linear({c[0] / a, c[1] / a, c[2] / a, a});
+            c = {lin.r * a, lin.g * a, lin.b * a, a};
+        }
+        base = colors + n + (n + 3) / 4;
+    }
+}
+
 void MeshBatcher::upload(GpuMesh& gpu, const vector::VectorMesh& mesh) {
     release(gpu);
     gpu.batches.clear();
@@ -121,8 +146,12 @@ void MeshBatcher::upload(GpuMesh& gpu, const vector::VectorMesh& mesh) {
             if (batch.index_count == 0) {
                 continue;
             }
-            std::memcpy(paints.data() + slot * paint_stride_, batch.paints.data(),
-                        std::min(batch.paints.size() * 16, paint_window_bytes));
+            std::vector<std::array<float, 4>> window = batch.paints;
+            if (device_->info().linear_color) {
+                linearize_paint_window(window);
+            }
+            std::memcpy(paints.data() + slot * paint_stride_, window.data(),
+                        std::min(window.size() * 16, paint_window_bytes));
             ++slot;
         }
         gpu.paints = device_->create_buffer(
@@ -199,7 +228,7 @@ void MeshBatcher::flush(const Affine2& m) {
     if (!device_ || instances_.empty() || !ensure_instance_capacity(instances_.size())) {
         return;
     }
-    const MeshGlobals globals{{m.a, m.c, m.tx, 0.0f}, {m.b, m.d, m.ty, 0.0f}};
+    const MeshGlobals globals{{m.a, m.c, m.tx, device_->info().linear_color ? 1.0f : 0.0f}, {m.b, m.d, m.ty, 0.0f}};
     device_->update_buffer(globals_, 0, std::as_bytes(std::span(&globals, 1)));
     device_->update_buffer(instance_buffer_, 0, std::as_bytes(std::span(instances_)));
 

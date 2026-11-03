@@ -207,13 +207,58 @@ int webgpu_bindings(const char* input, const char* output) {
 
 } // namespace
 
+// `--container`: the same translation as the header mode, written as a
+// `.cshader` file (render/user_shader.hpp, format version 1, no exports yet:
+// cuervo-tools adds them). Keep the layout in sync with encode_cshader.
+int write_container(const char* spv_path, const char* out_path, const char* wgsl_path) {
+    try {
+        const std::vector<std::uint32_t> spirv = read_spirv(spv_path);
+        Reflection reflection;
+        const std::string glsl330 = cross_compile(spirv, false, &reflection);
+        const std::string glsl_es300 = cross_compile(spirv, true, nullptr);
+        const std::string wgsl = wgsl_path ? read_text(wgsl_path) : std::string();
+        std::string out = "CSHD";
+        const auto u32 = [&](std::uint32_t v) {
+            for (int i = 0; i < 4; ++i) out.push_back(static_cast<char>((v >> (8 * i)) & 0xff));
+        };
+        const auto str = [&](const std::string& s) {
+            u32(static_cast<std::uint32_t>(s.size()));
+            out += s;
+        };
+        u32(1);
+        u32(static_cast<std::uint32_t>(spirv.size()));
+        for (std::uint32_t word : spirv) u32(word);
+        str(glsl330);
+        str(glsl_es300);
+        str(wgsl);
+        for (const std::vector<UniformBlock>* list : {&reflection.blocks, &reflection.textures}) {
+            u32(static_cast<std::uint32_t>(list->size()));
+            for (const UniformBlock& entry : *list) {
+                str(entry.name);
+                u32(entry.binding);
+            }
+        }
+        u32(0); // exports
+        std::ofstream file(out_path, std::ios::binary);
+        file.write(out.data(), static_cast<std::streamsize>(out.size()));
+        return file ? 0 : 1;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "shader_tool: %s\n", e.what());
+        return 1;
+    }
+}
+
 int main(int argc, char** argv) {
     if (argc == 4 && std::string(argv[1]) == "--webgpu-bindings") {
         return webgpu_bindings(argv[2], argv[3]);
     }
+    if ((argc == 4 || argc == 5) && std::string(argv[1]) == "--container") {
+        return write_container(argv[2], argv[3], argc == 5 ? argv[4] : nullptr);
+    }
     if (argc != 4 && argc != 5) {
         std::fprintf(stderr, "usage: shader_tool <input.spv> <symbol> <output.hpp> [<input.wgsl>]\n"
-                             "       shader_tool --webgpu-bindings <split.spv> <output.spv>\n");
+                             "       shader_tool --webgpu-bindings <split.spv> <output.spv>\n"
+                             "       shader_tool --container <input.spv> <output.cshader> [<input.wgsl>]\n");
         return 2;
     }
     const std::string symbol = argv[2];

@@ -9,7 +9,7 @@ class Label extends Control {
     @export var text = ""
     @export var style = #normal // #normal, #title, #small, #dim, #accent, #danger, #gold
     @export var font_size = 0.0 // > 0 overrides the style's size
-    @export var align = #left   // #left, #center, #right
+    @export var align = #left   // #left, #center, #right, #start, #end (start/end follow the locale's reading direction)
     // The font size: `font_size` if set, else the style's size from the theme.
     fn text_size() -> float {
         if font_size > 0.0 {
@@ -41,13 +41,20 @@ class Label extends Control {
     }
     // Draws the text, aligned within the rect.
     fn draw(g: Canvas) {
+        var a = align
+        var rtl = UI.x.mirror_rtl && Locale.is_rtl()
+        if a == #start {
+            a = rtl ? #right : #left
+        } else if a == #end {
+            a = rtl ? #left : #right
+        }
         var x = position.x
-        if align == #center {
+        if a == #center {
             x += size.x * 0.5
-        } else if align == #right {
+        } else if a == #right {
             x += size.x
         }
-        g.text(vec2(x, position.y + size.y * 0.5), text, size = text_size(), color = text_color(), align = align,
+        g.text(vec2(x, position.y + size.y * 0.5), text, size = text_size(), color = text_color(), align = a,
                baseline = #middle)
     }
 }
@@ -479,7 +486,8 @@ class LineEdit extends Control {
             return false
         }
         if dir.x != 0.0 {
-            set_caret(caret + (dir.x < 0.0 ? -1 : 1))
+            // Visual order: in right-to-left text the left arrow moves toward the end of the text.
+            caret = clamp(UI.caret_step(display_text(), get_theme().font_size, caret, dir.x < 0.0 ? -1 : 1), 0, char_count())
             return true
         }
         editing = false
@@ -500,18 +508,7 @@ class LineEdit extends Control {
         }
         editing = true
         var t = get_theme()
-        var shown = display_text().chars()
-        var rel = p.x - (position.x + t.padding.x) + text_offset()
-        var best = 0
-        var best_d = abs(rel)
-        for i in 1..(shown.len() + 1) {
-            var d = abs(UI.measure("".join(shown.slice(0, i)), t.font_size).x - rel)
-            if d < best_d {
-                best = i
-                best_d = d
-            }
-        }
-        caret = best
+        caret = clamp(UI.caret_at(display_text(), t.font_size, p.x - text_origin()), 0, char_count())
     }
     // Stops editing when focus is lost or the field is disabled, and asks the window for text input while editing.
     fn update(dt: float) {
@@ -531,12 +528,31 @@ class LineEdit extends Control {
         var t = get_theme()
         return UI.measure("MMMMMMMMMMMM", t.font_size) + t.padding * 2.0
     }
-    // Pixels the text is shifted left so the caret stays inside the field.
+    // Whether the field's text reads right to left (it is then right-aligned, and the caret scrolls the other way).
+    fn text_is_rtl() -> bool {
+        var shown = display_text()
+        if shown == "" {
+            return UI.x.mirror_rtl && Locale.is_rtl()
+        }
+        return UI.text_rtl(shown)
+    }
+    // Pixels the text is shifted so the caret stays inside the field: left for left-to-right text, right for right-to-left.
     fn text_offset() -> float {
         var t = get_theme()
-        var shown = display_text().chars()
-        var cx = UI.measure("".join(shown.slice(0, min(caret, shown.len()))), t.font_size).x
-        return max(cx - (size.x - t.padding.x * 2.0 - 4.0), 0.0)
+        var cx = UI.caret_x(display_text(), t.font_size, caret)
+        var room = size.x - t.padding.x * 2.0 - 4.0
+        if text_is_rtl() {
+            return max(-cx - room, 0.0)
+        }
+        return max(cx - room, 0.0)
+    }
+    // Where the text's layout origin sits: the inner left edge, or the inner right edge for right-to-left text.
+    fn text_origin() -> float {
+        var t = get_theme()
+        if text_is_rtl() {
+            return position.x + size.x - t.padding.x + text_offset()
+        }
+        return position.x + t.padding.x - text_offset()
     }
     // Draws the field, the text or placeholder scrolled to keep the caret visible, and a blinking caret while editing.
     fn draw(g: Canvas) {
@@ -547,19 +563,44 @@ class LineEdit extends Control {
         var inner_pos = position + vec2(t.padding.x, 0.0)
         var inner_size = vec2(max(size.x - t.padding.x * 2.0, 1.0), size.y)
         var mid = position.y + size.y * 0.5
+        var rtl = text_is_rtl()
+        var a = rtl ? #right : #left
         UI.push_clip(g, inner_pos, inner_size)
-        var off = text_offset()
+        var ox = text_origin()
         if text == "" && !editing {
-            g.text(vec2(inner_pos.x, mid), placeholder, size = t.font_size, color = t.text_disabled, baseline = #middle)
+            var px = rtl ? inner_pos.x + inner_size.x : inner_pos.x
+            g.text(vec2(px, mid), placeholder, size = t.font_size, color = t.text_disabled, align = a, baseline = #middle)
         } else {
-            g.text(vec2(inner_pos.x - off, mid), display_text(), size = t.font_size,
-                   color = disabled ? t.text_disabled : t.text, baseline = #middle)
+            g.text(vec2(ox, mid), display_text(), size = t.font_size, color = disabled ? t.text_disabled : t.text,
+                   align = a, baseline = #middle)
         }
-        if editing && (Time.tick / 30) % 2 == 0 {
-            var shown = display_text().chars()
-            var cx = UI.measure("".join(shown.slice(0, min(caret, shown.len()))), t.font_size).x
-            var x = inner_pos.x - off + cx
-            g.line(vec2(x, mid - t.font_size * 0.6), vec2(x, mid + t.font_size * 0.6), color = t.gold, width = 2.0)
+        if editing {
+            // IME composition: drawn at the caret, underlined, and not part of `text` until committed. Right-to-left
+            // composition grows to the left of the caret; its cursor follows the composition's own order.
+            var comp = Input.composition()
+            var cx0 = ox + UI.caret_x(display_text(), t.font_size, caret)
+            var cc = 0.0
+            var comp_w = 0.0
+            if comp != "" {
+                var crtl = UI.text_rtl(comp)
+                comp_w = UI.measure(comp, t.font_size).x
+                g.text(vec2(cx0, mid), comp, size = t.font_size, color = t.text, align = crtl ? #right : #left,
+                       baseline = #middle)
+                var uy = mid + t.font_size * 0.6
+                var x0 = crtl ? cx0 - comp_w : cx0
+                g.line(vec2(x0, uy), vec2(x0 + comp_w, uy), color = t.gold, width = 1.5)
+                var ci = Input.composition_cursor()
+                cc = crtl ? 0.0 - comp_w : comp_w
+                if ci >= 0 {
+                    cc = UI.caret_x(comp, t.font_size, ci)
+                }
+            }
+            var area_x = min(cx0, cx0 + cc)
+            UI.text_area(vec2(area_x, position.y), vec2(max(comp_w, 1.0), size.y), cx0 + cc - area_x)
+            if (Time.tick / 30) % 2 == 0 {
+                var x = cx0 + cc
+                g.line(vec2(x, mid - t.font_size * 0.6), vec2(x, mid + t.font_size * 0.6), color = t.gold, width = 2.0)
+            }
         }
         UI.pop_clip(g)
     }

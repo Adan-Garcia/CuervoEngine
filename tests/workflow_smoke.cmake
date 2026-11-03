@@ -110,9 +110,10 @@ if(NOT code EQUAL 0 OR NOT dump MATCHES "node Walker \"pal\"" OR NOT dump MATCHE
 endif()
 execute_process(COMMAND "${TOOLS}" scene build "${OUT}/main.txt" "${OUT}/main.scene" RESULT_VARIABLE code
                 ERROR_VARIABLE err)
-execute_process(COMMAND ${CMAKE_COMMAND} -E compare_files "${OUT}/main.scene" "${PROJECT}/scenes/main.scene"
-                RESULT_VARIABLE differs)
-if(NOT code EQUAL 0 OR NOT differs EQUAL 0)
+# The editor saves text scenes now (11.2c): the saved file is the text view, so compare dumps, not bytes.
+execute_process(COMMAND "${TOOLS}" scene dump "${OUT}/main.scene" OUTPUT_FILE "${OUT}/main2.txt" RESULT_VARIABLE code2)
+execute_process(COMMAND ${CMAKE_COMMAND} -E compare_files "${OUT}/main2.txt" "${OUT}/main.txt" RESULT_VARIABLE differs)
+if(NOT code EQUAL 0 OR NOT code2 EQUAL 0 OR NOT differs EQUAL 0)
     fail("the saved scene does not round-trip through the text view (${code})" "" "${err}")
 endif()
 

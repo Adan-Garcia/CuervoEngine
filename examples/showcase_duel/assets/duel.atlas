@@ -1,0 +1,41 @@
+{
+ "max_size": 1024,
+ "padding": 1,
+ "extrude": true,
+ "sprites": [
+  {
+   "path": "assets/art/bullet.png",
+   "name": "bullet"
+  },
+  {
+   "path": "assets/art/spark.png",
+   "name": "spark"
+  },
+  {
+   "path": "assets/art/panel.png",
+   "name": "panel"
+  },
+  {
+   "path": "assets/art/button.png",
+   "name": "button"
+  },
+  {
+   "path": "assets/art/bg.png",
+   "name": "bg"
+  }
+ ],
+ "sheets": [
+  {
+   "image": "assets/art/ship_a.png",
+   "frame_w": 32,
+   "frame_h": 32,
+   "prefix": "ship_a"
+  },
+  {
+   "image": "assets/art/ship_b.png",
+   "frame_w": 32,
+   "frame_h": 32,
+   "prefix": "ship_b"
+  }
+ ]
+}

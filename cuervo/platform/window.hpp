@@ -59,6 +59,10 @@ public:
     // The game turns it on while a text field has the focus (UI.wants_text),
     // which also raises the on-screen keyboard on touch devices.
     void set_text_input(bool on);
+    // Where the text being edited sits in the window (framebuffer pixels), so
+    // the IME can put its candidate list next to it; `cursor_x` is the caret
+    // offset inside the rectangle.
+    void set_text_input_area(ivec2 position, ivec2 size, int cursor_x);
 
     ivec2 pixel_size() const;
     GraphicsApi graphics() const { return graphics_; }

@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "cuervo/core/log.hpp"
+#include "runtime/cli_flags.hpp"
 #include "cuervo/jobs/job_system.hpp"
 #include "cuervo/math/simd.hpp"
 #include "cuervo/platform/platform.hpp"
@@ -13,18 +14,11 @@
 
 namespace {
 
-std::string_view arg_value(int argc, char** argv, std::string_view flag) {
-    for (int i = 1; i + 1 < argc; ++i) {
-        if (std::string_view(argv[i]) == flag) return argv[i + 1];
-    }
-    return {};
-}
+// Flags are read through the table (runtime/cli_flags.hpp), so one that isn't listed can't be handled.
+bool has_flag(int argc, char** argv, std::string_view flag) { return cuervo::cli::Args(argc, argv).has(flag); }
 
-bool has_flag(int argc, char** argv, std::string_view flag) {
-    for (int i = 1; i < argc; ++i) {
-        if (std::string_view(argv[i]) == flag) return true;
-    }
-    return false;
+std::string_view arg_value(int argc, char** argv, std::string_view flag) {
+    return cuervo::cli::Args(argc, argv).value(flag);
 }
 
 } // namespace
@@ -92,7 +86,48 @@ int run_game_cli(int argc, char** argv) {
     o.hot_reload = !has_flag(argc, argv, "--no-hot-reload");
     o.record = std::string(arg_value(argc, argv, "--record"));
     o.audio = !has_flag(argc, argv, "--no-audio");
+    if (const std::string_view v = arg_value(argc, argv, "--net-host"); !v.empty()) {
+        char* end = nullptr;
+        const long port = std::strtol(std::string(v).c_str(), &end, 10);
+        if (*end != '\0' || port < 0 || port > 65535) {
+            LOG_ERROR("--net-host needs a UDP port (0 picks one), not '{}'", v);
+            return EXIT_FAILURE;
+        }
+        o.net_host = static_cast<int>(port);
+    }
+    o.net_join = std::string(arg_value(argc, argv, "--net-join"));
+    o.net_relay = std::string(arg_value(argc, argv, "--net-relay"));
+    o.net_mesh = std::string(arg_value(argc, argv, "--net-mesh"));
+    if (const std::string_view v = arg_value(argc, argv, "--net-player"); !v.empty()) {
+        const long n = std::strtol(std::string(v).c_str(), nullptr, 10);
+        if (n < 0 || n > 3) {
+            LOG_ERROR("--net-player needs 0 to 3, not '{}'", v);
+            return EXIT_FAILURE;
+        }
+        o.net_player = static_cast<unsigned>(n);
+    }
+    o.net_room = std::string(arg_value(argc, argv, "--net-room"));
+    o.net_mode = std::string(arg_value(argc, argv, "--net-mode"));
+    if (!o.net_mode.empty() && o.net_mode != "lockstep" && o.net_mode != "rollback") {
+        LOG_ERROR("Unknown --net-mode '{}' (expected lockstep or rollback)", o.net_mode);
+        return EXIT_FAILURE;
+    }
+    if (const std::string_view v = arg_value(argc, argv, "--net-players"); !v.empty()) {
+        const long n = std::strtol(std::string(v).c_str(), nullptr, 10);
+        if (n < 2 || n > 8) {
+            LOG_ERROR("--net-players needs 2 to 8, not '{}'", v);
+            return EXIT_FAILURE;
+        }
+        o.net_players = static_cast<unsigned>(n);
+    }
+    if ((o.net_host >= 0) + !o.net_join.empty() + !o.net_relay.empty() + !o.net_mesh.empty() > 1 ||
+        (!o.net_relay.empty() && o.net_room.empty())) {
+        LOG_ERROR("Use one of --net-host <port>, --net-join <host:port> or --net-relay <ws-url> --net-room <name> or --net-mesh <list> --net-player <i>");
+        return EXIT_FAILURE;
+    }
     o.profile = has_flag(argc, argv, "--profile"); // engine zones + script profiler, summary at exit
+    o.trace = std::string(arg_value(argc, argv, "--trace")); // Chrome trace of the same, written at exit
+    if (!o.trace.empty()) o.profile = true;
     const std::string_view scale = arg_value(argc, argv, "--scale");
     if (scale == "integer") o.scale = render::ScaleMode::Integer;
     if (scale == "stretch") o.scale = render::ScaleMode::Stretch;

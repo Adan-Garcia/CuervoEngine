@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -90,8 +91,12 @@ public:
     audio::AudioSystem& audio() { return *audio_; }
 #endif
     const render::FontAtlas* font_atlas() const { return font_atlas_ ? &*font_atlas_ : nullptr; }
+    // The project's `[text] fallbacks` fonts, in order (empty without a game font).
+    const std::vector<render::FontAtlas>& fallback_atlases() const { return fallback_atlases_; }
     const SessionOptions& options() const { return options_; }
     bool started() const { return host_ != nullptr; }
+    // True when init() failed because the scripts did not compile (exit code 2, docs/CLI.md).
+    bool compile_failed() const { return compile_failed_; }
     const std::vector<std::filesystem::path>& script_files() const { return files_; }
     // Script units loaded (script_files() lists only those with a real file).
     std::size_t script_count() const { return sources_.size(); }
@@ -103,6 +108,8 @@ public:
     // Scripted input for automated runs (`--press`): "tick:action,..." holds
     // each action during that tick. Unknown actions are ignored with a warning.
     // A tick may be a range ("10-20:ui_click" holds it for ticks 10 to 20).
+    // "range:axis=x,y" drives a two-dimensional axis ("60-300:move=1,0"); x and
+    // y in [-1, 1] are quantized like sampled input and replace the devices'.
     void set_presses(std::string_view presses);
     // `--pointer`: "tick:x:y,..." puts the pointer at (x, y) virtual pixels
     // from that tick on (until the next entry), over the mouse.
@@ -115,6 +122,9 @@ public:
     InputFrame sample(DeviceState& devices, vec2 pointer);
     // One fixed tick with `frame` (recorded when recording).
     void tick(const InputFrame& frame);
+    // One fixed tick of a networked session: one frame per player (index = player), recorded in the
+    // replay's player dimension (Replay::extra_players).
+    void tick_players(std::span<const InputFrame> players);
 
     // Hot reload (DESIGN.md 5.13). `poll`: reload if a watched script
     // changed; `force`: reload now; `restart`: a fresh game from scratch.
@@ -151,15 +161,19 @@ private:
     std::unique_ptr<audio::AudioSystem> audio_;
 #endif
     std::optional<render::FontAtlas> font_atlas_;
+    std::vector<render::FontAtlas> fallback_atlases_; // [text] fallbacks; never resized after load
     HostOptions host_options_;
     std::unique_ptr<ScriptHost> host_;
     platform::FileWatcher watcher_;
     struct Press { std::uint64_t first, last; std::size_t action; };
+    struct AxisPress { std::uint64_t first, last; std::size_t axis_x, axis_y; std::int16_t x, y; };
+    std::vector<AxisPress> axis_presses_;
     std::vector<Press> presses_;
     struct PointerStep { std::uint64_t tick; vec2 at; };
     std::vector<PointerStep> pointer_script_;       // ascending by tick
     std::vector<std::pair<std::uint64_t, std::uint32_t>> typed_; // tick -> code point
     bool recording_ = false;
+    bool compile_failed_ = false;
     Replay replay_;
 };
 

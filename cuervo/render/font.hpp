@@ -2,10 +2,13 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
 #include <vector>
+
+#include "cuervo/text/shaping.hpp"
 
 // MSDF font atlases (DESIGN.md 4.4 "Text", 7.2 "Fonts"): the engine's runtime
 // font format. A TTF/OTF font is imported once (font_import.hpp) into an
@@ -18,7 +21,10 @@
 namespace cuervo::render {
 
 struct FontGlyph {
-    std::uint32_t codepoint = 0;
+    std::uint32_t codepoint = 0; // 0 for glyphs reachable only through shaping (FontAtlas::extra_glyphs)
+    // The font's glyph index (what HarfBuzz reports); meaningful when
+    // FontAtlas::has_glyph_ids. Shaped text draws by glyph id, not codepoint.
+    std::uint32_t glyph_id = 0;
     float advance = 0.0f; // ems
     // Quad around the glyph (plus the distance field margin), ems, relative to
     // the pen on the baseline, y down: top < 0 < bottom for most letters.
@@ -57,18 +63,38 @@ struct FontAtlas {
     std::vector<FontGlyph> glyphs;     // sorted by codepoint, unique
     std::vector<KerningPair> kerning;  // sorted by (first, second), unique
 
+    // Shaping support (version 2). Glyphs that no codepoint maps to (contextual
+    // Arabic forms, ligatures) live here, sorted by glyph_id, codepoint 0.
+    bool has_glyph_ids = false;
+    std::vector<FontGlyph> extra_glyphs;
+    // The source sfnt font, kept only when import asked for it: HarfBuzz needs
+    // it at run time to shape. Empty = per-codepoint layout.
+    std::vector<std::byte> shaping_data;
+    // HarfBuzz face made from shaping_data by prepare_shaping(); null when
+    // shaping is unavailable. Shared between copies of the atlas.
+    std::shared_ptr<const text::ShapingFont> shaper;
+    // Indices (into glyphs, then extra_glyphs) sorted by glyph id; see build_glyph_index().
+    std::vector<std::uint32_t> by_id;
+
     const FontGlyph* find(std::uint32_t codepoint) const;
+    // The glyph with this font glyph index (null without has_glyph_ids).
+    const FontGlyph* find_by_id(std::uint32_t glyph_id) const;
+    void build_glyph_index();
+    // build_glyph_index() plus the shaper; call after filling in or loading an atlas.
+    void prepare_shaping();
     float kerning_between(std::uint32_t first, std::uint32_t second) const;
 };
 
 // Binary .efont layout (little-endian):
-//   header  magic "EFNT", u32 format version, u32 flags (0), u32 reserved
+//   header  magic "EFNT", u32 format version, u32 flags (bit 0: glyph ids valid), u32 reserved
 //   body    name, em_size, distance_range, metrics (5 f32), width, height,
-//           glyphs (u32 count + 11 x 4 bytes each), kerning (u32 count + 12 bytes each),
-//           pixels (u32 byte count + RGBA8 rows)
+//           glyphs (u32 count + 11 x 4 bytes each; the last u32 is the glyph id in
+//           version 2, reserved before), kerning (u32 count + 12 bytes each),
+//           [v2] extra glyphs (u32 count + the same record, codepoint 0),
+//           pixels (u32 byte count + RGBA8 rows), [v2] shaping font (u32 byte count + sfnt)
 // Same versioning rule as ImportedVector: every change bumps the version, old
 // versions keep loading, newer ones are rejected.
-inline constexpr std::uint32_t font_atlas_version = 1;
+inline constexpr std::uint32_t font_atlas_version = 2;
 inline constexpr char font_atlas_magic[4] = {'E', 'F', 'N', 'T'};
 
 std::vector<std::byte> serialize_font_atlas(const FontAtlas& font);

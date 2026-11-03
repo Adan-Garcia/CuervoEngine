@@ -55,7 +55,104 @@ std::string unescape_dock(std::string_view v) {
     return out;
 }
 
+bool parse_pair(std::string_view v, float& a, float& b) {
+    const auto c = v.find(',');
+    return c != std::string_view::npos && parse_float(v.substr(0, c), a) && parse_float(v.substr(c + 1), b);
+}
+
+float overlap(const ScreenRect& a, const ScreenRect& b) {
+    const float w = std::min(a.x + a.w, b.x + b.w) - std::max(a.x, b.x);
+    const float h = std::min(a.y + a.h, b.y + b.h) - std::max(a.y, b.y);
+    return w > 0 && h > 0 ? w * h : 0.0f;
+}
+
+// Walks the ini text section by section; `visit(line, window, in_window_section)` for each line.
+template <typename F>
+void each_ini_line(std::string_view text, F&& visit) {
+    std::string window;
+    bool in_window = false;
+    std::size_t at = 0;
+    while (at <= text.size()) {
+        std::size_t end = text.find('\n', at);
+        if (end == std::string_view::npos) end = text.size();
+        std::string_view line = text.substr(at, end - at);
+        if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+        if (line.starts_with("[")) {
+            in_window = line.starts_with("[Window][") && line.back() == ']';
+            window = in_window ? std::string(line.substr(9, line.size() - 10)) : std::string();
+        }
+        visit(line, window, in_window);
+        if (end == text.size()) break;
+        at = end + 1;
+    }
+}
+
 } // namespace
+
+std::vector<DockViewport> dock_viewports(std::string_view dock) {
+    std::vector<DockViewport> out;
+    struct Acc { bool pos = false, size = false; DockViewport v; };
+    std::vector<Acc> acc;
+    each_ini_line(dock, [&](std::string_view line, const std::string& window, bool in_window) {
+        if (!in_window) return;
+        if (line.starts_with("[")) {
+            acc.push_back({false, false, {window, {}}});
+            return;
+        }
+        Acc& a = acc.back();
+        float x = 0, y = 0;
+        if (line.starts_with("ViewportPos=") && parse_pair(line.substr(12), x, y)) {
+            a.v.rect.x = x;
+            a.v.rect.y = y;
+            a.pos = true;
+        } else if (line.starts_with("Size=") && parse_pair(line.substr(5), x, y)) {
+            a.v.rect.w = x;
+            a.v.rect.h = y;
+            a.size = true;
+        }
+    });
+    for (const Acc& a : acc) {
+        if (a.pos) out.push_back(a.v);
+    }
+    return out;
+}
+
+std::string clamp_dock_viewports(std::string_view dock, std::span<const ScreenRect> monitors) {
+    if (monitors.empty()) return std::string(dock);
+    const std::vector<DockViewport> views = dock_viewports(dock);
+    std::string out;
+    out.reserve(dock.size());
+    std::string current;
+    each_ini_line(dock, [&](std::string_view line, const std::string& window, bool in_window) {
+        std::string text(line);
+        if (in_window && line.starts_with("ViewportPos=")) {
+            for (const DockViewport& v : views) {
+                if (v.window != window) continue;
+                ScreenRect r = v.rect;
+                if (r.w <= 0 || r.h <= 0) { r.w = 400; r.h = 300; }
+                const ScreenRect* best = &monitors[0];
+                float best_area = -1.0f;
+                for (const ScreenRect& m : monitors) {
+                    const float o = overlap(r, m);
+                    if (o > best_area) { best_area = o; best = &m; }
+                }
+                // Keep it where it is when at least a quarter of it is visible; else pull it in.
+                if (best_area < 0.25f * r.w * r.h) {
+                    const float w = std::min(r.w, best->w);
+                    const float h = std::min(r.h, best->h);
+                    r.x = std::clamp(r.x, best->x, best->x + best->w - w);
+                    r.y = std::clamp(r.y, best->y, best->y + best->h - h);
+                    text = std::format("ViewportPos={},{}", static_cast<int>(r.x), static_cast<int>(r.y));
+                }
+                break;
+            }
+        }
+        out += text;
+        out += '\n';
+    });
+    if (!dock.empty() && dock.back() != '\n' && !out.empty()) out.pop_back();
+    return out;
+}
 
 bool Layout::is_hidden(std::string_view title) const {
     return std::find(hidden.begin(), hidden.end(), title) != hidden.end();

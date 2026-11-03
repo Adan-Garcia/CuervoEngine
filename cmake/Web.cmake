@@ -47,6 +47,10 @@ if(CUERVO_WEB_THREADS)
     # waiting for a worker that can only load once it yields. 8 covers the
     # job system's automatic maximum (jobs::auto_thread_count, DESIGN.md 4.15).
     add_link_options(-pthread -sPTHREAD_POOL_SIZE=8)
+    # Audio on an AudioWorklet instead of miniaudio's deprecated main-thread
+    # ScriptProcessorNode backend (docs/WEB.md "Audio"). It needs shared memory
+    # (the mixer runs on the worklet's Wasm Worker), hence threads builds only.
+    add_compile_definitions(MA_ENABLE_AUDIO_WORKLETS)
 endif()
 
 # The project shipped in the page and its font (docs/WEB.md "Asset preload").
@@ -66,6 +70,9 @@ set(CUERVO_WEB_PACK "" CACHE STRING "Web build runs a pack: empty (raw project),
 # With the WebGPU backend the page requests the browser's device before main
 # (web/webgpu_init.js, milestone 10.3). Called after LINK_DEPENDS is set, which it extends.
 function(_cuervo_web_webgpu target)
+    # Persistent saves (web/idbfs_saves.js; docs/WEB.md "Persistent saves").
+    set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS "${PROJECT_SOURCE_DIR}/web/idbfs_saves.js")
+    target_link_options(${target} PRIVATE -lidbfs.js "--pre-js=${PROJECT_SOURCE_DIR}/web/idbfs_saves.js")
     if(CUERVO_WEBGPU)
         set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS "${PROJECT_SOURCE_DIR}/web/webgpu_init.js")
         target_link_options(${target} PRIVATE "--pre-js=${PROJECT_SOURCE_DIR}/web/webgpu_init.js")
@@ -75,6 +82,11 @@ endfunction()
 # cuervo_web_app(<target>): turns an executable into index.html + .js + .wasm
 # + .data (the preloaded project and font, or the pack).
 function(cuervo_web_app target)
+    if(CUERVO_WEB_THREADS)
+        # miniaudio's AudioWorklet backend (MA_ENABLE_AUDIO_WORKLETS above); its device
+        # start waits for the worklet module, which is what ASYNCIFY is for.
+        target_link_options(${target} PRIVATE -sAUDIO_WORKLET=1 -sWASM_WORKERS=1 -sASYNCIFY)
+    endif()
     if(CUERVO_WEB_PACK)
         set_target_properties(${target} PROPERTIES OUTPUT_NAME index SUFFIX ".html"
             LINK_DEPENDS "${PROJECT_SOURCE_DIR}/web/shell.html;${PROJECT_SOURCE_DIR}/web/pack_loader.js")

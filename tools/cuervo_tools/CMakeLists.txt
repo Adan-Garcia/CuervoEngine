@@ -1,8 +1,20 @@
 # `cuervo-tools`: command-line tools for project files (DESIGN.md 3 "tools/").
 # The release pipeline (pack/export, docs/EXPORT.md) is a library so the tests
 # can drive it too.
-add_library(cuervo_export STATIC export.cpp packages.cpp player.cpp registry.cpp)
+add_library(cuervo_export STATIC export.cpp packages.cpp player.cpp registry.cpp shader_build.cpp)
 target_link_libraries(cuervo_export PUBLIC cuervo)
+# User shader import runs the engine's shader pipeline (glslangValidator, shader_tool,
+# and naga + spirv-opt for WGSL); this tree's copies are the defaults.
+target_include_directories(cuervo_export PRIVATE "${PROJECT_SOURCE_DIR}")
+if(TARGET shader_tool)
+    target_compile_definitions(cuervo_export PRIVATE CUERVO_TOOLS_SHADER_TOOL="$<TARGET_FILE:shader_tool>")
+elseif(CUERVO_SHADER_TOOL)
+    target_compile_definitions(cuervo_export PRIVATE CUERVO_TOOLS_SHADER_TOOL="${CUERVO_SHADER_TOOL}")
+endif()
+if(CUERVO_WEBGPU AND CUERVO_NAGA AND CUERVO_SPIRV_OPT)
+    target_compile_definitions(cuervo_export PRIVATE CUERVO_TOOLS_NAGA="${CUERVO_NAGA}"
+                                                      CUERVO_TOOLS_SPIRV_OPT="${CUERVO_SPIRV_OPT}")
+endif()
 
 # The API reference generator (`cuervo-tools docs`, docs/API.md) only needs
 # the Pluma parser; a library so tests can feed it a synthetic prelude.

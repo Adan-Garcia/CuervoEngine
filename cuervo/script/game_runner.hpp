@@ -22,6 +22,11 @@ class Debugger;
 
 namespace cuervo::script {
 
+// Process exit codes of a run (docs/CLI.md): 0 ok, 1 other failure (and a replay
+// mismatch in the editor/tools), 2 the scripts did not compile, 3 a script panicked.
+inline constexpr int exit_compile_error = 2;
+inline constexpr int exit_script_panic = 3;
+
 struct GameOptions {
     std::string dir;
     // Release: run this exported pack instead of a project directory
@@ -56,6 +61,16 @@ struct GameOptions {
     // --record <file>: write every tick's input and state hash as a replay
     // (cuervo/input/replay.hpp) when the game ends.
     std::string record;
+    // Networked play (DESIGN.md 4.19, docs/NETWORK.md). At most one of host/join/relay; the match then
+    // runs through ScriptHost::net_tick and records every player's delivered input (Replay::extra_players).
+    int net_host = -1;            // --net-host <port>: UDP, we are player 0
+    std::string net_join;         // --net-join <host:port>: UDP, we are player 1
+    std::string net_mesh;         // --net-mesh <a:p,b:p,...> with net_player (UDP, 2 to 4 players)
+    unsigned net_player = 0;      // --net-player <i>: our index in net_mesh
+    std::string net_relay;        // --net-relay <ws-url>, with net_room and net_players
+    std::string net_room;         // --net-room <name>
+    unsigned net_players = 2;     // --net-players <n> (relay rooms)
+    std::string net_mode;         // --net-mode lockstep|rollback (default: the game's, else lockstep)
     // --bench <seconds>: run `bench_warmup` seconds (filling pools, settling
     // caches), then measure frame times for `bench` seconds, log avg / p50 /
     // p95 / p99 / max and exit. Pair with vsync = false. 0 = off.
@@ -68,6 +83,10 @@ struct GameOptions {
     // --profile: engine zones (cuervo/core/profiler.hpp) and script
     // profiling (pluma/profiler.hpp) on; a summary is logged at exit.
     bool profile = false;
+    // --trace <file>: also record a Chrome trace (cuervo/profile/trace.hpp) of
+    // the zones, job tasks, draw calls and Pluma heap, written at exit.
+    // Implies `profile`.
+    std::string trace;
 };
 
 // Runs the game to the end and returns the exit code. The frame loop is

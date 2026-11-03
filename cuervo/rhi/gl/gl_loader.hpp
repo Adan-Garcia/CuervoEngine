@@ -76,6 +76,7 @@ inline constexpr GLenum GL_ZERO = 0;
 inline constexpr GLenum GL_ONE = 1;
 inline constexpr GLenum GL_SRC_ALPHA = 0x0302;
 inline constexpr GLenum GL_ONE_MINUS_SRC_ALPHA = 0x0303;
+inline constexpr GLenum GL_ONE_MINUS_DST_COLOR = 0x0307;
 inline constexpr GLenum GL_FUNC_ADD = 0x8006;
 inline constexpr GLenum GL_PACK_ALIGNMENT = 0x0D05;
 inline constexpr GLenum GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT = 0x8A34;
@@ -89,6 +90,9 @@ inline constexpr GLenum GL_RGBA8 = 0x8058;
 inline constexpr GLenum GL_RGB8 = 0x8051;
 inline constexpr GLenum GL_MAX_SAMPLES = 0x8D57;
 inline constexpr GLenum GL_NEAREST = 0x2600;
+inline constexpr GLenum GL_NEAREST_MIPMAP_NEAREST = 0x2700;
+inline constexpr GLenum GL_LINEAR_MIPMAP_LINEAR = 0x2703;
+inline constexpr GLenum GL_SRGB8_ALPHA8 = 0x8C43;
 inline constexpr GLenum GL_BACK = 0x0405;
 inline constexpr GLenum GL_BACK_LEFT = 0x0402;
 inline constexpr GLenum GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE = 0x8215;
@@ -176,6 +180,7 @@ inline constexpr GLenum GL_FRAMEBUFFER_SRGB = 0x8DB9;
     X(void, glDeleteFramebuffers, (GLsizei n, const GLuint* framebuffers))           \
     X(void, glBindFramebuffer, (GLenum target, GLuint framebuffer))                  \
     X(GLenum, glCheckFramebufferStatus, (GLenum target))                             \
+    X(void, glFramebufferTexture2D, (GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level)) \
     X(void, glFramebufferRenderbuffer, (GLenum target, GLenum attachment, GLenum rb_target, GLuint renderbuffer)) \
     X(void, glGetFramebufferAttachmentParameteriv, (GLenum target, GLenum attachment, GLenum pname, GLint* params)) \
     X(void, glGenRenderbuffers, (GLsizei n, GLuint* renderbuffers))                  \

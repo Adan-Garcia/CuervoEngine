@@ -117,26 +117,14 @@ bool SdfBatcher::init(rhi::Device& device, std::size_t initial_capacity) {
     shutdown();
     device_ = &device;
 
-    const std::array<rhi::VertexStream, 2> streams{{
-        {sizeof(float) * 2, rhi::VertexRate::PerVertex, corner_attributes},
-        {sizeof(SdfInstance), rhi::VertexRate::PerInstance, instance_attributes},
-    }};
-    rhi::PipelineDesc desc;
-    desc.vertex = shaders::sdf_vert;
-    desc.fragment = shaders::sdf_frag;
-    desc.streams = streams;
-    // The fragment shader outputs premultiplied color, so outlines and
-    // anti-aliased edges composite without dark fringes.
-    desc.blend = rhi::BlendMode::Premultiplied;
-    desc.debug_name = "sdf";
-    pipeline_ = device.create_pipeline(desc);
+    pipelines_[0] = pipeline(SdfBlend::Normal);
 
     quad_vertices_ = device.create_buffer({rhi::BufferKind::Vertex, rhi::BufferUsage::Static, sizeof(quad_corners),
                                            quad_corners.data()});
     quad_indices_ = device.create_buffer({rhi::BufferKind::Index, rhi::BufferUsage::Static, sizeof(quad_index_data),
                                           quad_index_data.data()});
     globals_ = device.create_buffer({rhi::BufferKind::Uniform, rhi::BufferUsage::Dynamic, sizeof(SdfGlobals), nullptr});
-    if (!pipeline_ || !quad_vertices_ || !quad_indices_ || !globals_ || !ensure_capacity(initial_capacity)) {
+    if (!pipelines_[0] || !quad_vertices_ || !quad_indices_ || !globals_ || !ensure_capacity(initial_capacity)) {
         LOG_ERROR("SdfBatcher: failed to create GPU resources");
         shutdown();
         return false;
@@ -148,15 +136,62 @@ void SdfBatcher::shutdown() {
     if (!device_) {
         return;
     }
-    device_->destroy_pipeline(pipeline_);
+    for (rhi::PipelineHandle& p : pipelines_) {
+        device_->destroy_pipeline(p);
+        p = {};
+    }
+    blend_runs_.clear();
     device_->destroy_buffer(quad_vertices_);
     device_->destroy_buffer(quad_indices_);
     device_->destroy_buffer(instance_buffer_);
     device_->destroy_buffer(globals_);
-    pipeline_ = {};
     quad_vertices_ = quad_indices_ = instance_buffer_ = globals_ = {};
     capacity_ = 0;
     device_ = nullptr;
+}
+
+// Pipelines other than Normal are created on first use.
+rhi::PipelineHandle SdfBatcher::pipeline(SdfBlend mode) {
+    rhi::PipelineHandle& slot = pipelines_[static_cast<std::size_t>(mode)];
+    if (slot || !device_) {
+        return slot;
+    }
+    const std::array<rhi::VertexStream, 2> streams{{
+        {sizeof(float) * 2, rhi::VertexRate::PerVertex, corner_attributes},
+        {sizeof(SdfInstance), rhi::VertexRate::PerInstance, instance_attributes},
+    }};
+    rhi::PipelineDesc desc;
+    desc.vertex = shaders::sdf_vert;
+    desc.fragment = shaders::sdf_frag;
+    desc.streams = streams;
+    // The fragment shader outputs premultiplied color, so outlines and
+    // anti-aliased edges composite without dark fringes.
+    switch (mode) {
+        case SdfBlend::Normal:   desc.blend = rhi::BlendMode::Premultiplied; break;
+        case SdfBlend::Additive: desc.blend = rhi::BlendMode::AdditivePremultiplied; break;
+        case SdfBlend::Screen:   desc.blend = rhi::BlendMode::Screen; break;
+    }
+    desc.debug_name = "sdf";
+    slot = device_->create_pipeline(desc);
+    return slot;
+}
+
+void SdfBatcher::set_blend_from(std::size_t index, SdfBlend mode) {
+    index = std::min(index, instances_.size());
+    if (mode == blend()) {
+        return;
+    }
+    if (!blend_runs_.empty() && blend_runs_.back().first >= index) {
+        // Replaces an empty run (or the one starting here).
+        blend_runs_.back() = {blend_runs_.back().first, mode};
+        if (blend_runs_.size() >= 2 && blend_runs_[blend_runs_.size() - 2].blend == mode) {
+            blend_runs_.pop_back();
+        } else if (blend_runs_.size() == 1 && mode == SdfBlend::Normal) {
+            blend_runs_.clear();
+        }
+        return;
+    }
+    blend_runs_.push_back({index, mode});
 }
 
 bool SdfBatcher::ensure_capacity(std::size_t count) {
@@ -181,20 +216,36 @@ void SdfBatcher::flush(const Affine2& world_to_ndc, float world_units_per_pixel)
     if (!device_ || first == instances_.size() || !ensure_capacity(instances_.size())) {
         return;
     }
-    const SdfGlobals globals = make_sdf_globals(world_to_ndc, world_units_per_pixel);
+    SdfGlobals globals = make_sdf_globals(world_to_ndc, world_units_per_pixel);
+    globals.row0[3] = device_->info().linear_color ? 1.0f : 0.0f; // sdf.vert working_color
     device_->update_buffer(globals_, 0, std::as_bytes(std::span(&globals, 1)));
     // Only this flush's range: draws of earlier flushes this frame keep
     // reading theirs (the RHI gives updates GL ordering semantics).
     device_->update_buffer(instance_buffer_, first * sizeof(SdfInstance),
                            std::as_bytes(std::span(instances_).subspan(first)));
 
-    device_->bind_pipeline(pipeline_);
     device_->bind_vertex_buffer(0, quad_vertices_);
     device_->bind_vertex_buffer(1, instance_buffer_);
     device_->bind_index_buffer(quad_indices_, rhi::IndexFormat::UInt16);
     device_->bind_uniform_buffer(0, globals_);
-    device_->draw_indexed(static_cast<std::uint32_t>(quad_index_data.size()),
-                          static_cast<std::uint32_t>(instances_.size() - first), 0, static_cast<std::uint32_t>(first));
+    // One draw per blend run inside [first, size).
+    std::size_t begin = first;
+    while (begin < instances_.size()) {
+        SdfBlend run_blend = SdfBlend::Normal;
+        std::size_t end = instances_.size();
+        for (const BlendRun& run : blend_runs_) {
+            if (run.first <= begin) {
+                run_blend = run.blend;
+            } else {
+                end = std::min(end, run.first);
+                break;
+            }
+        }
+        device_->bind_pipeline(pipeline(run_blend));
+        device_->draw_indexed(static_cast<std::uint32_t>(quad_index_data.size()),
+                              static_cast<std::uint32_t>(end - begin), 0, static_cast<std::uint32_t>(begin));
+        begin = end;
+    }
 }
 
 void SdfBatcher::arc(vec2 center, float radius, float start_angle, float end_angle, rhi::Color fill,

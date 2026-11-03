@@ -55,7 +55,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build glslang-tools libvulkan-dev libasound2-dev \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev \
-            libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev
+            libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev \
+            libgl1-mesa-dri libegl-mesa0 libglx-mesa0
 
       - name: Install Emscripten 6.0.12
         run: |
@@ -73,6 +74,58 @@ jobs:
           source ~/emsdk/emsdk_env.sh
           cmake --preset web-pack
           cmake --build --preset web-pack
+
+  # Milestone 11.9: the web runtime with the shmup preloaded, run in Chrome and in Firefox
+  # (both preinstalled on ubuntu-latest): the state hash must match across browsers, then the
+  # IndexedDB reload-persistence game. Advisory (continue-on-error): browser availability and
+  # headless GL differ between runner images, and a missing browser is skipped by the scripts.
+  web-browsers:
+    name: Web browsers (Chrome + Firefox smoke)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build glslang-tools libvulkan-dev libasound2-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev \
+            libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev \
+            libgl1-mesa-dri libegl-mesa0 libglx-mesa0
+
+      - name: Install Emscripten 6.0.12
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git ~/emsdk
+          ~/emsdk/emsdk install 6.0.12
+          ~/emsdk/emsdk activate 6.0.12
+
+      - name: Build host tools
+        run: |
+          cmake --preset host-tools
+          cmake --build --preset host-tools --target shader_tool runtime
+
+      - name: Build web runtime (shmup)
+        run: |
+          source ~/emsdk/emsdk_env.sh
+          cmake --preset web
+          cmake --build --preset web --target runtime
+
+      - name: Shmup state hash matches in Chrome and Firefox
+        # The runner has no GPU: Firefox needs WebGL forced on (firefox_smoke.mjs writes the profile's
+        # user.js) with Mesa's software rasterizer (llvmpipe).
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          MOZ_HEADLESS: "1"
+        run: node tools/web/browser_hash_check.mjs --dir build/web/runtime --expect-hash a3e57e79964421d3
+
+      - name: Saves persist across reloads (IndexedDB)
+        run: |
+          source ~/emsdk/emsdk_env.sh
+          cmake -S . -B build/web -DCUERVO_WEB_GAME="$PWD/tools/web/persist_game"
+          cmake --build build/web --target runtime
+          node tools/web/persist_smoke.mjs --dir build/web/runtime
 
   # Milestone 10.5a (docs/WINDOWS.md): MSVC in Release (the configuration the
   # prebuilt players use; MSVC's Debug STL makes the suite about three times slower) and

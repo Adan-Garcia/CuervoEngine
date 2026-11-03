@@ -8,9 +8,20 @@
 // handshake and attaches the debugger to every VM it creates (hot reload
 // makes new ones). Everything runs on the VM's thread; only request_pause()
 // may be called from elsewhere.
+//
+// Threading rule for breakpoints: a client may send setBreakpoints at any
+// time. While the program is stopped they are applied immediately; while it
+// runs they wait in the transport until the host's next poll() (once per
+// frame) or the next stop, and a busy script loop never reads them. So
+// breakpoint changes take effect at frame boundaries, never mid-frame.
+// LocalTransport below lets an in-process client (the editor) do this
+// without a socket.
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -41,6 +52,35 @@ public:
     // the client is gone, see closed()).
     virtual std::optional<std::string> receive(std::chrono::milliseconds timeout) = 0;
     virtual bool closed() const = 0;
+};
+
+// A thread-safe in-process transport: a queue pair for an editor that drives
+// the Debugger in the same process. The Debugger uses the Transport side on
+// the VM thread; the client calls the client_* methods from any other thread
+// (messages are JSON text, as on a socket, minus the framing).
+class LocalTransport final : public Transport {
+public:
+    // Transport (debugger side)
+    void send(const std::string& message) override;
+    std::optional<std::string> receive(std::chrono::milliseconds timeout) override;
+    // True once the client called close() and its queued requests are consumed.
+    bool closed() const override;
+
+    // Client side. client_request wraps `command` and `arguments_json` (a JSON
+    // object text, "{}" if empty) into a request and returns its seq.
+    std::int64_t client_request(std::string_view command, std::string_view arguments_json = "{}");
+    void client_send(std::string message);
+    // The next message from the debugger (response or event), waiting at most `timeout`.
+    std::optional<std::string> client_receive(std::chrono::milliseconds timeout);
+    // The client is done (like a closed socket).
+    void close();
+
+private:
+    mutable std::mutex mutex_;
+    std::condition_variable to_debugger_cv_, to_client_cv_;
+    std::deque<std::string> to_debugger_, to_client_;
+    std::int64_t seq_ = 1;
+    bool closed_ = false;
 };
 
 class Debugger final : public DebugHooks {
@@ -91,6 +131,7 @@ public:
     void on_line(VM& vm) override;
     void on_panic(VM& vm, std::string_view message) override;
     void on_code_loaded(VM& vm) override;
+    void on_vm_destroyed(VM& vm) override;
 
 private:
     enum class Step : std::uint8_t { None, In, Over, Out };

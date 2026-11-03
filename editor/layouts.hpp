@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <map>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -13,6 +14,24 @@
 // fractions that size the default arrangement of 4.13 when there is no text,
 // and the set of hidden panels.
 namespace cuervo::editor {
+
+// Undocked panels (ImGui multi-viewport): each one lives in an OS window whose position and size
+// ImGui keeps in the layout's dock text (`ViewportPos=`, `Size=` in a `[Window][Title]`
+// section). These read and repair that text without needing an ImGui context.
+struct ScreenRect {
+    float x = 0, y = 0, w = 0, h = 0;
+    friend bool operator==(const ScreenRect&, const ScreenRect&) = default;
+};
+struct DockViewport {
+    std::string window; // the panel's title
+    ScreenRect rect;    // screen position and size of its OS window
+    friend bool operator==(const DockViewport&, const DockViewport&) = default;
+};
+std::vector<DockViewport> dock_viewports(std::string_view dock);
+// Moves every viewport window that is not (mostly) on one of `monitors` onto the best one (the
+// first when none overlaps), so a layout saved on a second monitor still opens its panels when
+// that monitor is gone. Text is returned unchanged when `monitors` is empty.
+std::string clamp_dock_viewports(std::string_view dock, std::span<const ScreenRect> monitors);
 
 struct Layout {
     float left = 0.19f;   // width of the left dock, fraction of the window

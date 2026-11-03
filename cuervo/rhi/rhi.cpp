@@ -5,6 +5,8 @@
 #include <fstream>
 #include <iterator>
 
+#include <SDL3/SDL.h>
+
 #include "cuervo/rhi/rhi_internal.hpp"
 
 #include "cuervo/core/log.hpp"
@@ -77,6 +79,16 @@ GraphicsApi graphics_api(Backend backend) {
     return GraphicsApi::OpenGL;
 }
 
+std::uint32_t full_mip_chain_length(std::int32_t width, std::int32_t height) {
+    std::int32_t largest = width > height ? width : height;
+    std::uint32_t levels = 1;
+    while (largest > 1) {
+        largest >>= 1;
+        ++levels;
+    }
+    return levels;
+}
+
 std::size_t texture_format_size(TextureFormat format) {
     switch (format) {
         case TextureFormat::RGBA8: return 4;
@@ -117,7 +129,10 @@ constexpr FeatureEntry feature_table[] = {
     {"points and lines", Tier::Compatible, true},
     {"MSAA", Tier::Compatible, false},
     {"frame capture", Tier::Compatible, false},
+    {"texture mips", Tier::Compatible, true},
+    {"render targets", Tier::Compatible, true},
     {"base-vertex draws", Tier::Full, true},
+    {"multiple window surfaces", Tier::Compatible, false},
 };
 static_assert(std::size(feature_table) == static_cast<std::size_t>(Feature::Count));
 
@@ -147,6 +162,37 @@ TierReport check_tier(const DeviceInfo& info, Tier tier) {
     low("max uniform block size", have.max_uniform_block_size, want.max_uniform_block_size);
     low("max vertex attributes", have.max_vertex_attributes, want.max_vertex_attributes);
     return report;
+}
+
+namespace {
+void multi_surface_unsupported(const char* what) {
+    LOG_WARN("{}: multiple window surfaces (Feature::MultiSurface) are not supported by this device; "
+             "it stays single-window",
+             what);
+}
+} // namespace
+
+SurfaceHandle Device::create_window_surface(SDL_Window*) {
+    multi_surface_unsupported("create_window_surface");
+    return {};
+}
+void Device::destroy_window_surface(SurfaceHandle) {}
+void Device::begin_frame_surface(SurfaceHandle, ivec2) { multi_surface_unsupported("begin_frame_surface"); }
+void Device::end_frame_surface() {}
+
+SDL_Window* create_surface_window(Backend backend, const char* title, int width, int height, bool resizable) {
+    SDL_WindowFlags flags = SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    if (resizable) flags |= SDL_WINDOW_RESIZABLE;
+    switch (backend) {
+        case Backend::OpenGL: flags |= SDL_WINDOW_OPENGL; break;
+        case Backend::Vulkan: flags |= SDL_WINDOW_VULKAN; break;
+        case Backend::WebGPU:
+            multi_surface_unsupported("create_surface_window");
+            return nullptr;
+    }
+    SDL_Window* window = SDL_CreateWindow(title, width, height, flags);
+    if (!window) LOG_ERROR("create_surface_window: SDL_CreateWindow failed: {}", SDL_GetError());
+    return window;
 }
 
 bool backend_compiled_in(Backend backend) {
@@ -198,6 +244,66 @@ bool valid_texture_update(std::int32_t width, std::int32_t height, TextureFormat
         return false;
     }
     return true;
+}
+
+std::span<const std::byte> texture_level_data(const TextureDesc& desc, std::uint32_t level) {
+    if (!desc.initial_levels.empty()) {
+        return level < desc.initial_levels.size() ? desc.initial_levels[level] : std::span<const std::byte>{};
+    }
+    if (level == 0 && desc.initial_data) {
+        const std::size_t n = static_cast<std::size_t>(desc.width) * static_cast<std::size_t>(desc.height) *
+                              texture_format_size(desc.format);
+        return {static_cast<const std::byte*>(desc.initial_data), n};
+    }
+    return {};
+}
+
+bool render_target_allowed(const DeviceInfo& info, const RenderTargetDesc& desc) {
+    if (!info.features.has(Feature::RenderTargets)) {
+        LOG_ERROR("create_render_target '{}': render targets are not available on this device", desc.debug_name);
+        return false;
+    }
+    TextureDesc as_texture;
+    as_texture.width = desc.width;
+    as_texture.height = desc.height;
+    as_texture.debug_name = desc.debug_name;
+    return texture_size_allowed(info, as_texture);
+}
+
+std::uint32_t texture_levels(const DeviceInfo& info, const TextureDesc& desc) {
+    if (!texture_size_allowed(info, desc)) return 0;
+    const std::uint32_t full = full_mip_chain_length(desc.width, desc.height);
+    const std::uint32_t levels = desc.mip_levels == 0 ? full : desc.mip_levels;
+    if (levels > full) {
+        LOG_ERROR("create_texture '{}': {} mip levels for a {}x{} texture (max {})", desc.debug_name, levels,
+                  desc.width, desc.height, full);
+        return 0;
+    }
+    if (desc.srgb && desc.format != TextureFormat::RGBA8) {
+        LOG_ERROR("create_texture '{}': only RGBA8 textures can be sRGB", desc.debug_name);
+        return 0;
+    }
+    if ((levels > 1 || desc.srgb) && !info.features.has(Feature::TextureMips)) {
+        LOG_ERROR("create_texture '{}': mip chains and sRGB textures are not available on this device",
+                  desc.debug_name);
+        return 0;
+    }
+    if (desc.initial_levels.size() > levels) {
+        LOG_ERROR("create_texture '{}': {} levels of data for {} mip levels", desc.debug_name,
+                  desc.initial_levels.size(), levels);
+        return 0;
+    }
+    for (std::uint32_t i = 0; i < desc.initial_levels.size(); ++i) {
+        const std::size_t expected = static_cast<std::size_t>(mip_extent(desc.width, i)) *
+                                     static_cast<std::size_t>(mip_extent(desc.height, i)) *
+                                     texture_format_size(desc.format);
+        if (!desc.initial_levels[i].empty() && desc.initial_levels[i].size() != expected) {
+            LOG_ERROR("create_texture '{}': level {} has {} bytes (expected {})", desc.debug_name, i,
+                      desc.initial_levels[i].size(), expected);
+            return 0;
+        }
+    }
+    return levels;
 }
 
 bool write_ppm(const std::string& path, int width, int height, std::span<const std::uint8_t> rgb) {

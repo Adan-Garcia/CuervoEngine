@@ -37,10 +37,24 @@ run(${offscreen} "${RHI_PARITY}" render --backend gl --gl-es --out "${OUT}/gles"
 # Same GL driver, two shading-language paths: must be identical.
 run("${RHI_PARITY}" compare "${OUT}/gl" "${OUT}/gles" --tolerance 0)
 
+# Linear color (4.19, 11.2b): mesh gradients and lights convert with the other
+# colors. Linear renders must differ from sRGB ones for those scenes and agree
+# across GL and GLES (and below, WebGPU and Vulkan).
+run(${offscreen} "${RHI_PARITY}" render --backend gl --linear --out "${OUT}/gl_linear")
+run(${offscreen} "${RHI_PARITY}" render --backend gl --gl-es --linear --out "${OUT}/gles_linear")
+run("${RHI_PARITY}" compare "${OUT}/gl_linear" "${OUT}/gles_linear" --tolerance 0)
+foreach(scene mesh_gradient lighting_shadows lighting_ambient)
+    run("${RHI_PARITY}" compare "${OUT}/gl/${scene}.ppm" "${OUT}/gl_linear/${scene}.ppm" --expect-different)
+endforeach()
+
 # Many frames on one device: rotating stream versions and the frame fence ring
 # (first and last frame identical; at most the bound queued).
 run(${offscreen} "${RHI_PARITY}" frames --backend gl --out "${OUT}/frames_gl")
 run(${offscreen} "${RHI_PARITY}" frames --backend gl --gl-es --out "${OUT}/frames_gles")
+
+# A second window's surface renders what the main window renders (MultiSurface).
+run(${offscreen} "${RHI_PARITY}" surfaces --backend gl --out "${OUT}/surfaces_gl")
+run(${offscreen} "${RHI_PARITY}" surfaces --backend gl --gl-es --out "${OUT}/surfaces_gles")
 
 set(shmup_args --game "${SHMUP}" --no-audio --no-hot-reload --screenshot)
 run(${offscreen} "${RUNTIME}" ${shmup_args} "${OUT}/shmup_gl.ppm" --backend gl)
@@ -58,6 +72,8 @@ endif()
 if(WEBGPU)
     run(${offscreen} "${RHI_PARITY}" render --backend webgpu --out "${OUT}/webgpu")
     run("${RHI_PARITY}" compare "${OUT}/gl" "${OUT}/webgpu")
+    run(${offscreen} "${RHI_PARITY}" render --backend webgpu --linear --out "${OUT}/webgpu_linear")
+    run("${RHI_PARITY}" compare "${OUT}/gl_linear" "${OUT}/webgpu_linear")
     run(${offscreen} "${RHI_PARITY}" frames --backend webgpu --out "${OUT}/frames_webgpu")
     run(${offscreen} "${RUNTIME}" ${shmup_args} "${OUT}/shmup_webgpu.ppm" --backend webgpu)
     run("${RHI_PARITY}" compare "${OUT}/shmup_gl.ppm" "${OUT}/shmup_webgpu.ppm")
@@ -82,12 +98,26 @@ endif()
 if(has_display AND NOT "$ENV{CUERVO_PARITY_VULKAN}" STREQUAL "0")
     run("${RHI_PARITY}" render --backend vulkan --out "${OUT}/vulkan")
     run("${RHI_PARITY}" compare "${OUT}/gl" "${OUT}/vulkan")
+    # Software Vulkan drivers (lavapipe on CI) expose no sRGB surface format, so linear color is
+    # unavailable there; the render logs that and the linear comparison is skipped.
+    execute_process(COMMAND "${RHI_PARITY}" render --backend vulkan --linear --out "${OUT}/vulkan_linear"
+                    RESULT_VARIABLE lin_result OUTPUT_VARIABLE lin_out ERROR_VARIABLE lin_err)
+    message("${lin_out}${lin_err}")
+    if(NOT lin_result EQUAL 0)
+        message(FATAL_ERROR "failed (${lin_result}): rhi_parity render --backend vulkan --linear")
+    endif()
+    if("${lin_out}${lin_err}" MATCHES "linear color is unavailable")
+        message(STATUS "Vulkan has no sRGB surface format here: skipping the Vulkan linear comparison")
+    else()
+        run("${RHI_PARITY}" compare "${OUT}/gl_linear" "${OUT}/vulkan_linear")
+    endif()
     if(WEBGPU)
         # wgpu-native runs on Vulkan here: same rasterization rules, same pixels.
         run("${RHI_PARITY}" compare "${OUT}/vulkan" "${OUT}/webgpu" --tolerance 0)
     endif()
     # Full tier: base-vertex draws must match their reference (checked by render).
     run("${RHI_PARITY}" frames --backend vulkan --out "${OUT}/frames_vulkan")
+    run("${RHI_PARITY}" surfaces --backend vulkan --out "${OUT}/surfaces_vulkan")
     run("${RHI_PARITY}" render --backend vulkan --tier full --out "${OUT}/vulkan_full")
     run("${RUNTIME}" ${shmup_args} "${OUT}/shmup_vulkan.ppm" --backend vulkan)
     run("${RHI_PARITY}" compare "${OUT}/shmup_gl.ppm" "${OUT}/shmup_vulkan.ppm")

@@ -1,0 +1,10 @@
+class Game extends Node {
+    fn ready() {
+        var runs = 0
+        if Save.load("boot") { runs = Save.get_int("boot", "runs", 0) }
+        runs += 1
+        Save.set_int("boot", "runs", runs)
+        Save.commit("boot")
+        print("persist-runs {runs}")
+    }
+}

@@ -17,6 +17,9 @@ bool Window::create(const WindowDesc& desc) {
     // Web frames run from requestAnimationFrame and must never suspend (the
     // build links no Asyncify or JSPI); SDL must not try to yield in its swap.
     SDL_SetHint(SDL_HINT_EMSCRIPTEN_ASYNCIFY, "0");
+    // The game draws the composition text inside its text field (LineEdit);
+    // the IME keeps its own candidate list (DESIGN.md 4.19 "11.3").
+    SDL_SetHint(SDL_HINT_IME_IMPLEMENTED_UI, "composition");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         LOG_ERROR("SDL_Init failed: {}", SDL_GetError());
         return false;
@@ -153,7 +156,14 @@ bool Window::handle_event(const SDL_Event& event, DeviceState& devices) {
                 break;
             }
 
+            case SDL_EVENT_TEXT_EDITING:
+                devices.composition = event.edit.text != nullptr ? event.edit.text : "";
+                devices.composition_cursor = devices.composition.empty() ? -1 : static_cast<int>(event.edit.start);
+                break;
+
             case SDL_EVENT_TEXT_INPUT: {
+                devices.composition.clear(); // committed: the composition is over
+                devices.composition_cursor = -1;
                 // UTF-8 to code points; invalid bytes are skipped.
                 const char* t = event.text.text;
                 while (t != nullptr && *t != '\0') {
@@ -224,6 +234,16 @@ void Window::set_text_input(bool on) {
     } else {
         SDL_StopTextInput(window_);
     }
+}
+
+void Window::set_text_input_area(ivec2 position, ivec2 size, int cursor_x) {
+    if (window_ == nullptr || !SDL_TextInputActive(window_)) return;
+    const float inv = 1.0f / SDL_GetWindowPixelDensity(window_);
+    const SDL_Rect area{static_cast<int>(static_cast<float>(position.x()) * inv),
+                        static_cast<int>(static_cast<float>(position.y()) * inv),
+                        static_cast<int>(static_cast<float>(size.x()) * inv),
+                        static_cast<int>(static_cast<float>(size.y()) * inv)};
+    SDL_SetTextInputArea(window_, &area, static_cast<int>(static_cast<float>(cursor_x) * inv));
 }
 
 ivec2 Window::pixel_size() const {

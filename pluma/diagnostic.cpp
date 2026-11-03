@@ -8,7 +8,7 @@ namespace pluma {
 Diagnostic& DiagnosticSink::report(Severity severity, Span span, std::string message) {
     Location loc = source_.location(span.begin);
     diagnostics_.push_back(
-        {severity, std::string(loc.path), loc.line, loc.column, span, std::move(message), std::nullopt});
+        {severity, std::string(loc.path), loc.line, loc.column, span, std::move(message), {}, std::nullopt});
     return diagnostics_.back();
 }
 

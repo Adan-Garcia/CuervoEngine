@@ -18,7 +18,7 @@
 
 #include "cuervo/core/log.hpp"
 #include "editor/app.hpp"
-#include "editor/theme.hpp"
+#include "editor/imgui_theme.hpp"
 #include "editor/panels.hpp"
 
 namespace cuervo::editor {

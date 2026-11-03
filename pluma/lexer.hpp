@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string_view>
 #include <vector>
 
@@ -16,6 +17,32 @@ namespace pluma {
 // the interpolated expressions. Raw strings `r"..."` and multiline `"""..."""`
 // strings are single tokens too. Newlines are tokens because they end
 // statements; consecutive blank lines collapse into one.
+// Carried between lines by Lexer::tokenize_line (editor highlighting). Only the
+// constructs that can span lines need state: nested block comments and
+// `"""` strings.
+struct LineState {
+    enum class Mode : std::uint8_t { Normal, BlockComment, MultiString };
+    Mode mode = Mode::Normal;
+    std::uint16_t depth = 0; // comment nesting, or `{` depth inside a string interpolation
+    bool raw = false;        // MultiString: an r"""...""" string (no interpolation)
+    bool operator==(const LineState&) const = default;
+};
+
+// One highlight token on a single line. `column` is a 0-based byte offset into
+// the line. Comments are reported (kind is meaningless then); the whole-file
+// lexer drops them. A string or comment spanning lines yields one segment per line.
+struct LineToken {
+    TokenKind kind = TokenKind::Eof;
+    bool comment = false;
+    std::uint32_t column = 0;
+    std::uint32_t length = 0;
+};
+
+struct LineResult {
+    std::vector<LineToken> tokens;
+    LineState state; // state at the end of the line; feed it to the next line
+};
+
 class Lexer {
 public:
     explicit Lexer(std::string_view source) : source_(source), end_(source.size()) {}
@@ -32,6 +59,14 @@ public:
     // Lex the whole input. The last token is always Eof.
     static std::vector<Token> tokenize(std::string_view source);
     std::vector<Token> tokenize_all();
+
+    // Incremental, per-line lexing for highlighting. `line` is one line without
+    // its terminator (a trailing "\n" / "\r\n" is tolerated). A caller that edits
+    // line N re-lexes from N with the cached state of line N-1 and stops at the
+    // first line whose returned `state` equals its cached one. Newline and Eof
+    // tokens are not produced. Interpolations that span lines containing nested
+    // `"""` strings are approximated; everything else matches `tokenize`.
+    static LineResult tokenize_line(std::string_view line, LineState state = {});
 
 private:
     char peek(std::size_t ahead = 0) const;

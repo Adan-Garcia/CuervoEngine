@@ -1,0 +1,68 @@
+// Four pawns, one screen. Player p steers with Input.held_by(p, ...) and shoots in the direction it
+// last moved; a shot that reaches another pawn scores and sends that pawn to a random spot. Slots with
+// no player stay idle, so the same script runs with 2, 3 or 4 players and replays offline from the
+// recorded input (it never asks the network anything: the number of players is not game state).
+var COLORS = [Color.hex("7fe6ff"), Color.hex("ffb86b"), Color.hex("b6ff7f"), Color.hex("ff7fb6")]
+// A globals-only digest of the match (the state hash covers script globals).
+var checksum = 0
+
+class Arena extends Node {
+    var pos = [vec2(100.0, 100.0), vec2(540.0, 100.0), vec2(100.0, 260.0), vec2(540.0, 260.0)]
+    var facing = [vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(1.0, 0.0), vec2(-1.0, 0.0)]
+    var score = [0, 0, 0, 0]
+    var cooldown = [0, 0, 0, 0]
+    var shots = List<vec2>()
+    var vel = List<vec2>()
+    var owner = List<int>()
+
+    fn update(dt: float) {
+        for p in 0..4 {
+            var move = vec2(0.0, 0.0)
+            if Input.held_by(p, #left) { move = vec2(move.x - 1.0, move.y) }
+            if Input.held_by(p, #right) { move = vec2(move.x + 1.0, move.y) }
+            if Input.held_by(p, #up) { move = vec2(move.x, move.y - 1.0) }
+            if Input.held_by(p, #down) { move = vec2(move.x, move.y + 1.0) }
+            if move.x != 0.0 || move.y != 0.0 { facing[p] = move }
+            var next = pos[p] + move * (150.0 * dt)
+            pos[p] = vec2(clamp(next.x, 20.0, 620.0), clamp(next.y, 20.0, 340.0))
+            if cooldown[p] > 0 { cooldown[p] -= 1 }
+            if Input.held_by(p, #shoot) && cooldown[p] == 0 {
+                cooldown[p] = 10
+                shots.push(pos[p])
+                vel.push(facing[p] * (7.0 / facing[p].length()))
+                owner.push(p)
+            }
+        }
+        var i = 0
+        while i < shots.len() {
+            shots[i] = shots[i] + vel[i]
+            var gone = shots[i].x < 0.0 || shots[i].x > 640.0 || shots[i].y < 0.0 || shots[i].y > 360.0
+            for p in 0..4 {
+                if !gone && p != owner[i] && (shots[i] - pos[p]).length() < 18.0 {
+                    score[owner[i]] += 1
+                    pos[p] = vec2(20.0 + Random.range(0.0, 600.0), 20.0 + Random.range(0.0, 320.0))
+                    gone = true
+                }
+            }
+            if gone {
+                shots.remove(i)
+                vel.remove(i)
+                owner.remove(i)
+            } else {
+                i += 1
+            }
+        }
+        checksum = (checksum * 31 + (pos[0].x as int) + 7 * (pos[1].x as int) + 13 * (pos[2].y as int)
+            + 17 * (pos[3].x as int) + 1000 * score[0] + 100 * score[1] + 10 * score[2] + score[3]) % 1000003
+    }
+
+    fn draw(g: Canvas) {
+        for p in 0..4 {
+            g.circle(pos[p], 14.0, fill = COLORS[p])
+            g.text(vec2(24.0 + 80.0 * (p as float), 18.0), "{score[p]}", size = 24.0, color = COLORS[p])
+        }
+        for s in shots {
+            g.circle(s, 3.0, fill = Color.hex("ffffff"))
+        }
+    }
+}

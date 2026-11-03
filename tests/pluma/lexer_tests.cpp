@@ -131,3 +131,151 @@ TEST_CASE("raw and multiline strings are single tokens") {
     CHECK(kinds("\"{\"nested\"}\"") == std::vector{K::String, K::Eof});
     CHECK(kinds("\"\"\"never closed") == std::vector{K::Error, K::Eof});
 }
+
+// ---- Lexer::tokenize_line (incremental highlighting) ----
+
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+
+namespace {
+
+using pluma::LineState;
+using pluma::LineToken;
+
+struct Seg {
+    TokenKind kind;
+    std::size_t begin, end; // absolute offsets
+};
+
+// Per-line lex of `src`, merging string segments that continue a multi-line token.
+std::vector<Seg> lex_by_lines(std::string_view src, std::vector<LineState>* states = nullptr) {
+    std::vector<Seg> out;
+    LineState state;
+    std::size_t start = 0;
+    while (start <= src.size()) {
+        std::size_t nl = src.find('\n', start);
+        std::size_t stop = nl == std::string_view::npos ? src.size() : nl;
+        auto r = Lexer::tokenize_line(src.substr(start, stop - start), state);
+        bool first = true;
+        for (const LineToken& t : r.tokens) {
+            if (t.comment) { first = false; continue; }
+            Seg s{t.kind, start + t.column, start + t.column + t.length};
+            if (first && t.column == 0 && state.mode == LineState::Mode::MultiString && !out.empty())
+                out.back().end = s.end;
+            else
+                out.push_back(s);
+            first = false;
+        }
+        state = r.state;
+        if (states) states->push_back(state);
+        if (nl == std::string_view::npos) break;
+        start = nl + 1;
+    }
+    return out;
+}
+
+std::vector<Seg> lex_whole(std::string_view src) {
+    std::vector<Seg> out;
+    for (const Token& t : Lexer::tokenize(src)) {
+        if (t.kind == K::Newline || t.kind == K::Eof) continue;
+        out.push_back({t.kind, t.offset, t.offset + t.length});
+    }
+    return out;
+}
+
+void check_equivalent(std::string_view src, const std::string& what) {
+    auto a = lex_whole(src), b = lex_by_lines(src);
+    INFO(what);
+    REQUIRE(a.size() == b.size());
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        INFO("token " << i << " at " << a[i].begin);
+        CHECK(a[i].kind == b[i].kind);
+        CHECK(a[i].begin == b[i].begin);
+        CHECK(a[i].end == b[i].end);
+    }
+}
+
+} // namespace
+
+TEST_CASE("tokenize_line matches whole-file tokenize on the example corpus") {
+    int files = 0;
+    for (const auto& e : std::filesystem::recursive_directory_iterator(PLUMA_EXAMPLES_DIR)) {
+        if (e.path().extension() != ".plm") continue;
+        std::ifstream in(e.path(), std::ios::binary);
+        std::stringstream ss;
+        ss << in.rdbuf();
+        std::string text = ss.str();
+        check_equivalent(text, e.path().string());
+        // Same file with CRLF line endings.
+        std::string crlf;
+        for (char c : text) { if (c == '\n') crlf += '\r'; crlf += c; }
+        check_equivalent(crlf, e.path().string() + " (CRLF)");
+        ++files;
+    }
+    CHECK(files > 10);
+}
+
+TEST_CASE("tokenize_line edge cases match whole-file tokenize") {
+    const char* cases[] = {
+        "",
+        "\n\n\n",
+        "var a = 1 /* c */ + 2\n",
+        "/* a\n b /* nested\n */ still\n*/ var x = 1\n",
+        "var s = \"\"\"line one\nline {two}\n\"\"\" + 1\n",
+        "var s = r\"\"\"raw {not\ninterp\"\"\"\nvar t = 2\n",
+        "var s = \"\"\"a {\n  x + 1\n} b\"\"\"\nvar t = 2\n",
+        "var s = \"héllo wörld ✓\" // ünï\nvar y = 2\n",
+        "var s = \"héllo\n var z = 3\n",
+        "var a = 1 // trailing\r\nvar b = 2\r\n",
+        "\xEF\xBB\xBFvar bom = 1\n",
+        "var ok = 1\n/* unterminated\nvar hidden = 2\n",
+        "var s = \"\"\"never closed\nvar hidden = 2\n",
+        "var é = 1\n",
+    };
+    for (const char* c : cases) {
+        auto a = lex_whole(c), b = lex_by_lines(c);
+        INFO(c);
+        // Error tokens for unterminated constructs are reported differently at
+        // end of input (whole-file reports the error; per-line carries state).
+        bool unterminated = std::string_view(c).find("unterminated\n") != std::string_view::npos ||
+                            std::string_view(c).find("never closed") != std::string_view::npos ||
+                            std::string_view(c).find("\"héllo\n") != std::string_view::npos;
+        if (unterminated) continue;
+        check_equivalent(c, c);
+    }
+}
+
+TEST_CASE("tokenize_line state and comments") {
+    auto r = Lexer::tokenize_line("var a = 1 /* open");
+    REQUIRE(r.tokens.size() == 5);
+    CHECK(r.tokens.back().comment);
+    CHECK(r.tokens.back().column == 10);
+    CHECK(r.state.mode == LineState::Mode::BlockComment);
+    CHECK(r.state.depth == 1);
+
+    auto r2 = Lexer::tokenize_line("still /* deeper", r.state);
+    CHECK(r2.state.depth == 2);
+    auto r3 = Lexer::tokenize_line("*/ */ var x", r2.state);
+    CHECK(r3.state == LineState{});
+    REQUIRE(r3.tokens.size() == 3);
+    CHECK(r3.tokens[0].comment);
+    CHECK(r3.tokens[0].length == 5);
+    CHECK(r3.tokens[1].kind == K::Keyword);
+
+    // An edit that does not change the end state lets the caller stop re-lexing.
+    CHECK(Lexer::tokenize_line("var q = 2", {}).state == Lexer::tokenize_line("var r = 3", {}).state);
+    CHECK(Lexer::tokenize_line("\"\"\"x").state != LineState{});
+    CHECK(Lexer::tokenize_line("\"one line\"").state == LineState{});
+    CHECK(Lexer::tokenize_line("// c /* not open").state == LineState{});
+    CHECK(Lexer::tokenize_line("\"x /* y\"").state == LineState{});
+
+    // Unterminated one-line string: an Error token, no carried state.
+    auto e = Lexer::tokenize_line("var s = \"oops");
+    CHECK(e.state == LineState{});
+    CHECK(e.tokens.back().kind == K::Error);
+
+    // Empty line, and a line ending in CR.
+    CHECK(Lexer::tokenize_line("").tokens.empty());
+    CHECK(Lexer::tokenize_line("var\r").tokens.size() == 1);
+}

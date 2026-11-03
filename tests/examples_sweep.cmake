@@ -89,7 +89,14 @@ foreach(scene ${scenes})
     endif()
     execute_process(COMMAND ${CMAKE_COMMAND} -E compare_files "${base}.scene" "${scene}" RESULT_VARIABLE differs)
     if(NOT differs EQUAL 0)
-        fail("${scene}: dump + build did not give back the same bytes" "" "")
+        # A text scene (the editor's default since 11.2c) legitimately differs from the binary build of its dump;
+        # it must still dump to the same text after a build.
+        execute_process(COMMAND "${TOOLS}" scene dump "${base}.scene" OUTPUT_FILE "${base}.again.txt"
+                        RESULT_VARIABLE code ERROR_VARIABLE err)
+        execute_process(COMMAND ${CMAKE_COMMAND} -E compare_files "${base}.again.txt" "${base}.txt" RESULT_VARIABLE differs_text)
+        if(NOT code EQUAL 0 OR NOT differs_text EQUAL 0)
+            fail("${scene}: dump + build did not give back the same bytes" "" "${err}")
+        endif()
     endif()
     execute_process(COMMAND "${TOOLS}" scene dump "${base}.scene" OUTPUT_FILE "${base}.again.txt" RESULT_VARIABLE code)
     execute_process(COMMAND ${CMAKE_COMMAND} -E compare_files "${base}.again.txt" "${base}.txt" RESULT_VARIABLE differs)

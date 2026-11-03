@@ -8,6 +8,7 @@
 #include "cuervo/jobs/job_system.hpp"
 #include "cuervo/math/dmath.hpp"
 #include "cuervo/math/simd.hpp"
+#include "recording_device.hpp"
 #include "cuervo/particles/particle_render.hpp"
 #include "cuervo/particles/particle_system.hpp"
 
@@ -504,6 +505,39 @@ TEST_CASE("draw_emitters packs the same instances as draw_emitter, in parallel")
     REQUIRE(parallel.size() == serial.size() + 1);
     CHECK(std::memcmp(parallel.instances().data() + 1, serial.instances().data(),
                       serial.size() * sizeof(render::SdfInstance)) == 0);
+}
+
+TEST_CASE("Emitter blend modes become blend runs of the batcher (11.2b)") {
+    ParticleSystem system(3);
+    const render::SdfBlend modes[] = {render::SdfBlend::Normal, render::SdfBlend::Additive, render::SdfBlend::Screen};
+    for (render::SdfBlend mode : modes) {
+        EmitterConfig c = random_shooter();
+        c.render.blend = mode;
+        c.spawners[0].pattern = Burst{50, 0.0f, dmath::tau};
+        system.add_emitter(c);
+    }
+    for (int t = 0; t < 3; ++t) system.tick(dt);
+    const std::size_t n0 = system.emitter(0).size();
+    const std::size_t n1 = system.emitter(1).size();
+    REQUIRE(n0 > 0);
+    REQUIRE(n1 > 0);
+    REQUIRE(system.emitter(2).size() > 0);
+
+    cuervo::test::RecordingDevice device;
+    render::SdfBatcher batch;
+    REQUIRE(batch.init(device, 16));
+    draw_emitters(system, batch, 0.0f, nullptr);
+    CHECK(batch.blend() == render::SdfBlend::Normal); // runs end back at Normal
+    batch.flush(Affine2{}, 1.0f);
+    REQUIRE(device.draws.size() == 3);
+    CHECK(device.draws[0].instance_count == n0);
+    CHECK(device.draws[1].first_instance == n0);
+    CHECK(device.draws[1].instance_count == n1);
+    CHECK(device.draws[2].first_instance == n0 + n1);
+    REQUIRE(device.pipelines.size() == 3);
+    CHECK(device.pipelines[1].blend == rhi::BlendMode::AdditivePremultiplied);
+    CHECK(device.pipelines[2].blend == rhi::BlendMode::Screen);
+    batch.shutdown();
 }
 
 TEST_CASE("Deterministic replay: SIMD and scalar paths give the same state hash every tick (DESIGN.md 4.15)") {

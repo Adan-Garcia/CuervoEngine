@@ -4,18 +4,23 @@
 
 #include <doctest.h>
 
+#include <filesystem>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "editor/anim_edit.hpp"
+#include "editor/command_script.hpp"
 #include "editor/editor_document.hpp"
 #include "editor/icons.hpp"
 #include "editor/project_env.hpp"
+#include "editor/scene_preview.hpp"
 #include "pluma/value.hpp"
 
 using namespace cuervo;
 using namespace cuervo::editor;
+namespace fs = std::filesystem;
 
 namespace {
 
@@ -167,4 +172,96 @@ TEST_CASE("icons: the lighting, tilemap collision and animation nodes have their
     CHECK(icon_for_class(nullptr, "TileMapCollision2D") == "static_body");
     CHECK(icon_for_class(nullptr, "AnimationPlayer") == "animation");
     for (const char* name : {"light", "sun", "moon", "occluder", "animation"}) CHECK(has_icon(name));
+}
+
+// ------------------------------------------------------- 11.7a scene preview
+
+namespace {
+void write_marker(const fs::path& dir, int bump, bool with_update) {
+    std::ofstream(dir / "scripts/marker.plm", std::ios::trunc)
+        << "class Marker extends Node2D {\n"
+           "    var ran_ready = false\n"
+           "    var ticks_seen = 0\n"
+           "    var level = 1\n"
+           "    fn ready() {\n"
+           "        ran_ready = true\n"
+           "        level = level + " << bump << "\n"
+           "    }\n"
+        << (with_update ? "    fn update(dt: float) {\n        ticks_seen = ticks_seen + 1\n    }\n" : "")
+        << "}\n";
+}
+
+fs::path preview_project(std::string_view tag) {
+    const fs::path dir = fs::temp_directory_path() / "cuervo_editor_preview_tests" / std::string(tag);
+    fs::remove_all(dir);
+    fs::create_directories(dir / "scripts");
+    std::ofstream(dir / "project.toml") << "name = \"Prev\"\nseed = 7\n";
+    write_marker(dir, 100, true);
+    return dir;
+}
+} // namespace
+
+TEST_CASE("scene preview: runs ready() in an isolated session that never ticks, refreshed on edit and hot reload") {
+    const fs::path dir = preview_project("basic");
+    ProjectEnv env;
+    std::string error;
+    REQUIRE_MESSAGE(env.open(dir, nullptr, error), error);
+    EditorDocument doc;
+    doc.set_registry(&env.classes());
+    ScenePreview preview;
+    CommandContext ctx{doc, env, nullptr, nullptr, nullptr, std::string(), 1, &preview};
+
+    ScriptResult r = run_command_script("new Marker root\nadd / Marker child\npreview\n", ctx);
+    REQUIRE_MESSAGE(r.ok, r.error);
+    CHECK(preview.refreshes() == 1);
+    // ready() ran on the whole tree; update() never did.
+    r = run_command_script("expect-preview / ran_ready true\n"
+                           "expect-preview /child ran_ready true\n"
+                           "expect-preview /child level 101\n"
+                           "expect-preview /child ticks_seen 0\n"
+                           "expect-preview-tick 0\nexpect-preview-nodes 2\n",
+                           ctx);
+    CHECK_MESSAGE(r.ok, "line " << r.line << ": " << r.error);
+
+    // An edit followed by a refresh shows the new document.
+    r = run_command_script("add / Marker second\npreview\nexpect-preview-nodes 3\n", ctx);
+    CHECK_MESSAGE(r.ok, "line " << r.line << ": " << r.error);
+    CHECK(preview.refreshes() == 2);
+
+    // Hot reload: the scripts change, the project is recompiled, a refresh runs the new ready().
+    write_marker(dir, 1000, false);
+    ProjectEnv fresh;
+    REQUIRE_MESSAGE(fresh.open(dir, nullptr, error), error);
+    CommandContext ctx2{doc, fresh, nullptr, nullptr, nullptr, std::string(), 1, &preview};
+    r = run_command_script("preview\nexpect-preview /second level 1001\n", ctx2);
+    CHECK_MESSAGE(r.ok, "line " << r.line << ": " << r.error);
+
+    // Failures: wrong value, no preview, commands unavailable without the member.
+    CHECK_FALSE(run_command_script("expect-preview /second level 3\n", ctx2).ok);
+    CHECK_FALSE(run_command_script("preview-clear\nexpect-preview-tick 0\n", ctx2).ok);
+    CommandContext bare{doc, fresh, nullptr, nullptr, nullptr, std::string(), 1};
+    CHECK_FALSE(run_command_script("preview\n", bare).ok);
+}
+
+TEST_CASE("scene preview: a panic in ready() keeps the session and reports it") {
+    const fs::path dir = preview_project("panic");
+    std::ofstream(dir / "scripts/marker.plm", std::ios::trunc)
+        << "class Marker extends Node2D {\n"
+           "    var parts = [1]\n"
+           "    fn ready() {\n"
+           "        print(parts[5])\n"
+           "    }\n"
+           "}\n";
+    ProjectEnv env;
+    std::string error;
+    REQUIRE_MESSAGE(env.open(dir, nullptr, error), error);
+    EditorDocument doc;
+    doc.set_registry(&env.classes());
+    ScenePreview preview;
+    CommandContext ctx{doc, env, nullptr, nullptr, nullptr, std::string(), 1, &preview};
+    const ScriptResult r = run_command_script("new Marker root\npreview\n", ctx);
+    CHECK_MESSAGE(r.ok, r.error);
+    CHECK(preview.active());
+    CHECK(preview.panicked());
+    CHECK(preview.tick() == 0);
 }

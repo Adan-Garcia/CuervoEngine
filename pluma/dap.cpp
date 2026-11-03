@@ -180,11 +180,77 @@ void Debugger::reverify(const VM& vm) {
     rebuild_lines();
 }
 
+void Debugger::on_vm_destroyed(VM& vm) {
+    // The VM dies before the debugger (Session members/declaration order, hot
+    // reload): never touch it again, not even from the destructor's detach().
+    if (vm_ == &vm) vm_ = nullptr;
+    if (stopped_vm_ == &vm) stopped_vm_ = nullptr;
+}
+
 void Debugger::detach() {
     if (vm_ != nullptr && vm_->debug_hooks() == this) vm_->set_debug_hooks(nullptr);
     vm_ = nullptr;
     refs_.clear();
     sources_.clear();
+}
+
+void LocalTransport::send(const std::string& message) {
+    {
+        std::lock_guard lock(mutex_);
+        to_client_.push_back(message);
+    }
+    to_client_cv_.notify_all();
+}
+
+std::optional<std::string> LocalTransport::receive(std::chrono::milliseconds timeout) {
+    std::unique_lock lock(mutex_);
+    to_debugger_cv_.wait_for(lock, timeout, [&] { return !to_debugger_.empty() || closed_; });
+    if (to_debugger_.empty()) return std::nullopt;
+    std::string m = std::move(to_debugger_.front());
+    to_debugger_.pop_front();
+    return m;
+}
+
+bool LocalTransport::closed() const {
+    std::lock_guard lock(mutex_);
+    return closed_ && to_debugger_.empty();
+}
+
+std::int64_t LocalTransport::client_request(std::string_view command, std::string_view arguments_json) {
+    std::int64_t seq;
+    {
+        std::lock_guard lock(mutex_);
+        seq = seq_++;
+        to_debugger_.push_back(std::format(R"({{"seq":{},"type":"request","command":"{}","arguments":{}}})", seq,
+                                           command, arguments_json.empty() ? "{}" : arguments_json));
+    }
+    to_debugger_cv_.notify_all();
+    return seq;
+}
+
+void LocalTransport::client_send(std::string message) {
+    {
+        std::lock_guard lock(mutex_);
+        to_debugger_.push_back(std::move(message));
+    }
+    to_debugger_cv_.notify_all();
+}
+
+std::optional<std::string> LocalTransport::client_receive(std::chrono::milliseconds timeout) {
+    std::unique_lock lock(mutex_);
+    to_client_cv_.wait_for(lock, timeout, [&] { return !to_client_.empty(); });
+    if (to_client_.empty()) return std::nullopt;
+    std::string m = std::move(to_client_.front());
+    to_client_.pop_front();
+    return m;
+}
+
+void LocalTransport::close() {
+    {
+        std::lock_guard lock(mutex_);
+        closed_ = true;
+    }
+    to_debugger_cv_.notify_all();
 }
 
 void Debugger::poll() {

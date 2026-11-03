@@ -1,3 +1,4 @@
+#include "editor/file_import.hpp"
 #include "editor/app.hpp"
 #include "editor/license_view.hpp"
 #include "editor/launcher.hpp"
@@ -5,6 +6,8 @@
 
 #include <SDL3/SDL.h>
 #include <imgui.h>
+#include <imgui_internal.h>
+#include <imgui_internal.h>
 #include <imgui_impl_sdl3.h>
 #include <imgui_stdlib.h>
 
@@ -25,8 +28,10 @@
 #include "cuervo/input/replay.hpp"
 #include "cuervo/render/camera.hpp"
 #include "cuervo/render/font_import.hpp"
+#include "editor/cli_run.hpp"
 #include "editor/command_script.hpp"
-#include "editor/theme.hpp"
+#include "editor/scene_painter.hpp"
+#include "editor/imgui_theme.hpp"
 
 namespace cuervo::editor {
 
@@ -36,14 +41,6 @@ namespace {
 
 double now_seconds() {
     return static_cast<double>(SDL_GetPerformanceCounter()) / static_cast<double>(SDL_GetPerformanceFrequency());
-}
-
-std::string read_file(const std::string& path, bool& ok) {
-    std::ifstream in(path, std::ios::binary);
-    ok = static_cast<bool>(in);
-    std::stringstream ss;
-    ss << in.rdbuf();
-    return ss.str();
 }
 
 // Draw-list callback (ImGuiRenderer runs it in order): the scene view's
@@ -85,7 +82,16 @@ std::vector<Panel*> PanelRegistry::in(Dock dock) const {
 // ------------------------------------------------------------ app
 
 EditorApp::EditorApp(const EditorOptions& options) : options_(options) {
-    console_.install();
+    ctl_.console().install();
+    ctl_.set_play_setup({options_.font_path, options_.jobs,
+                         options_.audio && !platform::env_is("SDL_VIDEO_DRIVER", "offscreen") && !platform::env_is("CUERVO_AUDIO", "null")});
+    ctl_.hooks.scene_opened = [this] { frame_scene(); };
+    ctl_.hooks.persist = [this] { save_user_state(); };
+    ctl_.hooks.scripts_reloaded = [this] {
+        preview_revision_ = ~std::uint64_t{0}; // rebuild the scene view
+        ctl_.invalidate_ready_preview();       // and restart the ready() preview on the new scripts
+        rebuild_actions();
+    };
     if (options_.view) {
         camera_.center = {options_.view->x(), options_.view->y()};
         camera_.zoom = std::clamp(options_.view->z(), ViewCamera::min_zoom, ViewCamera::max_zoom);
@@ -103,6 +109,8 @@ EditorApp::EditorApp(const EditorOptions& options) : options_(options) {
     panels_.add(make_profiler_panel());
     panels_.add(make_history_panel());
     panels_.add(make_animation_panel());
+    panels_.add(make_sprites_panel());
+    panels_.add(make_particles_panel());
     for (const std::string& t : options_.tabs) {
         if (Panel* p = panels_.find(t)) {
             p->select = true;
@@ -114,18 +122,7 @@ EditorApp::EditorApp(const EditorOptions& options) : options_(options) {
 
 EditorApp::~EditorApp() {
     shutdown();
-    console_.uninstall();
-}
-
-void EditorApp::report(bool ok) {
-    if (!ok && !doc_.error().empty()) report_failure(doc_.error());
-}
-
-void EditorApp::request_add_child(NodeId parent) {
-    add_parent_ = parent;
-    class_filter_.clear();
-    dialog_ = Dialog::AddChild;
-    dialog_opened_ = false;
+    ctl_.console().uninstall();
 }
 
 bool EditorApp::start(std::string& error) {
@@ -135,23 +132,19 @@ bool EditorApp::start(std::string& error) {
     if (!headless) {
         font_atlas_ = render::load_font_file(options_.font_path);
         if (!font_atlas_) LOG_WARN("No font ('{}'): scene text is not drawn", options_.font_path);
+        ctl_.set_font_atlas(font_atlas_ ? &*font_atlas_ : nullptr);
     }
-    if (!env_.open(options_.project, font_atlas_ ? &*font_atlas_ : nullptr, error)) return false;
-    doc_.set_registry(&env_.classes());
-    LOG_INFO("Project '{}': {} node classes", env_.project().name, env_.classes().classes().size());
-    assets_.open(env_.project_dir());
-    if (!input_map_.load(env_.project_dir(), error)) return false;
+    if (!ctl_.env().open(options_.project, font_atlas_ ? &*font_atlas_ : nullptr, error)) return false;
+    ctl_.doc().set_registry(&ctl_.env().classes());
+    LOG_INFO("Project '{}': {} node classes", ctl_.env().project().name, ctl_.env().classes().classes().size());
+    ctl_.assets().open(ctl_.env().project_dir());
+    if (!ctl_.input_map().load(ctl_.env().project_dir(), error)) return false;
     restore_user_state();
     open_initial_scene();
     rebuild_actions();
-    if (options_.tool) tool_ = *options_.tool;
+    if (options_.tool) ctl_.set_tool(*options_.tool);
     if (!options_.select_paths.empty()) {
-        std::vector<NodeId> ids;
-        for (const std::string& path : options_.select_paths) {
-            if (const NodeId id = doc_.model().find_path(path); id != 0) ids.push_back(id);
-            else LOG_WARN("--select: no node at '{}'", path);
-        }
-        doc_.select_set(ids);
+        select_paths(ctl_, options_.select_paths);
     }
     if (options_.palette) palette_request_ = true, palette_query_ = *options_.palette;
     return true;
@@ -161,42 +154,42 @@ void EditorApp::open_initial_scene() {
     // 1. Explicit CLI argument --scene <path>
     if (!options_.scene.empty()) {
         std::string error;
-        const fs::path path = env_.resolve(options_.scene);
-        if (doc_.open(path, error)) {
-            LOG_INFO("Opened '{}'", env_.relative(path));
-            settings_.set_last_scene(env_.project_dir(), env_.relative(path));
+        const fs::path path = ctl_.env().resolve(options_.scene);
+        if (ctl_.doc().open(path, error)) {
+            LOG_INFO("Opened '{}'", ctl_.env().relative(path));
+            ctl_.settings().set_last_scene(ctl_.env().project_dir(), ctl_.env().relative(path));
             save_user_state();
             return;
         }
         LOG_ERROR("{}", error);
         report_failure(error);
-        doc_.new_scene();
+        ctl_.doc().new_scene();
         return;
     }
 
     // 2. Remembered per-project last scene
-    const std::string remembered = settings_.last_scene(env_.project_dir());
+    const std::string remembered = ctl_.settings().last_scene(ctl_.env().project_dir());
     if (!remembered.empty()) {
-        const fs::path path = env_.resolve(remembered);
+        const fs::path path = ctl_.env().resolve(remembered);
         std::error_code ec;
         if (fs::exists(path, ec)) {
             std::string error;
-            if (doc_.open(path, error)) {
-                LOG_INFO("Opened '{}'", env_.relative(path));
+            if (ctl_.doc().open(path, error)) {
+                LOG_INFO("Opened '{}'", ctl_.env().relative(path));
                 return;
             }
         }
     }
 
     // 3. project.toml main_scene
-    if (!env_.project().main_scene.empty()) {
-        const fs::path path = env_.resolve(env_.project().main_scene);
+    if (!ctl_.env().project().main_scene.empty()) {
+        const fs::path path = ctl_.env().resolve(ctl_.env().project().main_scene);
         std::error_code ec;
         if (fs::exists(path, ec)) {
             std::string error;
-            if (doc_.open(path, error)) {
-                LOG_INFO("Opened '{}'", env_.relative(path));
-                settings_.set_last_scene(env_.project_dir(), env_.relative(path));
+            if (ctl_.doc().open(path, error)) {
+                LOG_INFO("Opened '{}'", ctl_.env().relative(path));
+                ctl_.settings().set_last_scene(ctl_.env().project_dir(), ctl_.env().relative(path));
                 save_user_state();
                 return;
             }
@@ -206,13 +199,13 @@ void EditorApp::open_initial_scene() {
     // 4. Convention scenes: scenes/main.scene, scenes/level.scene, main.scene
     const std::string conventions[] = {"scenes/main.scene", "scenes/level.scene", "main.scene"};
     for (const auto& candidate : conventions) {
-        const fs::path path = env_.resolve(candidate);
+        const fs::path path = ctl_.env().resolve(candidate);
         std::error_code ec;
         if (fs::exists(path, ec)) {
             std::string error;
-            if (doc_.open(path, error)) {
-                LOG_INFO("Opened '{}'", env_.relative(path));
-                settings_.set_last_scene(env_.project_dir(), env_.relative(path));
+            if (ctl_.doc().open(path, error)) {
+                LOG_INFO("Opened '{}'", ctl_.env().relative(path));
+                ctl_.settings().set_last_scene(ctl_.env().project_dir(), ctl_.env().relative(path));
                 save_user_state();
                 return;
             }
@@ -222,7 +215,7 @@ void EditorApp::open_initial_scene() {
     // 5. First .scene found in scenes/ directory or project root
     std::vector<fs::path> candidate_scenes;
     std::error_code ec;
-    const fs::path scenes_dir = env_.project_dir() / "scenes";
+    const fs::path scenes_dir = ctl_.env().project_dir() / "scenes";
     if (fs::exists(scenes_dir, ec) && fs::is_directory(scenes_dir, ec)) {
         for (const auto& entry : fs::directory_iterator(scenes_dir, ec)) {
             if (entry.is_regular_file() && entry.path().extension() == ".scene") {
@@ -231,7 +224,7 @@ void EditorApp::open_initial_scene() {
         }
     }
     if (candidate_scenes.empty()) {
-        for (const auto& entry : fs::directory_iterator(env_.project_dir(), ec)) {
+        for (const auto& entry : fs::directory_iterator(ctl_.env().project_dir(), ec)) {
             if (entry.is_regular_file() && entry.path().extension() == ".scene") {
                 candidate_scenes.push_back(entry.path());
             }
@@ -240,70 +233,38 @@ void EditorApp::open_initial_scene() {
     std::sort(candidate_scenes.begin(), candidate_scenes.end());
     for (const auto& p : candidate_scenes) {
         std::string error;
-        if (doc_.open(p, error)) {
-            LOG_INFO("Opened '{}'", env_.relative(p));
-            settings_.set_last_scene(env_.project_dir(), env_.relative(p));
+        if (ctl_.doc().open(p, error)) {
+            LOG_INFO("Opened '{}'", ctl_.env().relative(p));
+            ctl_.settings().set_last_scene(ctl_.env().project_dir(), ctl_.env().relative(p));
             save_user_state();
             return;
         }
     }
 
     // 6. Fallback: blank scene
-    doc_.new_scene();
+    ctl_.doc().new_scene();
 }
 
 int EditorApp::run_script() {
-    bool ok = false;
-    const std::string text = read_file(options_.script_commands, ok);
-    if (!ok) {
-        LOG_ERROR("--script-commands: can't read '{}'", options_.script_commands);
-        return EXIT_FAILURE;
-    }
-    CommandContext context{doc_, env_, &play_, &input_map_, &assets_, options_.font_path, options_.jobs};
-    const ScriptResult r = run_command_script(text, context);
-    if (!r.ok) {
-        LOG_ERROR("{}:{}: {}", options_.script_commands, r.line, r.error);
-        return EXIT_FAILURE;
-    }
-    if (doc_.dirty()) {
-        std::string error;
-        if (!doc_.save(error)) {
-            LOG_ERROR("--script-commands: {}", error);
-            return EXIT_FAILURE;
-        }
-        LOG_INFO("Saved '{}'", env_.relative(doc_.path()));
-        assets_.poll(); // our own write is not an external change
-    }
-    if (input_map_.dirty()) LOG_WARN("--script-commands: the input map was edited but not saved ('input save')");
-    LOG_INFO("--script-commands: {} command(s) applied, {} node(s) in '{}'", r.commands, doc_.model().size(),
-             env_.relative(doc_.path()));
-    return EXIT_SUCCESS;
+    return run_script_file(ctl_, options_.script_commands, options_.font_path, options_.jobs, &ui_steps_);
 }
 
 int EditorApp::run_replay_verify() {
-    std::string error;
-    auto replay = load_replay(platform::path_from_utf8(options_.replay_verify), error);
-    if (!replay) {
-        LOG_ERROR("--replay-verify: {}", error);
-        return EXIT_FAILURE;
-    }
-    script::SessionOptions base;
-    base.font_path = options_.font_path;
-    base.jobs = options_.jobs;
-    const script::ReplayCheck c = script::verify_replay(platform::path_from_utf8(options_.project), *replay, base);
-    if (!c.error.empty()) {
-        LOG_ERROR("--replay-verify: {}", c.error);
-        return EXIT_FAILURE;
-    }
-    if (c.first_mismatch) {
-        LOG_ERROR("--replay-verify: state hash mismatch at tick {} of {}: recorded {:016x}, got {:016x}",
-                  *c.first_mismatch, replay->ticks(), c.expected, c.actual);
-        return EXIT_FAILURE;
-    }
-    LOG_INFO("--replay-verify: {} ticks replayed on {} thread(s), all {} state hashes match (final state hash {:016x})",
-             c.ticks, jobs::default_jobs().thread_count(), c.compared, c.final_hash);
-    return EXIT_SUCCESS;
+    return run_replay_verify_file(options_.project, options_.replay_verify, options_.font_path, options_.jobs);
 }
+
+namespace {
+
+void (*g_backend_create_window)(ImGuiViewport*) = nullptr;
+
+void create_window_keep_context(ImGuiViewport* viewport) {
+    SDL_Window* window = SDL_GL_GetCurrentWindow();
+    SDL_GLContext context = SDL_GL_GetCurrentContext();
+    g_backend_create_window(viewport);
+    SDL_GL_MakeCurrent(window, context);
+}
+
+} // namespace
 
 bool EditorApp::open_window(std::string& error) {
     auto try_open = [&](rhi::Backend backend) -> bool {
@@ -317,7 +278,7 @@ bool EditorApp::open_window(std::string& error) {
         rhi::DeviceOptions o;
         o.vsync = options_.vsync;
         // The editor shows what the game will look like: gated to its tier.
-        o.tier = env_.project().render_tier;
+        o.tier = ctl_.env().project().render_tier;
         device_ = rhi::create_device(backend, window_, o);
         if (!device_) window_.destroy();
         return device_ != nullptr;
@@ -330,10 +291,12 @@ bool EditorApp::open_window(std::string& error) {
         LOG_WARN("Vulkan unavailable, falling back to OpenGL");
     }
     LOG_INFO("Editor renders with {} ({})", rhi::backend_name(device_->info().backend), device_->info().renderer);
-    if (!shapes_.init(*device_, 4096) || !lights_.init(*device_) || !text_.init(*device_) || !meshes_.init(*device_)) {
+    if (!shapes_.init(*device_, 4096) || !lights_.init(*device_) || !text_.init(*device_) || !meshes_.init(*device_) ||
+        !sprite_batcher_.init(*device_)) {
         error = "could not create the scene renderers";
         return false;
     }
+    sprite_library_.init(device_.get());
     if (font_atlas_) font_ = text_.add_font(*font_atlas_);
 
     IMGUI_CHECKVERSION();
@@ -350,7 +313,7 @@ bool EditorApp::open_window(std::string& error) {
     theme::load_fonts(options_.font_path);
     // The splash, unless asked not to; screenshots show it only with --splash.
     const bool want_splash = options_.splash == SplashMode::On ||
-                             (options_.splash == SplashMode::Auto && options_.screenshot.empty());
+                             (options_.splash == SplashMode::Auto && options_.screenshot.empty() && ui_steps_.empty());
     if (want_splash) {
         const std::string brand_dir = platform::utf8(platform::find_asset("brand", CUERVO_BRAND_DIR));
         const std::string display_font = platform::utf8(platform::find_asset("fonts/Outfit-Medium.ttf", CUERVO_FONT_DISPLAY));
@@ -360,7 +323,25 @@ bool EditorApp::open_window(std::string& error) {
             LOG_WARN("Splash: the brand mark could not be loaded from '{}'", brand_dir);
         }
     }
-    if (!ImGui_ImplSDL3_InitForOther(window_.native())) {
+    // Undockable panels (DESIGN.md 4.13, 11.7b): ImGui's multi-viewport needs one RHI surface per
+    // OS window, which only devices with Feature::MultiSurface have. The SDL3 backend must know
+    // the graphics API so the windows it creates can present (Vulkan / OpenGL flags).
+    const rhi::Backend backend = device_->info().backend;
+    const bool multi = device_->info().supports(rhi::Feature::MultiSurface) && !options_.no_viewports;
+    bool sdl_ok = false;
+    // The SDL3 backend offers platform viewports only where it can read the global mouse state
+    // (X11, Windows, macOS); Wayland compositors don't let an app place its windows, so panels
+    // stay inside the editor window there. The offscreen driver (tests) is allowed: it has no
+    // compositor and honors window positions.
+    const char* video_driver = SDL_GetCurrentVideoDriver();
+    if (multi && video_driver != nullptr && std::string_view(video_driver) == "offscreen") {
+        io.BackendFlags |= ImGuiBackendFlags_PlatformHasViewports;
+    }
+    // (Set before the backend starts: it installs its window callbacks only when the flag is on.)
+    if (multi && backend == rhi::Backend::Vulkan) sdl_ok = ImGui_ImplSDL3_InitForVulkan(window_.native());
+    else if (multi && backend == rhi::Backend::OpenGL) sdl_ok = ImGui_ImplSDL3_InitForOpenGL(window_.native(), SDL_GL_GetCurrentContext());
+    else sdl_ok = ImGui_ImplSDL3_InitForOther(window_.native());
+    if (!sdl_ok) {
         error = "ImGui SDL3 backend failed to start";
         return false;
     }
@@ -369,12 +350,34 @@ bool EditorApp::open_window(std::string& error) {
         error = "ImGui renderer failed to start";
         return false;
     }
+    const bool platform_ok = (io.BackendFlags & ImGuiBackendFlags_PlatformHasViewports) != 0;
+    if (multi && platform_ok && imgui_renderer_.enable_viewports()) {
+        viewports_on_ = true;
+        io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+        // The editor draws each OS window through the RHI surface (imgui_rhi.cpp); the SDL3
+        // backend's own GL make-current / swap would fight the device's contexts.
+        ImGui::GetPlatformIO().Platform_RenderWindow = nullptr;
+        ImGui::GetPlatformIO().Platform_SwapBuffers = nullptr;
+        if (backend == rhi::Backend::OpenGL) {
+            // The backend makes the new window's context current when it is done; the device
+            // expects its own back.
+            g_backend_create_window = ImGui::GetPlatformIO().Platform_CreateWindow;
+            ImGui::GetPlatformIO().Platform_CreateWindow = create_window_keep_context;
+        }
+    } else {
+        LOG_INFO("Panels stay inside the editor window ({})",
+                 options_.no_viewports                                   ? "--no-viewports"
+                 : !device_->info().supports(rhi::Feature::MultiSurface) ? "this device has no multi-window support"
+                                                                         : "this window system cannot place app windows");
+    }
     return true;
 }
 
 void EditorApp::shutdown() {
     if (imgui_ready_) save_user_state();
     if (imgui_ready_) {
+        // Surfaces go before their windows, and before the renderer that owns the pipeline.
+        if (viewports_on_) ImGui::DestroyPlatformWindows();
         imgui_renderer_.shutdown();
         ImGui_ImplSDL3_Shutdown();
         ImGui::DestroyContext();
@@ -382,6 +385,8 @@ void EditorApp::shutdown() {
     }
     splash_.shutdown();
     text_.shutdown();
+    sprite_library_.shutdown();
+    sprite_batcher_.shutdown();
     meshes_.shutdown();
     lights_.shutdown();
     shapes_.shutdown();
@@ -398,21 +403,21 @@ int EditorApp::run() {
     }
     if (!options_.script_commands.empty()) {
         const int code = run_script();
-        if (code != EXIT_SUCCESS || options_.screenshot.empty()) return code;
+        if (code != EXIT_SUCCESS || (options_.screenshot.empty() && ui_steps_.empty())) return code;
     }
     if (!open_window(error)) {
         LOG_ERROR("{}", error);
         return EXIT_FAILURE;
     }
     const double start_time = now_seconds();
-    while (running_) {
+    while (running_ && !ctl_.switch_requested()) {
         frame();
         if (options_.quit_after > 0.0 && now_seconds() - start_time >= options_.quit_after) {
             LOG_INFO("--quit-after reached ({} frames)", frames_);
             running_ = false;
         }
     }
-    return EXIT_SUCCESS;
+    return ui_failed_ ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
 void EditorApp::frame() {
@@ -430,27 +435,40 @@ void EditorApp::frame() {
             splash_state_ = SplashState::Off;
             continue;
         }
+        // Files dragged in from the OS: collected until the drop completes, then imported.
+        if (event.type == SDL_EVENT_DROP_BEGIN) dropped_.clear();
+        if (event.type == SDL_EVENT_DROP_FILE && event.drop.data != nullptr) {
+            dropped_.push_back(platform::path_from_utf8(event.drop.data));
+        }
+        if (event.type == SDL_EVENT_DROP_COMPLETE && !dropped_.empty()) {
+            import_dropped_files(std::exchange(dropped_, {}));
+        }
         ImGui_ImplSDL3_ProcessEvent(&event);
         // The same events drive the game's devices (play-in-editor) and the
         // input map's "press a key" capture.
         window_.handle_event(event, devices_);
-        if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) running_ = false;
+        // A secondary window's close request belongs to ImGui (it docks the panel back or hides it).
+        if (event.type == SDL_EVENT_QUIT ||
+            (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(window_.native()))) {
+            running_ = false;
+        }
     }
     if (now - last_poll_ >= 1.0) {
         last_poll_ = now;
         poll_assets();
     }
     // The scene view shows the document as of this frame's start.
-    if (preview_revision_ != doc_.revision()) {
-        preview_revision_ = doc_.revision();
-        env_.rebuild_preview(doc_.model().to_doc());
+    if (preview_revision_ != ctl_.doc().revision()) {
+        preview_revision_ = ctl_.doc().revision();
+        ctl_.env().rebuild_preview(ctl_.doc().model().to_doc());
     }
+    ctl_.update_ready_preview();
     // The timeline's scrub poses the fresh preview (every frame: cheap, and
     // it survives the rebuilds edits cause).
-    if (anim_preview_.on && !play_.active()) {
-        const int index = doc_.model().doc_index(anim_preview_.player);
+    if (anim_preview_.on && !ctl_.play().active()) {
+        const int index = ctl_.doc().model().doc_index(anim_preview_.player);
         std::string why;
-        if (index < 0 || !env_.preview_animation(static_cast<std::size_t>(index), anim_preview_.clip,
+        if (index < 0 || !ctl_.env().preview_animation(static_cast<std::size_t>(index), anim_preview_.clip,
                                                  static_cast<float>(anim_preview_.tick), why)) {
             anim_preview_.on = false;
             refresh_preview();
@@ -461,16 +479,18 @@ void EditorApp::frame() {
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
     clock_ = now;
+    ctl_.set_clock(now);
     handle_shortcuts();
     draw_menu_bar();
     draw_docks();
+    apply_prompt();
     draw_dialogs();
     draw_toolbar();
     draw_palette();
     draw_messages();
     // Continuous edits end when nothing is held: the next edit is a new
     // undo step (backs up widgets whose release isn't seen, e.g. pickers).
-    if (!ImGui::IsAnyItemActive() && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) doc_.seal();
+    if (!ImGui::IsAnyItemActive() && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) ctl_.doc().seal();
     // The game ticks after the UI (which may have paused or stepped it), so
     // this frame draws the latest tick. Screenshots freeze it where a
     // command script left it.
@@ -479,6 +499,7 @@ void EditorApp::frame() {
         update_play(seconds);
     }
     ImGui::Render();
+    if (viewports_on_) ImGui::UpdatePlatformWindows(); // creates / moves / closes the OS windows
 
     int w = 0;
     int h = 0;
@@ -491,9 +512,61 @@ void EditorApp::frame() {
     const bool capture = !options_.screenshot.empty() && frames_ >= static_cast<std::uint64_t>(options_.screenshot_frame);
     if (capture) device_->capture_frame(options_.screenshot);
     device_->end_frame();
+    // The undocked panels' windows, after the main frame is presented (frames never overlap).
+    if (viewports_on_) ImGui::RenderPlatformWindowsDefault();
+    run_ui_steps();
     if (capture) {
         LOG_INFO("Screenshot written to '{}' ({} frames)", options_.screenshot, frames_);
         running_ = false;
+    }
+}
+
+// Window steps of a command script (undock, save-layout, expect-viewports): one every few frames
+// so ImGui has made the OS window (or dropped it) before the next step looks.
+void EditorApp::run_ui_steps() {
+    if (ui_steps_.empty() || frames_ < ui_step_wait_ || frames_ < 8) return;
+    if (ui_step_next_ >= ui_steps_.size()) {
+        running_ = false;
+        return;
+    }
+    const UiStep& step = ui_steps_[ui_step_next_++];
+    ui_step_wait_ = frames_ + 4;
+    auto fail = [&](const std::string& why) {
+        LOG_ERROR("--script-commands: {}", why);
+        ui_failed_ = true;
+        running_ = false;
+    };
+    switch (step.kind) {
+    case UiStep::Kind::Undock:
+        if (!viewports_on_) return fail("undock: this device cannot open a second window (see the log)");
+        if (panels_.find(step.name) == nullptr) return fail(std::format("undock: there is no panel '{}'", step.name));
+        undock_requests_[step.name] = {step.x, step.y};
+        break;
+    case UiStep::Kind::SaveLayout: {
+        std::string error;
+        if (!layouts_.save_as(step.name, current_layout(), error)) return fail("save-layout: " + error);
+        if (!layouts_.save(LayoutStore::user_file(), error)) return fail("save-layout: " + error);
+        LOG_INFO("Layout '{}' saved ({} undocked window(s))", step.name, dock_viewports(current_layout().dock).size());
+        break;
+    }
+    case UiStep::Kind::ExpectViewport: {
+        const ImGuiWindow* w = ImGui::FindWindowByName(step.name.c_str());
+        if (w == nullptr || w->Viewport == nullptr || w->Viewport == ImGui::GetMainViewport()) {
+            return fail(std::format("expect-viewport: '{}' is not in a window of its own", step.name));
+        }
+        if (std::abs(w->Pos.x - step.x) > 1.0f || std::abs(w->Pos.y - step.y) > 1.0f) {
+            return fail(std::format("expect-viewport: '{}' is at {},{}, expected {},{}", step.name, w->Pos.x, w->Pos.y,
+                                    step.x, step.y));
+        }
+        LOG_INFO("expect-viewport {}: ok", step.name);
+        break;
+    }
+    case UiStep::Kind::ExpectViewports: {
+        const int have = viewports_on_ ? ImGui::GetPlatformIO().Viewports.Size - 1 : 0;
+        if (have != step.count) return fail(std::format("expect-viewports: expected {} extra window(s), got {}", step.count, have));
+        LOG_INFO("expect-viewports {}: ok", have);
+        break;
+    }
     }
 }
 
@@ -513,31 +586,31 @@ void EditorApp::render_splash(ivec2 size, double now) {
         if (t > hold) opacity = static_cast<float>(1.0 - (t - hold) / fade);
     }
     splash_.render(*device_, shapes_, text_, size, theme::current(), opacity,
-                   std::format("Engine Editor  ·  {}", env_.project().name));
+                   std::format("Engine Editor  ·  {}", ctl_.env().project().name));
 }
 
 void EditorApp::update_play(double seconds) {
-    if (play_.active()) {
+    if (ctl_.play().active()) {
         // The game reads the devices only while the view has the input focus.
         static DeviceState none;
         none = DeviceState{};
         DeviceState& source = game_input_ ? devices_ : none;
         if (game_input_) last_pointer_ = game_pointer();
-        play_.update(seconds, source, last_pointer_);
-        if (play_.panic() && !panic_seen_) {
+        ctl_.play().update(seconds, source, last_pointer_);
+        if (ctl_.play().panic() && !panic_seen_) {
             panic_seen_ = true;
             if (Panel* p = panels_.find("Debugger")) p->select = true;
         }
-        if (!play_.panic()) panic_seen_ = false;
+        if (!ctl_.play().panic()) panic_seen_ = false;
     }
     // Taps the game didn't consume this frame (no tick ran, or the game
     // doesn't have the input) don't linger into later ticks.
-    if (!(play_.active() && game_input_)) devices_.clear_transients();
+    if (!(ctl_.play().active() && game_input_)) devices_.clear_transients();
 }
 
 vec2 EditorApp::game_pointer() const {
     if (game_rect_.width <= 0 || game_rect_.height <= 0) return last_pointer_;
-    const render::ViewportFit fit = render::fit_viewport(render::ScaleMode::Fit, env_.project().virtual_size,
+    const render::ViewportFit fit = render::fit_viewport(render::ScaleMode::Fit, ctl_.env().project().virtual_size,
                                                          {game_rect_.width, game_rect_.height});
     const vec2 local = devices_.mouse_position - vec2{static_cast<float>(game_rect_.x), static_cast<float>(game_rect_.y)};
     return render::framebuffer_to_virtual(fit, local);
@@ -545,100 +618,69 @@ vec2 EditorApp::game_pointer() const {
 
 void EditorApp::set_game_view(rhi::Rect rect, bool has_input) {
     game_rect_ = rect;
-    game_input_ = has_input && play_.active();
+    game_input_ = has_input && ctl_.play().active();
 }
 
 script::SessionOptions EditorApp::play_options(bool current_scene) const {
-    script::SessionOptions o;
-    o.dir = env_.project_dir();
-    o.font_path = options_.font_path;
-    o.jobs = options_.jobs;
-    const bool headless = platform::env_is("SDL_VIDEO_DRIVER", "offscreen");
-    o.audio_device = options_.audio && !headless && !platform::env_is("CUERVO_AUDIO", "null");
-    if (current_scene) {
-        o.scene = std::make_shared<const scene::SceneDoc>(doc_.model().to_doc());
-        o.scene_label = doc_.has_path() ? env_.relative(doc_.path()) : std::string("(new scene)");
-    }
-    return o;
+    return ctl_.play_options(current_scene);
 }
 
 void EditorApp::start_play(bool current_scene, bool record) {
-    std::string error;
-    if (!play_.start(play_options(current_scene), error)) {
-        LOG_ERROR("Play: {}", error.empty() ? std::string("the game could not start") : error);
-        return;
-    }
-    if (record) play_.start_recording();
+    if (!ctl_.start_play(current_scene, record)) return;
     panic_seen_ = false;
     if (Panel* p = panels_.find("Scene View")) p->select = true;
 }
 
-void EditorApp::stop_play() { play_.stop(); }
+void EditorApp::stop_play() { ctl_.play().stop(); }
 
 void EditorApp::start_replay(const std::string& path) {
-    std::string error;
-    auto replay = load_replay(env_.resolve(path), error);
-    if (!replay || !play_.start_replay(play_options(false), std::move(*replay), error)) {
-        LOG_ERROR("Replay: {}", error);
-        return;
-    }
+    if (!ctl_.start_replay(path)) return;
     if (Panel* p = panels_.find("Replay")) p->select = true;
+}
+
+void EditorApp::import_dropped_files(const std::vector<std::filesystem::path>& files) {
+    const EditorController::ImportSummary sum = ctl_.import_files(files);
+    if (!sum.first_image.empty()) show_sprite_asset(sum.first_image);
+}
+
+void EditorApp::show_sprite_asset(std::string path) {
+    sprite_request_ = std::move(path);
+    if (Panel* p = panels_.find("Sprites")) {
+        p->visible = true;
+        p->select = true;
+    }
+}
+
+render::SpriteRef EditorApp::sprite_preview(std::string_view asset, std::string_view frame) {
+    if (!sprite_vfs_ || sprite_vfs_dir_ != ctl_.env().project_dir()) {
+        sprite_vfs_ = assets::Vfs::dev(ctl_.env().project_dir());
+        sprite_vfs_dir_ = ctl_.env().project_dir();
+    }
+    return sprite_library_.resolve(*sprite_vfs_, asset, frame, render::SpriteFilter::Nearest, 1.0f);
 }
 
 void EditorApp::poll_assets() {
     std::vector<std::string> changed;
-    if (!assets_.poll(&changed)) return;
+    if (!ctl_.assets().poll(&changed)) return;
     bool scripts = false;
     for (const std::string& c : changed) {
         if (c.ends_with(".plm")) scripts = true;
-        if (doc_.has_path() && c == env_.relative(doc_.path()) && std::filesystem::exists(doc_.path())) {
-            LOG_WARN("'{}' changed on disk{}", c, doc_.dirty() ? " (the editor has unsaved changes to it)" : "");
+        // An image, atlas or SVG changed on disk: the library reloads it on next use.
+        if (c.ends_with(".png") || c.ends_with(".jpg") || c.ends_with(".qoi") || c.ends_with(".svg") ||
+            c.ends_with(".atlas") || c.ends_with(".catlas")) {
+            sprite_library_.shutdown();
+            sprite_library_.init(device_.get());
         }
-        if (c == "project.toml" && !input_map_.dirty()) {
+        if (ctl_.doc().has_path() && c == ctl_.env().relative(ctl_.doc().path()) && std::filesystem::exists(ctl_.doc().path())) {
+            LOG_WARN("'{}' changed on disk{}", c, ctl_.doc().dirty() ? " (the editor has unsaved changes to it)" : "");
+        }
+        if (c == "project.toml" && !ctl_.input_map().dirty()) {
             std::string error;
-            if (!input_map_.load(env_.project_dir(), error)) LOG_WARN("{}", error);
+            if (!ctl_.input_map().load(ctl_.env().project_dir(), error)) LOG_WARN("{}", error);
         }
     }
     // Playing: the session hot-reloads by itself (PlayController::update).
-    if (scripts && !play_.active()) reload_project_scripts();
-}
-
-void EditorApp::reload_project_scripts() {
-    ProjectEnv fresh;
-    std::string error;
-    const render::FontAtlas* font = font_atlas_ ? &*font_atlas_ : nullptr;
-    if (!fresh.open(env_.project_dir(), font, error)) {
-        LOG_ERROR("Scripts: {}", error);
-        return;
-    }
-    if (!env_.open(env_.project_dir(), font, error)) {
-        LOG_ERROR("Scripts: {}", error);
-        return;
-    }
-    doc_.set_registry(&env_.classes());
-    class_scripts_cache_.clear();
-    preview_revision_ = ~std::uint64_t{0}; // rebuild the scene view
-    LOG_INFO("Scripts recompiled: {} node classes", env_.classes().classes().size());
-    rebuild_actions();
-}
-
-void EditorApp::request_open_scene(const std::string& path) {
-    if (doc_.dirty()) {
-        pending_open_ = path;
-        dialog_ = Dialog::DiscardChanges;
-        dialog_opened_ = false;
-        return;
-    }
-    std::string error;
-    const std::filesystem::path p = env_.resolve(path);
-    if (doc_.open(p, error)) {
-        LOG_INFO("Opened '{}'", env_.relative(p));
-        settings_.set_last_scene(env_.project_dir(), env_.relative(p));
-        save_user_state();
-        frame_scene();
-    } else {
-        LOG_ERROR("{}", error);
-    }
+    if (scripts && !ctl_.play().active()) reload_project_scripts();
 }
 
 void EditorApp::open_location(const std::string& file, std::uint32_t line) {
@@ -649,21 +691,49 @@ void EditorApp::open_location(const std::string& file, std::uint32_t line) {
     reveal_asset(file);
     if (Panel* p = panels_.find("Assets")) p->select = true;
     const std::string where = line > 0 ? std::format("{}:{}", file, line) : file;
-    SDL_SetClipboardText(platform::utf8(env_.resolve(file)).c_str());
+    SDL_SetClipboardText(platform::utf8(ctl_.env().resolve(file)).c_str());
     if (file.ends_with(".plm") || file.ends_with(".txt") || file.ends_with(".toml") || file.ends_with(".json")) {
-        open_in_external_editor(env_.resolve(file), static_cast<int>(line));
+        open_in_external_editor(ctl_.env().resolve(file), static_cast<int>(line));
     }
     LOG_INFO("{} (path copied to the clipboard)", where);
 }
 
 void EditorApp::update_title() {
-    std::string title = std::format("{}{} \u2014 {} \u2014 Cuervo Engine Editor", doc_.dirty() ? "*" : "",
-                                    doc_.has_path() ? env_.relative(doc_.path()) : std::string("(new scene)"),
-                                    env_.project().name);
+    std::string title = std::format("{}{} \u2014 {} \u2014 Cuervo Engine Editor", ctl_.doc().dirty() ? "*" : "",
+                                    ctl_.doc().has_path() ? ctl_.env().relative(ctl_.doc().path()) : std::string("(new scene)"),
+                                    ctl_.env().project().name);
     if (title != title_) {
         title_ = title;
         SDL_SetWindowTitle(window_.native(), title_.c_str());
     }
+}
+
+// Maps the controller's pending question onto this UI's dialogs.
+void EditorApp::apply_prompt() {
+    const PendingPrompt p = ctl_.take_prompt();
+    switch (p.kind) {
+        case Prompt::None: return;
+        case Prompt::SaveAs: dialog_ = Dialog::SaveAs; break;
+        case Prompt::DiscardOpen:
+        case Prompt::DiscardLeave: dialog_ = Dialog::DiscardChanges; break;
+        case Prompt::AddChild:
+            add_parent_ = p.node;
+            class_filter_.clear();
+            dialog_ = Dialog::AddChild;
+            break;
+        case Prompt::AttachScript: {
+            attach_node_ = p.node;
+            dialog_ = Dialog::AttachScript;
+            attach_tab_ = 0;
+            attach_filter_.clear();
+            attach_error_.clear();
+            if (const ModelNode* n = ctl_.doc().model().get(p.node)) {
+                std::tie(new_script_class_, new_script_path_) = EditorController::suggest_script(n->name);
+            }
+            break;
+        }
+    }
+    dialog_opened_ = false;
 }
 
 void EditorApp::draw_dialogs() {
@@ -675,7 +745,7 @@ void EditorApp::draw_dialogs() {
         ImGui::OpenPopup(name);
         dialog_opened_ = true;
         if (dialog_ == Dialog::Open || dialog_ == Dialog::SaveAs) {
-            path_input_ = doc_.has_path() ? env_.relative(doc_.path()) : std::string("scenes/new.scene");
+            path_input_ = ctl_.doc().has_path() ? ctl_.env().relative(ctl_.doc().path()) : std::string("scenes/new.scene");
         }
     }
     if (dialog_ == Dialog::License) {
@@ -694,7 +764,7 @@ void EditorApp::draw_dialogs() {
         ImGui::CloseCurrentPopup();
         dialog_ = Dialog::None;
     };
-    const auto& classes = env_.classes().classes();
+    const auto& classes = ctl_.env().classes().classes();
     if (dialog_ == Dialog::License) {
         draw_license_dialog(license_view_);
         if (ImGui::Button("Close")) close();
@@ -717,33 +787,19 @@ void EditorApp::draw_dialogs() {
             close();
         }
     } else if (dialog_ == Dialog::DiscardChanges) {
-        if (discard_switch_) {
+        const bool leave = ctl_.discard_is_leave();
+        if (leave) {
             ImGui::TextWrapped("The scene has unsaved changes. Leave this project and discard them?");
         } else {
-            ImGui::TextWrapped("The scene has unsaved changes. Open '%s' and discard them?", pending_open_.c_str());
+            ImGui::TextWrapped("The scene has unsaved changes. Open '%s' and discard them?", ctl_.discard_path().c_str());
         }
-        if (ImGui::Button(discard_switch_ ? "Discard and Leave" : "Discard and Open")) {
-            if (discard_switch_) {
-                discard_switch_ = false;
-                switch_target_ = pending_open_;
-                switch_requested_ = true;
-                running_ = false;
-            } else {
-                std::string error;
-                const std::filesystem::path p = env_.resolve(pending_open_);
-                if (doc_.open(p, error)) {
-                    LOG_INFO("Opened '{}'", env_.relative(p));
-                    frame_scene();
-                } else {
-                    LOG_ERROR("{}", error);
-                    notify(message_open_failed(env_.relative(p), error, true));
-                }
-            }
+        if (ImGui::Button(leave ? "Discard and Leave" : "Discard and Open")) {
+            ctl_.confirm_discard();
             close();
         }
         ImGui::SameLine();
         if (ImGui::Button("Cancel")) {
-            discard_switch_ = false;
+            ctl_.cancel_discard();
             close();
         }
     } else if (dialog_ == Dialog::Open || dialog_ == Dialog::SaveAs) {
@@ -755,8 +811,8 @@ void EditorApp::draw_dialogs() {
         if (ImGui::BeginListBox("##scenes", {-1.0f, 150.0f})) {
             std::error_code ec;
             std::vector<std::string> found;
-            for (fs::recursive_directory_iterator it(env_.project_dir(), ec), end; !ec && it != end; it.increment(ec)) {
-                if (it->is_regular_file(ec) && it->path().extension() == ".scene") found.push_back(env_.relative(it->path()));
+            for (fs::recursive_directory_iterator it(ctl_.env().project_dir(), ec), end; !ec && it != end; it.increment(ec)) {
+                if (it->is_regular_file(ec) && it->path().extension() == ".scene") found.push_back(ctl_.env().relative(it->path()));
             }
             std::sort(found.begin(), found.end());
             for (const std::string& f : found) {
@@ -769,13 +825,13 @@ void EditorApp::draw_dialogs() {
         if (ImGui::Button("Cancel")) close();
         if (go && !path_input_.empty()) {
             std::string error;
-            const fs::path path = env_.resolve(path_input_);
-            const bool ok = dialog_ == Dialog::Open ? doc_.open(path, error) : doc_.save_as(path, error);
+            const fs::path path = ctl_.env().resolve(path_input_);
+            const bool ok = dialog_ == Dialog::Open ? ctl_.doc().open(path, error) : ctl_.doc().save_as(path, error);
             if (ok) {
-                LOG_INFO("{} '{}'", dialog_ == Dialog::Open ? "Opened" : "Saved", env_.relative(path));
-                assets_.poll();
+                LOG_INFO("{} '{}'", dialog_ == Dialog::Open ? "Opened" : "Saved", ctl_.env().relative(path));
+                ctl_.assets().poll();
                 if (dialog_ == Dialog::Open) frame_scene();
-                settings_.set_last_scene(env_.project_dir(), env_.relative(path));
+                ctl_.settings().set_last_scene(ctl_.env().project_dir(), ctl_.env().relative(path));
                 save_user_state();
                 close();
             } else {
@@ -792,18 +848,18 @@ void EditorApp::draw_dialogs() {
             }
             ImGui::EndCombo();
         }
-        if (doc_.dirty()) {
+        if (ctl_.doc().dirty()) {
             ImGui::TextColored(theme::im(theme::colors().warning), "Unsaved changes to the current scene will be lost.");
         }
         if (ImGui::Button("Create")) {
-            doc_.new_scene(new_root_class_, "root");
+            ctl_.doc().new_scene(new_root_class_, "root");
             frame_scene();
             close();
         }
         ImGui::SameLine();
         if (ImGui::Button("Cancel")) close();
     } else if (dialog_ == Dialog::AddChild) {
-        const ModelNode* parent = doc_.model().get(add_parent_ != 0 ? add_parent_ : doc_.model().root());
+        const ModelNode* parent = ctl_.doc().model().get(add_parent_ != 0 ? add_parent_ : ctl_.doc().model().root());
         ImGui::Text("Add a child to '%s':", parent != nullptr ? parent->name.c_str() : "?");
         ImGui::SetNextItemWidth(-1.0f);
         if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
@@ -833,16 +889,16 @@ void EditorApp::draw_dialogs() {
         if (!chosen.empty() && parent != nullptr) {
             // A positioned node appears in the middle of the scene view.
             std::vector<scene::Field> fields;
-            const ClassRegistry& reg = env_.classes();
+            const ClassRegistry& reg = ctl_.env().classes();
             if (reg.is_a(chosen, "Node2D") && !reg.is_a(chosen, "Control")) {
                 fields.push_back({"position", "vec2",
                                   scene::Value::vector({std::round(camera_.center.x()), std::round(camera_.center.y())})});
             }
-            report(doc_.add_child(parent->id, chosen, {}, std::move(fields)) != 0);
+            report(ctl_.doc().add_child(parent->id, chosen, {}, std::move(fields)) != 0);
             close();
         }
     } else if (dialog_ == Dialog::AttachScript) {
-        const ModelNode* n = doc_.model().get(attach_node_);
+        const ModelNode* n = ctl_.doc().model().get(attach_node_);
         if (n == nullptr) {
             close();
             return;
@@ -873,7 +929,7 @@ void EditorApp::draw_dialogs() {
                     if (ImGui::Selectable(label.c_str(), selected, ImGuiSelectableFlags_AllowDoubleClick)) {
                         chosen = cls_name;
                         if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                            if (doc_.change_type(attach_node_, chosen)) {
+                            if (ctl_.doc().change_type(attach_node_, chosen)) {
                                 notify_ok(std::format("Bound '{}' to '{}'.", chosen, n->name));
                                 close();
                             }
@@ -888,11 +944,11 @@ void EditorApp::draw_dialogs() {
             ImGui::BeginDisabled(chosen.empty());
             theme::push_primary_button();
             if (ImGui::Button("Attach") && !chosen.empty()) {
-                if (doc_.change_type(attach_node_, chosen)) {
+                if (ctl_.doc().change_type(attach_node_, chosen)) {
                     notify_ok(std::format("Bound '{}' to '{}'.", chosen, n->name));
                     close();
                 } else {
-                    attach_error_ = doc_.error();
+                    attach_error_ = ctl_.doc().error();
                 }
             }
             theme::pop_primary_button();
@@ -931,102 +987,45 @@ void EditorApp::draw_dialogs() {
     ImGui::EndPopup();
     if (!open) {
         dialog_ = Dialog::None;
-        discard_switch_ = false;
+        ctl_.cancel_discard();
     }
 }
 
 // ------------------------------------------------------------ scene view
 
 void EditorApp::render_game_view(rhi::Rect view) {
-    script::GameSession* session = play_.session();
-    device_->set_viewport(view);
-    device_->set_scissor(view);
-    device_->clear({0.0f, 0.0f, 0.0f, 1.0f});
-    if (session == nullptr) return;
-    const script::Project& project = session->project();
-    // Letterboxed like the runtime's `fit` scale mode, inside the view.
-    render::ViewportFit fit = render::fit_viewport(render::ScaleMode::Fit, project.virtual_size, {view.width, view.height});
-    fit.viewport.x += view.x;
-    fit.viewport.y += view.y;
-    device_->set_viewport(fit.viewport);
-    device_->set_scissor(fit.viewport);
-    device_->clear(project.clear_color);
-    shapes_.clear();
-    text_.clear();
-    const float pixels = std::min(fit.scale.x(), fit.scale.y());
-    const vec2 extent{static_cast<float>(project.virtual_size.x()), static_cast<float>(project.virtual_size.y())};
-    // The game's own view: its Camera2D composes with the screen transform.
-    meshes_.clear();
-    session->host().draw(script::make_draw_targets(shapes_, text_, font_, &vectors_, render::virtual_to_ndc(extent),
-                                                   pixels, true, &lights_));
+    script::GameSession* session = ctl_.play().session();
+    if (session == nullptr) {
+        device_->set_viewport(view);
+        device_->set_scissor(view);
+        device_->clear({0.0f, 0.0f, 0.0f, 1.0f});
+        return;
+    }
+    paint_game_view({device_.get(), &shapes_, &lights_, &text_, &meshes_, &vectors_, &sprite_batcher_, &sprite_library_, font_}, *session, view);
 }
 
 void EditorApp::render_scene_view(rhi::Rect view) {
     if (view.width <= 0 || view.height <= 0) return;
-    if (play_.active()) {
+    if (ctl_.play().active()) {
         render_game_view(view);
         return;
     }
-    device_->set_viewport(view);
-    device_->set_scissor(view);
-    // Around the game's screen: the theme's subtle page color.
-    const brand::ThemeColors& ui = theme::colors();
-    device_->clear(ui.bg_subtle);
-    const vec2 size{static_cast<float>(view.width), static_cast<float>(view.height)};
-    const Affine2 world_to_ndc = camera_.world_to_ndc(size);
-    const float upp = camera_.world_units_per_pixel();
-    shapes_.clear();
-    text_.clear();
-
-    // The game's screen (virtual coordinates) in its clear color.
-    const vec2 screen = env_.virtual_size();
-    shapes_.rounded_rect(screen * 0.5f, screen * 0.5f, 0.0f, 0.0f, env_.project().clear_color);
-    shapes_.flush(world_to_ndc, upp);
-
-    // The scene itself, drawn by its nodes' draw() exactly as in the game.
-    if (env_.preview_ok() && !env_.host().panicked()) {
-#if CUERVO_FEATURE_PHYSICS
-        env_.host().physics_world().set_editor_debug_shapes(collision_shapes_);
-#endif
-        // The editor's camera, not the scene's Camera2D (cameras off).
-        meshes_.clear();
-        env_.host().draw(script::make_draw_targets(shapes_, text_, font_, &vectors_, world_to_ndc,
-                                                   upp > 0.0f ? 1.0f / upp : 1.0f, false,
-                                                   preview_lighting_ ? &lights_ : nullptr));
-        if (env_.host().panicked()) LOG_WARN("scene view: {}", env_.host().error());
+    // The painter is shared with the RmlUi shell (scene_painter.hpp); the ImGui panel draws its own overlay.
+    ScenePaintParams p;
+    p.virtual_size = ctl_.env().virtual_size();
+    p.clear_color = ctl_.env().project().clear_color;
+    p.camera = camera_;
+    p.colors = &theme::colors();
+    p.collision_shapes = ctl_.collision_shapes();
+    p.lighting = ctl_.preview_lighting();
+    // With the ready() preview on and started, that session is drawn (the edit-time one still serves picking).
+    if (ctl_.ready_preview_on() && ctl_.ready_preview().active() && !ctl_.ready_preview().panicked()) {
+        p.drawn = &ctl_.ready_preview().session()->host();
+    } else if (ctl_.env().preview_ok()) {
+        p.drawn = &ctl_.env().host();
     }
-    shapes_.flush(world_to_ndc, upp);
-    text_.flush(world_to_ndc);
-
-    // A faint grid over the scene (a level's backdrop would hide one drawn
-    // under it), in world units, lines one pixel wide at any zoom.
-    const vec2 lo = camera_.screen_to_world({0.0f, 0.0f}, {0.0f, 0.0f}, size);
-    const vec2 hi = camera_.screen_to_world(size, {0.0f, 0.0f}, size);
-    const float step = grid_step(camera_.zoom);
-    const float half_px = 0.5f * upp;
-    const rhi::Color minor = brand::with_alpha(ui.text_muted, 0.08f);
-    const rhi::Color major = brand::with_alpha(ui.text_muted, 0.18f);
-    const rhi::Color axis = brand::with_alpha(ui.info, 0.55f);
-    const vec2 mid = (lo + hi) * 0.5f;
-    const vec2 half_extent = (hi - lo) * 0.5f;
-    for (float x = std::floor(lo.x() / step) * step; x <= hi.x(); x += step) {
-        const bool is_major = std::fmod(std::abs(x), step * 4.0f) < 0.5f * step;
-        shapes_.rounded_rect({x, mid.y()}, {half_px, half_extent.y()}, 0.0f, 0.0f,
-                             x == 0.0f ? axis : (is_major ? major : minor));
-    }
-    for (float y = std::floor(lo.y() / step) * step; y <= hi.y(); y += step) {
-        const bool is_major = std::fmod(std::abs(y), step * 4.0f) < 0.5f * step;
-        shapes_.rounded_rect({mid.x(), y}, {half_extent.x(), half_px}, 0.0f, 0.0f,
-                             y == 0.0f ? axis : (is_major ? major : minor));
-    }
-    // The screen's frame on top of the grid.
-    const rhi::Color frame = brand::with_alpha(ui.accent, 0.9f);
-    const float w = 1.5f * upp;
-    shapes_.rounded_rect({screen.x() * 0.5f, 0.0f}, {screen.x() * 0.5f + w, w}, 0.0f, 0.0f, frame);
-    shapes_.rounded_rect({screen.x() * 0.5f, screen.y()}, {screen.x() * 0.5f + w, w}, 0.0f, 0.0f, frame);
-    shapes_.rounded_rect({0.0f, screen.y() * 0.5f}, {w, screen.y() * 0.5f + w}, 0.0f, 0.0f, frame);
-    shapes_.rounded_rect({screen.x(), screen.y() * 0.5f}, {w, screen.y() * 0.5f + w}, 0.0f, 0.0f, frame);
-    shapes_.flush(world_to_ndc, upp);
+    paint_scene_view({device_.get(), &shapes_, &lights_, &text_, &meshes_, &vectors_, &sprite_batcher_, &sprite_library_, font_}, p,
+                     view);
 }
 
 // ------------------------------------------------------------ entry
@@ -1096,314 +1095,6 @@ int run_editor(const EditorOptions& options) {
 void EditorApp::queue_scene_view(ImDrawList* list, rhi::Rect rect) {
     SceneViewCallback data{this, rect};
     list->AddCallback(&scene_view_callback, &data, sizeof(data)); // copied into the draw list
-}
-
-bool EditorApp::open_in_external_editor(const fs::path& path, int line) {
-    if (path.empty()) return false;
-    std::error_code ec;
-    const fs::path abs_path = fs::absolute(path, ec);
-    const std::string path_str = platform::utf8(abs_path);
-
-    std::string editor;
-    if (const auto e = cuervo::platform::env("CUERVO_EDITOR"); e && !e->empty()) editor = *e;
-    else if (const auto v = cuervo::platform::env("VISUAL"); v && !v->empty()) editor = *v;
-    else if (const auto ed = cuervo::platform::env("EDITOR"); ed && !ed->empty()) editor = *ed;
-
-    std::string command;
-    if (!editor.empty()) {
-        std::string ed_lower = editor;
-        for (char& c : ed_lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-
-        if (ed_lower.find("code") != std::string::npos || ed_lower.find("cursor") != std::string::npos ||
-            ed_lower.find("subl") != std::string::npos) {
-            if (line > 0) {
-                command = std::format("{} -g \"{}:{}\"", editor, path_str, line);
-            } else {
-                command = std::format("{} \"{}\"", editor, path_str);
-            }
-        } else if (ed_lower.find("vim") != std::string::npos || ed_lower.find("nvim") != std::string::npos ||
-                   ed_lower.find("nano") != std::string::npos || ed_lower.find("emacs") != std::string::npos ||
-                   ed_lower.find("gedit") != std::string::npos || ed_lower.find("kate") != std::string::npos) {
-            if (line > 0) {
-                command = std::format("{} +{} \"{}\"", editor, line, path_str);
-            } else {
-                command = std::format("{} \"{}\"", editor, path_str);
-            }
-        } else {
-            if (line > 0) {
-                command = std::format("{} \"{}:{}\"", editor, path_str, line);
-            } else {
-                command = std::format("{} \"{}\"", editor, path_str);
-            }
-        }
-    } else {
-#if defined(_WIN32)
-        command = std::format("start \"\" \"{}\"", path_str);
-#elif defined(__APPLE__)
-        command = std::format("open \"{}\"", path_str);
-#else
-        if (std::system("which code >/dev/null 2>&1") == 0) {
-            if (line > 0) {
-                command = std::format("code -g \"{}:{}\"", path_str, line);
-            } else {
-                command = std::format("code \"{}\"", path_str);
-            }
-        } else if (std::system("which cursor >/dev/null 2>&1") == 0) {
-            if (line > 0) {
-                command = std::format("cursor -g \"{}:{}\"", path_str, line);
-            } else {
-                command = std::format("cursor \"{}\"", path_str);
-            }
-        } else {
-            command = std::format("xdg-open \"{}\"", path_str);
-        }
-#endif
-    }
-
-#if defined(_WIN32)
-    const std::string bg_cmd = command;
-    LOG_INFO("Opening external editor: {}", command);
-    const int res = std::system(bg_cmd.c_str());
-    return res == 0;
-#else
-    const std::string bg_cmd = std::format("({} ) >/dev/null 2>&1 &", command);
-    LOG_INFO("Opening external editor: {}", command);
-    const int res = std::system(bg_cmd.c_str());
-    return res == 0;
-#endif
-}
-
-std::pair<std::string, int> EditorApp::find_class_script(const std::string& class_name) const {
-    if (class_name.empty() || !env_.has_project()) return {"", 0};
-
-    if (const auto it = class_scripts_cache_.find(class_name); it != class_scripts_cache_.end()) {
-        return it->second;
-    }
-
-    std::vector<fs::path> script_files;
-    const fs::path scripts_dir = env_.project_dir() / "scripts";
-    std::error_code ec;
-
-    if (fs::exists(scripts_dir, ec) && fs::is_directory(scripts_dir, ec)) {
-        for (const auto& entry : fs::recursive_directory_iterator(scripts_dir, ec)) {
-            if (entry.is_regular_file() && entry.path().extension() == ".plm") {
-                script_files.push_back(entry.path());
-            }
-        }
-    }
-
-    for (const auto& entry : fs::directory_iterator(env_.project_dir(), ec)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".plm") {
-            script_files.push_back(entry.path());
-        }
-    }
-
-    for (const fs::path& file : script_files) {
-        std::ifstream in(file);
-        if (!in) continue;
-        std::string line;
-        int line_num = 0;
-        while (std::getline(in, line)) {
-            ++line_num;
-            const std::size_t cpos = line.find("class ");
-            if (cpos != std::string::npos) {
-                if (cpos > 0 && !std::isspace(static_cast<unsigned char>(line[cpos - 1]))) continue;
-                std::size_t name_start = cpos + 6;
-                while (name_start < line.size() && std::isspace(static_cast<unsigned char>(line[name_start]))) {
-                    ++name_start;
-                }
-                if (line.substr(name_start, class_name.size()) == class_name) {
-                    const std::size_t after = name_start + class_name.size();
-                    if (after >= line.size() || std::isspace(static_cast<unsigned char>(line[after])) ||
-                        line[after] == ':' || line[after] == '(' || line[after] == '{') {
-                        auto res = std::make_pair(env_.relative(file), line_num);
-                        class_scripts_cache_[class_name] = res;
-                        return res;
-                    }
-                }
-            }
-        }
-    }
-    class_scripts_cache_[class_name] = {"", 0};
-    return {"", 0};
-}
-
-bool EditorApp::is_script_class(const std::string& class_name) const {
-    return !find_class_script(class_name).first.empty();
-}
-
-bool EditorApp::has_script_bound(NodeId id) const {
-    const ModelNode* n = doc_.model().get(id);
-    return n != nullptr && is_script_class(n->type);
-}
-
-std::pair<std::string, int> EditorApp::node_script(NodeId id) const {
-    const ModelNode* n = doc_.model().get(id);
-    return n != nullptr ? find_class_script(n->type) : std::pair<std::string, int>{"", 0};
-}
-
-std::vector<std::pair<std::string, std::string>> EditorApp::project_script_classes() const {
-    std::vector<std::pair<std::string, std::string>> result;
-    for (const ClassSpec& c : env_.classes().classes()) {
-        const auto [path, line] = find_class_script(c.name);
-        if (!path.empty()) {
-            result.emplace_back(c.name, path);
-        }
-    }
-    return result;
-}
-
-std::vector<std::string> EditorApp::find_script_classes_in_file(const fs::path& file) const {
-    std::vector<std::string> out;
-    std::ifstream in(file);
-    if (!in) return out;
-    std::string line;
-    while (std::getline(in, line)) {
-        const std::size_t cpos = line.find("class ");
-        if (cpos != std::string::npos) {
-            if (cpos > 0 && !std::isspace(static_cast<unsigned char>(line[cpos - 1]))) continue;
-            std::size_t name_start = cpos + 6;
-            while (name_start < line.size() && std::isspace(static_cast<unsigned char>(line[name_start]))) {
-                ++name_start;
-            }
-            std::size_t name_end = name_start;
-            while (name_end < line.size() && (std::isalnum(static_cast<unsigned char>(line[name_end])) || line[name_end] == '_')) {
-                ++name_end;
-            }
-            if (name_end > name_start) {
-                out.push_back(line.substr(name_start, name_end - name_start));
-            }
-        }
-    }
-    return out;
-}
-
-bool EditorApp::attach_script_file(NodeId id, const fs::path& file, std::string& error) {
-    const ModelNode* n = doc_.model().get(id);
-    if (n == nullptr) {
-        error = "Node not found";
-        return false;
-    }
-    const std::vector<std::string> classes = find_script_classes_in_file(file);
-    if (classes.empty()) {
-        error = std::format("No class found in '{}'", platform::utf8(file));
-        return false;
-    }
-    std::string chosen_class = classes.front();
-    if (env_.classes().find(chosen_class) == nullptr) {
-        reload_project_scripts();
-    }
-    if (env_.classes().find(chosen_class) == nullptr) {
-        error = std::format("Class '{}' not found after compilation", chosen_class);
-        return false;
-    }
-    if (!doc_.change_type(id, chosen_class)) {
-        error = doc_.error();
-        return false;
-    }
-    class_scripts_cache_.clear();
-    LOG_INFO("Bound script '{}' (class '{}') to '{}'", platform::utf8(file), chosen_class, n->name);
-    notify_ok(std::format("Bound class '{}' to '{}'.", chosen_class, n->name));
-    return true;
-}
-
-bool EditorApp::create_and_attach_script(NodeId id, const std::string& class_name, const fs::path& rel_path,
-                                        std::string& error) {
-    const ModelNode* n = doc_.model().get(id);
-    if (n == nullptr) {
-        error = "Node not found";
-        return false;
-    }
-    if (class_name.empty()) {
-        error = "Class name cannot be empty";
-        return false;
-    }
-    const ClassRegistry& reg = env_.classes();
-    std::string base_class = n->type;
-    const ClassSpec* current_cls = reg.find(n->type);
-    if (current_cls != nullptr && !find_class_script(n->type).first.empty() && !current_cls->base.empty()) {
-        base_class = current_cls->base;
-    }
-
-    const fs::path full_path = env_.resolve(rel_path.string());
-    std::error_code ec;
-    if (fs::exists(full_path, ec)) {
-        error = std::format("File '{}' already exists", rel_path.string());
-        return false;
-    }
-
-    fs::create_directories(full_path.parent_path(), ec);
-    std::ofstream out(full_path);
-    if (!out) {
-        error = std::format("Could not create file '{}': {}", rel_path.string(), std::error_code(errno, std::generic_category()).message());
-        return false;
-    }
-
-    out << "class " << class_name << " extends " << base_class << " {\n";
-    out << "    fn ready() {\n";
-    out << "    }\n\n";
-    out << "    fn update(dt: float) {\n";
-    out << "    }\n";
-    out << "}\n";
-    out.close();
-
-    reload_project_scripts();
-    class_scripts_cache_.clear();
-
-    if (!doc_.change_type(id, class_name)) {
-        error = doc_.error();
-        return false;
-    }
-
-    LOG_INFO("Created script '{}' and bound class '{}' to '{}'", rel_path.string(), class_name, n->name);
-    notify_ok(std::format("Bound '{}' ({}) to '{}'.", rel_path.string(), class_name, n->name));
-    open_in_external_editor(full_path, 1);
-    return true;
-}
-
-bool EditorApp::detach_script(NodeId id) {
-    const ModelNode* n = doc_.model().get(id);
-    if (n == nullptr) return false;
-    const ClassRegistry& reg = env_.classes();
-    const ClassSpec* cls = reg.find(n->type);
-    std::string base = "Node2D";
-    if (cls != nullptr && !cls->base.empty()) {
-        base = cls->base;
-    } else {
-        if (reg.is_a(n->type, "Control")) base = "Control";
-        else if (reg.is_a(n->type, "Node2D")) base = "Node2D";
-        else base = "Node";
-    }
-    const bool ok = doc_.change_type(id, base);
-    if (ok) {
-        LOG_INFO("Detached script from '{}' (type reverted to '{}')", n->name, base);
-        notify_ok(std::format("Detached script from '{}'.", n->name));
-    } else {
-        report_failure(doc_.error());
-    }
-    return ok;
-}
-
-void EditorApp::request_attach_script(NodeId id) {
-    attach_node_ = id;
-    dialog_ = Dialog::AttachScript;
-    dialog_opened_ = false;
-    attach_tab_ = 0;
-    attach_filter_.clear();
-    attach_error_.clear();
-    const ModelNode* n = doc_.model().get(id);
-    if (n != nullptr) {
-        new_script_class_ = n->name;
-        if (!new_script_class_.empty()) {
-            new_script_class_[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(new_script_class_[0])));
-        } else {
-            new_script_class_ = "CustomNode";
-        }
-        std::string fname = n->name;
-        std::transform(fname.begin(), fname.end(), fname.begin(), [](unsigned char c) { return std::tolower(c); });
-        if (fname.empty()) fname = "custom_node";
-        new_script_path_ = "scripts/" + fname + ".plm";
-    }
 }
 
 } // namespace cuervo::editor

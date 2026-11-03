@@ -1,0 +1,23 @@
+key,en,ar,ja
+title,CUERVO DUEL,مبارزة كويرفو,クエルボ・デュエル
+subtitle,Two ships and one arena,سفينتان وساحة واحدة,二隻の船とひとつのアリーナ
+press_fire,Press Fire when you are ready,اضغط زر الإطلاق عندما تكون جاهزًا,準備ができたら発射ボタンを押してください
+ready,Ready,جاهز,準備完了
+waiting,Waiting for the other player...,في انتظار اللاعب الآخر...,相手のプレイヤーを待っています...
+player,Player {0},اللاعب {0},プレイヤー{0}
+hits.zero,No hits,لا إصابات,ヒットなし
+hits.one,{0} hit,إصابة واحدة,{0}ヒット
+hits.two,{0} hits,إصابتان,{0}ヒット
+hits.few,{0} hits,{0} إصابات,{0}ヒット
+hits.many,{0} hits,{0} إصابة,{0}ヒット
+hits.other,{0} hits,{0} إصابة,{0}ヒット
+lead,Player {0} leads,اللاعب {0} في المقدمة,プレイヤー{0}がリード
+tied,All square,تعادل,同点
+winner,Player {0} wins!,فاز اللاعب {0}!,プレイヤー{0}の勝ち！
+rematch,Press Fire for a rematch,اضغط زر الإطلاق لمباراة جديدة,発射ボタンでもう一度対戦
+controls,Move: WASD or arrows   Fire: Space   Language: L,الحركة: WASD أو الأسهم   الإطلاق: مسافة   اللغة: L,移動: WASD か矢印　発射: スペース　言語: L
+language,Language,اللغة,言語
+language_name,English,العربية,日本語
+net_online,Online,متصل,オンライン
+net_offline,Offline,غير متصل,オフライン
+tick,Tick {0},الدورة {0},ティック{0}

@@ -88,4 +88,47 @@ private:
     std::vector<Entry> stack_;
 };
 
+// Heap memory profiler (DESIGN.md 5.10): samples the Pluma heap's counters
+// (pluma/heap.hpp heap_stats) once per tick. It reports live objects (and how
+// many of them are manual), the cycle collector's backlog and output, the
+// peak, and the growth since the first sample: a steady climb in `live` with
+// the collector keeping up (`collected` rising) is a leak through a long-lived
+// structure; a growing `suspects` backlog means the collector's budget is too
+// small for the garbage the game makes. The counters are process-wide (the
+// heap is shared by every VM), and sampling only reads them.
+class HeapProfiler {
+public:
+    static constexpr std::size_t history_size = 300;
+
+    struct Sample {
+        std::size_t live = 0;
+        std::size_t manual = 0;
+        std::size_t suspects = 0;
+        std::uint64_t collected = 0; // cumulative, as in HeapStats
+        std::uint64_t work = 0;
+    };
+
+    // Reads the heap counters now.
+    const Sample& sample();
+    void reset();
+
+    std::size_t samples() const { return count_; }
+    const Sample& first() const { return first_; }
+    const Sample& last() const { return last_; }
+    std::size_t peak_live() const { return peak_live_; }
+    std::size_t peak_suspects() const { return peak_suspects_; }
+    // Signed live-object growth since the first sample.
+    long long growth() const { return static_cast<long long>(last_.live) - static_cast<long long>(first_.live); }
+    // Live objects per sample, oldest first (the last `history_size`).
+    std::vector<std::size_t> live_history() const;
+    std::string report() const;
+
+private:
+    Sample first_{}, last_{};
+    std::size_t count_ = 0;
+    std::size_t peak_live_ = 0;
+    std::size_t peak_suspects_ = 0;
+    std::vector<std::size_t> ring_ = std::vector<std::size_t>(history_size, 0);
+};
+
 } // namespace pluma

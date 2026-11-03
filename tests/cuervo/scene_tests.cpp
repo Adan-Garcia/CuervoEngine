@@ -4,11 +4,18 @@
 
 #include <doctest.h>
 
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
 #include <format>
 #include <filesystem>
 #include <limits>
 
+#include "cuervo/core/hash.hpp"
 #include "cuervo/scene/scene_file.hpp"
 
 using namespace cuervo;
@@ -267,4 +274,164 @@ TEST_CASE("scene files: save_file / load_file and the shmup's menus") {
         REQUIRE_MESSAGE(parsed.has_value(), error);
         CHECK(*parsed == *doc);
     }
+}
+
+// ------------------------------------------------------------ text scenes (11.2c)
+
+namespace {
+
+std::filesystem::path unique_dir(const char* tag) {
+    static std::atomic<int> counter{0};
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    auto dir = std::filesystem::temp_directory_path() /
+               std::format("cuervo_{}_{}_{}", tag, stamp, counter.fetch_add(1));
+    std::filesystem::create_directories(dir);
+    return dir;
+}
+
+std::vector<std::filesystem::path> example_scenes() {
+    std::vector<std::filesystem::path> out;
+    for (const auto& e : std::filesystem::recursive_directory_iterator(CUERVO_EXAMPLES_DIR)) {
+        if (e.is_regular_file() && e.path().extension() == ".scene") out.push_back(e.path());
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+std::uint64_t state_hash(const SceneDoc& doc) {
+    const auto bytes = write_binary(doc);
+    StateHasher h;
+    h.bytes(bytes.data(), bytes.size());
+    return h.digest();
+}
+
+std::string slurp(const std::filesystem::path& p) {
+    std::ifstream in(p, std::ios::binary);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+} // namespace
+
+TEST_CASE("text scenes: every example scene dumps, parses and dumps identically") {
+    const auto scenes = example_scenes();
+    REQUIRE(scenes.size() >= 10);
+    for (const auto& path : scenes) {
+        std::string error;
+        auto doc = load_file(path, error);
+        REQUIRE_MESSAGE(doc.has_value(), error);
+        const std::string once = dump_text(*doc);
+        auto parsed = parse_text(once, error);
+        REQUIRE_MESSAGE(parsed.has_value(), path.string(), ": ", error);
+        CHECK_MESSAGE(*parsed == *doc, path.string());
+        CHECK_MESSAGE(dump_text(*parsed) == once, path.string());
+    }
+}
+
+TEST_CASE("text scenes: binary and text files load to the same state hash") {
+    const auto dir = unique_dir("scene_hash");
+    std::string error;
+    for (const auto& path : example_scenes()) {
+        auto doc = load_file(path, error);
+        REQUIRE_MESSAGE(doc.has_value(), error);
+        REQUIRE(save_file(dir / "t.scene", *doc, error, SaveFormat::Text));
+        REQUIRE(save_file(dir / "b.scene", *doc, error, SaveFormat::Binary));
+        auto t = load_file(dir / "t.scene", error);
+        auto b = load_file(dir / "b.scene", error);
+        REQUIRE_MESSAGE(t.has_value(), error);
+        REQUIRE_MESSAGE(b.has_value(), error);
+        CHECK(state_hash(*t) == state_hash(*b));
+        CHECK(state_hash(*t) == state_hash(*doc));
+        CHECK(slurp(dir / "t.scene").starts_with("scene version 2\n"));
+    }
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST_CASE("text scenes: floats round-trip exactly, including extremes") {
+    SceneDoc doc;
+    Node n;
+    n.type = "Node2D";
+    n.name = "n";
+    const float fl[] = {0.1f, 1.0f / 3.0f, 1e-38f, 3.4028235e38f, 1.4e-45f, -0.0f, 123456.789f, 16777217.0f};
+    for (std::size_t i = 0; i < std::size(fl); ++i) {
+        n.fields.push_back({std::format("f{}", i), "float", Value::number(fl[i], NumKind::F32)});
+    }
+    n.fields.push_back({"d", "f64", Value::number(0.1 + 0.2, NumKind::F64)});
+    n.fields.push_back({"big", "f64", Value::number(1.7976931348623157e308, NumKind::F64)});
+    n.fields.push_back({"tiny", "f64", Value::number(5e-324, NumKind::F64)});
+    n.fields.push_back({"v", "vec3", Value::vector({0.1f, -1e-30f, 7.0e10f})});
+    doc.nodes.push_back(n);
+    std::string error;
+    auto parsed = parse_text(dump_text(doc), error);
+    REQUIRE_MESSAGE(parsed.has_value(), error);
+    CHECK(state_hash(*parsed) == state_hash(doc));
+    CHECK(dump_text(*parsed) == dump_text(doc));
+}
+
+TEST_CASE("text scenes: the loader sniffs the format and rejects malformed text") {
+    const auto dir = unique_dir("scene_sniff");
+    std::string error;
+    REQUIRE(save_file(dir / "a.scene", sample(), error));
+    REQUIRE(save_file(dir / "b.scene", sample(), error, SaveFormat::Binary));
+    auto a = load_file(dir / "a.scene", error);
+    auto b = load_file(dir / "b.scene", error);
+    REQUIRE(a.has_value());
+    REQUIRE(b.has_value());
+    CHECK(*a == *b);
+    {
+        std::ofstream bad(dir / "c.scene", std::ios::binary);
+        bad << "node Panel \"p\" {\n";
+    }
+    CHECK_FALSE(load_file(dir / "c.scene", error).has_value());
+    CHECK(error.find("c.scene") != std::string::npos);
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST_CASE("text scenes: a three-way merge of two edits to a text scene is clean") {
+    if (std::system("git --version >/dev/null 2>&1") != 0 && std::system("git --version >nul 2>&1") != 0) {
+        WARN("git not available; merge test skipped");
+        return;
+    }
+    const auto dir = unique_dir("scene_merge");
+    const std::string d = "\"" + dir.string() + "\"";
+    auto git = [&](const std::string& args) { return std::system(("git -C " + d + " " + args).c_str()); };
+    REQUIRE(git("init -q") == 0);
+    REQUIRE(git("config user.email t@example.com") == 0);
+    REQUIRE(git("config user.name t") == 0);
+    REQUIRE(git("config core.autocrlf false") == 0);
+    REQUIRE(git("config commit.gpgsign false") == 0);
+
+    const SceneDoc base = sample();
+    std::string error;
+    const auto file = dir / "level.scene";
+    REQUIRE(save_file(file, base, error));
+    REQUIRE(git("add level.scene") == 0);
+    REQUIRE(git("commit -q -m base") == 0);
+    REQUIRE(git("branch -M main") == 0);
+    REQUIRE(git("checkout -q -b side") == 0);
+
+    // side: change the root's layer (the first field)
+    SceneDoc side = base;
+    side.nodes[0].fields[0].value = Value::integer(99);
+    REQUIRE(save_file(file, side, error));
+    REQUIRE(git("commit -q -am side") == 0);
+
+    // main: rename a node further down the file
+    REQUIRE(git("checkout -q main") == 0);
+    SceneDoc main_doc = base;
+    main_doc.nodes.back().name = "renamed";
+    REQUIRE(save_file(file, main_doc, error));
+    REQUIRE(git("commit -q -am main") == 0);
+
+    REQUIRE(git("merge -q side -m merge") == 0);
+    auto merged = load_file(file, error);
+    REQUIRE_MESSAGE(merged.has_value(), error);
+    CHECK(merged->nodes.back().name == "renamed");
+    CHECK(merged->nodes[0].fields[0].value.i == 99);
+    CHECK(merged->nodes.size() == base.nodes.size());
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
 }

@@ -5,7 +5,7 @@
 #include <string_view>
 
 #include "cuervo/platform/license.hpp"
-#include "editor/theme.hpp"
+#include "editor/imgui_theme.hpp"
 
 namespace cuervo::editor {
 

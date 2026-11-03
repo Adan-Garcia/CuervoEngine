@@ -1,10 +1,10 @@
 # cuervo-editor
 
-The Cuervo Engine editor (DESIGN.md 4.13): a standalone Dear ImGui application built on
-the engine. It opens, builds and saves scenes without writing code, and has an asset
+The Cuervo Engine editor (DESIGN.md 4.13): a standalone RmlUi application built on
+the engine (the previous Dear ImGui editor is deprecated and still available behind `--imgui`). It opens, builds and saves scenes without writing code, and has an asset
 browser, an input-map editor, play-in-editor with hot reload, replays, a debugger, a
-profiler and the tier migration report. It is desktop only (verified on Linux; Windows is
-experimental, see [STATUS.md](../docs/STATUS.md)); there is no web editor.
+profiler and the tier migration report. It is desktop only (verified on Linux; the Windows and macOS
+builds are not yet verified, see [STATUS.md](../docs/STATUS.md)); there is no web editor.
 
 ```sh
 cmake --build build/<dir> --target editor
@@ -33,6 +33,9 @@ build/<dir>/editor/cuervo-editor --project examples/shmup --scene scenes/title.s
 | `--screen welcome` | show the welcome screen even when a project is given (screenshots) |
 | `--layout <name>` | start in that saved layout (Default, Debugging, Minimal or yours) |
 | `--tool select\|move\|rotate\|scale`, `--select </a,/b>`, `--palette [query]` | start with that tool, those nodes selected, or the command palette open (screenshots of the gizmos and the palette) |
+| `--imgui` | the deprecated Dear ImGui editor (logs a warning; docking layouts, panels as OS windows, `--font-scale`, `--no-viewports`). Not available in a build configured with `-DCUERVO_EDITOR_IMGUI=OFF`: it then exits with "this build has no ImGui editor" |
+| `--rml-ui` | accepted and ignored: the RmlUi editor is the default. It honors the same switches: `--script-commands`, `--replay-verify`, `--select`, `--tool`, `--palette`, `--screen welcome`, `--layout` (a named RmlUi layout), `--tabs` (rail panes and drawer tabs: Scene, Assets, Search, Settings, Console, History, Profiler, Replay, Tiers, Input map, Debugger, Sprites). Not read: `--no-viewports`, `--font-scale`; the `undock`/`save-layout`/`expect-viewports` script steps are refused |
+| `--ui-events "move 10,20\|click 10,20\|key ctrl+o"` | post input events before the `--screenshot` (drag, menu and dialog states for the golden tests, tests/golden/README.md) |
 
 `--font` sets the font of the scene view's text (the game's font); the editor UI uses the
 brand fonts (below).
@@ -54,7 +57,7 @@ cuervo-editor --project examples/editor_level --theme dark --screenshot editor-d
 ```
 
 The editor is desktop-only: the web build (Emscripten) never configures `editor/`.
-`-DCUERVO_BUILD_EDITOR=OFF` skips it (and the Dear ImGui download) elsewhere too.
+`-DCUERVO_BUILD_EDITOR=OFF` skips it elsewhere too; `-DCUERVO_EDITOR_IMGUI=OFF` keeps the RmlUi editor and skips only the deprecated ImGui one (and its Dear ImGui download).
 
 ## Welcome screen
 
@@ -99,11 +102,19 @@ third-party notices.
 
 ## Layout and panels
 
-The editor uses **ImGui's docking branch** (`v1.92.9b-docking`, DESIGN.md 4.16
-"Clarified (Milestone 8.3)"). Every panel is a dockable window inside the one editor
+The editor uses **ImGui's docking branch** (`v1.92.9b-docking`, DESIGN.md 4.16). Every panel is a dockable window inside the one editor
 window: drag a tab to another dock or onto a dock's edge to split it, drag it into empty
 space to float it, drag it back to redock, drag the thin separators to resize. Floating
-panels stay inside the main window (multi-viewport, OS-level windows, is not enabled).
+panels become their own OS windows (ImGui's multi-viewport, DESIGN.md 4.13) when the device
+reports `Feature::MultiSurface` (Vulkan and GL; each window is an RHI surface, `imgui_rhi.cpp`)
+and the SDL3 backend can place windows (X11, Windows, macOS). Saved layouts keep each undocked
+window's screen position and size, and a window saved on a monitor that is gone is moved onto
+a visible one when the layout loads. On Wayland, WebGPU, or with `--no-viewports` panels stay
+inside the editor window (one log line says why). Limits: real-display (X11/Windows/macOS)
+behavior is not covered by CI, only the offscreen GL test `editor_viewports`. Command scripts have `undock <panel> <x> <y>`, `save-layout <name>`,
+`expect-viewports <n>` and `expect-viewport <panel> <x> <y>`; they open the editor window after
+the script's document edits and need the multi-window path. *View > Zoom In/Out* (and `--ui-scale`,
+`--font-scale`) scale the UI from 50% to 300%; 200% is covered by a test and a screenshot.
 The default arrangement is built with the DockBuilder API and is Godot-like (DESIGN.md
 7.2): **Scene** tree and **Assets** left, **Scene View** center, **Inspector** and
 **Debugger** right, **Console**, **Replay**, **Input Map**, **Tier Report**,
@@ -151,6 +162,30 @@ exit and restored at the next start. ImGui's own `imgui.ini` is switched off.
     node (prelude) that stores the scene's path and loads it when it enters the tree,
     so edits to that scene show up everywhere it is used. The view expands instances
     (the tree shows one node). A scene can't instance itself.
+- **Sprites.** (bottom dock) Previews the image, SVG or atlas frame the
+  selected `Sprite2D`, `AnimatedSprite2D` or `NinePatchRect` names (or the one you
+  double-clicked in Assets or dropped on the path field), through the same sprite library
+  the scene view draws with, at any zoom on a checkerboard. For a node: a frame picker
+  (atlas frames), *Use all frames* / *Add this frame* / *Clear* for an `AnimatedSprite2D`'s
+  frame list, and the four 9-slice margins as sliders with guide lines over the image.
+  For an image: **Slice sheet** (frame size, margin, spacing, name prefix, the grid drawn
+  over the image) and *Add to atlas* writes an `.atlas` source file (or adds to the
+  existing one); *Add whole image as a sprite* does the same for single images. Opening an
+  `.atlas` lists its sprites and sheets (with *Remove*), its frame names and *Save atlas*.
+  Every node edit is an undoable `set_field`, saved in the scene; the atlas tools run the
+  headless `AtlasEditor` (`sprite_tools.hpp`) that the `atlas` script commands use.
+- **Particles.** (bottom dock) Live tuning of the selected `Emitter2D`:
+  sliders grouped as Emission (pattern, count, interval, one shot, direction, spread),
+  Motion (speed, jitter, drag, spin, gravity), Life and Look (size, end scale, color, fade
+  to an end color), three presets (Sparks, Smoke, Ring burst), and a preview running the
+  emitter beside them. Edits are one undo step per drag and are saved in the scene with the
+  node. The preview (`particle_preview.hpp`) is an editor-side approximation that follows
+  the fields; the game's own emitter stays the reference.
+- **Importing from the OS.** Drop image (PNG, JPEG, QOI), SVG, sound (WAV, OGG, FLAC, MP3) or
+  font (TTF, OTF) files on the editor window: they are copied into `art/`, `sounds/` or
+  `fonts/` (a taken name gets `_2`, `_3`; nothing is overwritten), images are decoded to
+  check them, and the first image opens in Sprites and is revealed in Assets. Other files
+  are refused with a message.
 - **Console.** Every log line (engine, scripts' `print`, editor) with level toggles, a
   filter and auto-scroll.
 - **Assets.** The project folder: scenes, scripts, fonts, sounds, vector art, images,
@@ -180,7 +215,7 @@ exit and restored at the next start. ImGui's own `imgui.ini` is switched off.
 - **Tier Report.** The `cuervo-tools tier check` report for the project's tier or a target
   tier, *Run Again*, *Copy as Text*; click an entry to open its scene or show its file in
   Assets (path copied to the clipboard).
-- **Profiler.** (DESIGN.md 5.14 "Clarified (Phase 8 — Profiler)") *Record* turns on the
+- **Profiler.** (DESIGN.md 5.14) *Record* turns on the
   engine zones (`cuervo/core/profiler.hpp`) and, while playing, the script profiler
   (`pluma/profiler.hpp`); *Reset* clears both. Left: graphs of the last 300 frames' frame
   time and simulation time (the `tick` zone). Middle: the zone tree (`editor frame` >
@@ -274,6 +309,8 @@ Play, replay, input-map and asset commands:
 | `hold <action>`, `release <action>` | hold a project action on the following ticks |
 | `expect-tick <n>`, `expect-hash <hex>` | checks on the running game |
 | `print-hash` | logs `at tick N (state hash H)`, the runtime's wording, so a script can hand the hash to a test |
+| `preview`, `preview-clear` | start (or drop) the scene view's ready() preview: the open scene on its own session, `ready()` run, never ticked |
+| `expect-preview <node path> <field> <value>`, `expect-preview-tick <n>`, `expect-preview-nodes <n>` | a live node's field as the debugger shows it (`/` is the root); the preview's tick (always 0); its node count |
 | `expect-state stopped\|playing\|paused`, `expect-panic <text>`, `expect-clean` | the play state; a panic mentioning text (message, trace or locals); no unsaved scene changes |
 | `append-file <path> <text>`, `reload` | appends a line to a project file (a script edit); force a hot reload of the playing game (fails if it did not reload) |
 | `record start\|stop`, `record save <path>` | recording, and saving it as a replay |
@@ -282,6 +319,17 @@ Play, replay, input-map and asset commands:
 | `input add-axis\|remove-axis <axis>`, `input axis-source\|remove-axis-source <axis> <source>` | |
 | `input undo\|redo\|save`, `input expect <action> [bindings...]` | |
 | `asset mkdir <path>`, `asset rename <path> <name>`, `asset delete <path>`, `asset expect[-missing] <path>` | file operations |
+
+Sprite and import commands:
+
+| Command | |
+|---|---|
+| `atlas new <path>`, `atlas open <path>` | start an `.atlas` source file, or edit an existing one |
+| `atlas sprite <image> [name] [scale]` | add one image or SVG |
+| `atlas sheet <image> <frame w> <frame h> [prefix] [margin] [spacing]` | add a sprite sheet sliced by a grid (frames are `<prefix>_<n>`) |
+| `atlas save`, `atlas expect-frames [names...]` | write the file; check the frame list exactly |
+| `frames <node> <atlas> [prefix]` | make an `AnimatedSprite2D` play the atlas's frames (those starting with `prefix`) |
+| `drop <file on disk> [folder]` | what dropping an OS file on the window does (imports into the project) |
 
 Gizmo, multi-select, palette and history commands:
 

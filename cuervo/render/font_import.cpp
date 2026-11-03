@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <cstring>
 #include <map>
+#include <set>
 #include <thread>
 
 #include "cuervo/core/log.hpp"
+#include "cuervo/text/shaping.hpp"
 #include "cuervo/vector/imported_vector.hpp" // read_file
 
 #ifdef CUERVO_HAS_FONT_IMPORT
@@ -81,16 +83,49 @@ std::optional<FontAtlas> import_with_msdf(std::span<const std::byte> data, std::
             charset.add(cp);
         }
     }
+    // Shaped import: the atlas is keyed by glyph id. Codepoint -> glyph via the
+    // cmap, then the GSUB closure adds the forms shaping can produce.
+    const bool shaped = options.shaping && text::shaping_available();
+    if (options.shaping && !shaped) {
+        LOG_WARN("Font '{}': shaping requested but CUERVO_TEXT_SHAPING is off; importing per codepoint", name);
+    }
+    std::shared_ptr<text::ShapingFont> shaper;
+    std::multimap<std::uint32_t, std::uint32_t> codepoints_of_glyph; // glyph id -> codepoints (shaped mode)
+    msdf_atlas::Charset glyphset;
+    if (shaped) {
+        shaper = text::ShapingFont::create(data);
+        if (!shaper) {
+            LOG_ERROR("Font '{}': HarfBuzz could not parse the font", name);
+            return std::nullopt;
+        }
+        std::vector<std::uint32_t> seeds{0};
+        std::set<std::uint32_t> seen; // ranges may overlap
+        for (const auto& [first, last] : options.ranges) {
+            for (std::uint32_t cp = first; cp <= last && cp <= 0x10FFFF; ++cp) {
+                if (!seen.insert(cp).second) {
+                    continue;
+                }
+                if (const std::uint32_t g = shaper->glyph_for(cp)) {
+                    seeds.push_back(g);
+                    codepoints_of_glyph.emplace(g, cp);
+                }
+            }
+        }
+        for (std::uint32_t g : shaper->glyph_closure(seeds)) {
+            glyphset.add(static_cast<msdf_atlas::unicode_t>(g));
+        }
+    }
 
     // Font scale 1: geometry, advances, kerning and metrics in ems.
     std::vector<msdf_atlas::GlyphGeometry> glyphs;
     msdf_atlas::FontGeometry geometry(&glyphs);
-    const int loaded = geometry.loadCharset(face.handle, 1.0, charset);
+    const int loaded = shaped ? geometry.loadGlyphset(face.handle, 1.0, glyphset)
+                              : geometry.loadCharset(face.handle, 1.0, charset);
     if (loaded <= 0) {
         LOG_ERROR("Font '{}': none of the requested {} codepoints could be loaded", name, charset.size());
         return std::nullopt;
     }
-    if (static_cast<std::size_t>(loaded) < charset.size()) {
+    if (!shaped && static_cast<std::size_t>(loaded) < charset.size()) {
         LOG_DEBUG("Font '{}': {} of {} requested codepoints present", name, loaded, charset.size());
     }
     for (msdf_atlas::GlyphGeometry& glyph : glyphs) {
@@ -145,10 +180,11 @@ std::optional<FontAtlas> import_with_msdf(std::span<const std::byte> data, std::
                     bitmap(0, y), static_cast<std::size_t>(width) * 4);
     }
 
+    font.has_glyph_ids = true;
     std::multimap<int, std::uint32_t> codepoints_of_index; // several codepoints may share a glyph
     for (const msdf_atlas::GlyphGeometry& glyph : glyphs) {
         FontGlyph out;
-        out.codepoint = glyph.getCodepoint();
+        out.glyph_id = static_cast<std::uint32_t>(glyph.getIndex());
         out.advance = static_cast<float>(glyph.getAdvance());
         if (!glyph.isWhitespace()) {
             double l = 0, b = 0, r = 0, t = 0;
@@ -163,11 +199,31 @@ std::optional<FontAtlas> import_with_msdf(std::span<const std::byte> data, std::
             out.atlas_top = static_cast<float>(height - t);
             out.atlas_bottom = static_cast<float>(height - b);
         }
-        font.glyphs.push_back(out);
-        codepoints_of_index.emplace(glyph.getIndex(), out.codepoint);
+        std::vector<std::uint32_t> mapped;
+        if (shaped) {
+            const auto range = codepoints_of_glyph.equal_range(out.glyph_id);
+            for (auto it = range.first; it != range.second; ++it) {
+                mapped.push_back(it->second);
+            }
+        } else {
+            mapped.push_back(glyph.getCodepoint());
+        }
+        if (mapped.empty()) {
+            font.extra_glyphs.push_back(out); // reachable only through shaping
+        }
+        for (std::uint32_t cp : mapped) {
+            out.codepoint = cp;
+            font.glyphs.push_back(out);
+            codepoints_of_index.emplace(glyph.getIndex(), cp);
+        }
     }
     std::sort(font.glyphs.begin(), font.glyphs.end(),
               [](const FontGlyph& a, const FontGlyph& b) { return a.codepoint < b.codepoint; });
+    std::sort(font.extra_glyphs.begin(), font.extra_glyphs.end(),
+              [](const FontGlyph& a, const FontGlyph& b) { return a.glyph_id < b.glyph_id; });
+    if (shaped) {
+        font.shaping_data.assign(data.begin(), data.end());
+    }
 
     for (const auto& [pair, advance] : geometry.getKerning()) {
         const auto firsts = codepoints_of_index.equal_range(pair.first);
@@ -182,6 +238,7 @@ std::optional<FontAtlas> import_with_msdf(std::span<const std::byte> data, std::
         return a.first != b.first ? a.first < b.first : a.second < b.second;
     });
 
+    font.prepare_shaping();
     if (std::string invalid = validate_font_atlas(font); !invalid.empty()) {
         LOG_ERROR("Font '{}': imported atlas is invalid: {}", name, invalid);
         return std::nullopt;

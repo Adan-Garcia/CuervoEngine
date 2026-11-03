@@ -1,0 +1,49 @@
+engine zones (per frame, last 300 frames)
+frame: 0.942 ms avg, 3.125 ms max over 300 frames
+  zone                                avg ms    max ms  calls/f
+  frame                                0.939     3.123     1.00
+    simulation                         0.134     0.178     1.00
+      tick                             0.132     0.173     1.00
+        scripts                        0.131     0.171     1.00
+          coroutines                   0.000     0.001     1.00
+          update                       0.051     0.077     1.00
+          particles                    0.007     0.015     1.00
+            simulate                   0.000     0.001     1.00
+            spawn                      0.000     0.000     1.00
+            colliders                  0.003     0.009     1.00
+            hits                       0.000     0.001     1.00
+          on_hit                       0.000     0.000     1.00
+          areas                        0.000     0.001     1.00
+          scene flush                  0.021     0.032     2.00
+          physics                      0.002     0.013     1.00
+          gc                           0.007     0.015     1.00
+    render                             0.772     2.958     1.00
+      begin_frame                      0.012     0.061     1.00
+      draw                             0.522     0.610     1.00
+      flush                            0.220     2.431     1.00
+    end_frame                          0.022     0.086     1.00
+script time: 746.859 ms in 59 function(s)
+  function                                                 calls     self ms     incl ms  % self
+  Canvas.text (cuervo/core.plm:175)                        13510     279.062     279.062   37.4%
+  Canvas.sprite (cuervo/core.plm:201)                       8281      94.231      94.231   12.6%
+  Hud.draw (scripts/duel.plm:83)                            1200      57.662     476.458    7.7%
+  Duel.update (scripts/duel.plm:181)                        1200      32.567      43.808    4.4%
+  Canvas.nine_patch (cuervo/core.plm:208)                   5226      21.560      21.560    2.9%
+  Node.update_tree (cuervo/scene.plm:145)                   7200      21.438      76.045    2.9%
+  Locale.format_int (cuervo/locale.plm:45)                  8657      20.338      20.338    2.7%
+  Node.draw_tree (cuervo/scene.plm:159)                     7200      19.054     660.504    2.6%
+  Locale.tr_args (cuervo/locale.plm:41)                     6257      18.823      18.823    2.5%
+  Hud.panel (scripts/duel.plm:70)                           4142      14.715      32.189    2.0%
+  AnimatedSprite2D.draw (cuervo/nodes.plm:317)              2400      14.317      36.556    1.9%
+  ShotLayer.draw (scripts/duel.plm:43)                      1200      13.517      21.706    1.8%
+  Hud.overlay (scripts/duel.plm:124)                         542      12.809      78.644    1.7%
+  Locale.tr (cuervo/locale.plm:39)                          6692      12.713      12.713    1.7%
+  Node2D.inherits_transform (cuervo/scene.plm:240)         10800      10.997      16.139    1.5%
+  Locale.tr_plural (cuervo/locale.plm:43)                   2400      10.816      10.816    1.4%
+  Sprite2D.draw (cuervo/nodes.plm:223)                      1200       7.822      99.003    1.0%
+  Input.held_by (cuervo/core.plm:124)                      10918       7.725       7.725    1.0%
+  Node2D.draw_tree (cuervo/scene.plm:233)                   6000       7.126     651.827    1.0%
+  Hud.player_name (scripts/duel.plm:79)                     3484       6.732      26.613    0.9%
+  ... 39 more
+heap over 1200 samples: live 228 (peak 228, +0 since start), manual 0, collector backlog 14 (peak 18), 0 collected, 140291 work units
+trace written to trace.json (28800 events, 0 dropped)

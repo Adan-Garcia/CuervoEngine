@@ -413,7 +413,13 @@ TEST_CASE("editor: a level built only from editor operations loads and runs like
     REQUIRE_MESSAGE(r.ok, "level.cmds:" << r.line << ": " << r.error);
     CHECK(r.saved);
     // The checked-in level is exactly what the operations produce.
-    CHECK(read_bytes(out) == read_bytes(project / "scenes" / "level.scene"));
+    // (The editor writes new files as text; the checked-in one may be either form.)
+    std::string load_error;
+    const auto made = scene::load_file(out, load_error);
+    const auto kept = scene::load_file(project / "scenes" / "level.scene", load_error);
+    REQUIRE_MESSAGE(made.has_value(), load_error);
+    REQUIRE_MESSAGE(kept.has_value(), load_error);
+    CHECK(*made == *kept);
 
     // The scene view's preview builds it (no ready(), no ticks) and lays out UI.
     env.rebuild_preview(doc.model().to_doc());

@@ -3,6 +3,8 @@
 #include <charconv>
 
 #include "cuervo/core/log.hpp"
+#include "cuervo/core/profiler.hpp"
+#include "cuervo/profile/trace.hpp"
 #include "cuervo/math/simd.hpp"
 #include "cuervo/platform/platform.hpp"
 
@@ -29,6 +31,18 @@ void cpu_relax() {
 // polling across those gaps avoids a futex wake-up per batch. Wall-clock
 // timing here only affects speed, never results.
 constexpr int spin_iterations = 4000;
+
+// One task; while a trace capture runs (cuervo/profile/trace.hpp) its span
+// lands on the executing thread's timeline. Timestamps only observe.
+void run_task(void* fn_object, void (*fn)(void*, std::size_t), std::size_t task) {
+    if (!profile::job_spans_enabled()) {
+        fn(fn_object, task);
+        return;
+    }
+    const std::uint64_t start = profiler::clock_ns();
+    fn(fn_object, task);
+    profile::add_span("job", "job", start, profiler::clock_ns());
+}
 
 } // namespace
 
@@ -81,7 +95,7 @@ void JobSystem::drain(Batch& batch) {
     for (;;) {
         const std::size_t task = batch.next.fetch_add(1, std::memory_order_relaxed);
         if (task >= batch.task_count) break;
-        batch.fn(batch.fn_object, task);
+        run_task(batch.fn_object, batch.fn, task);
         // Release: the task's writes happen-before the caller's acquire of
         // `done`, so the caller sees every task's results.
         batch.done.fetch_add(1, std::memory_order_release);
@@ -92,7 +106,7 @@ void JobSystem::drain(Batch& batch) {
 void JobSystem::run_erased(std::size_t task_count, void* fn_object, TaskFn fn) {
     if (task_count == 0) return;
     if (workers_.empty() || task_count == 1 || t_in_task) {
-        for (std::size_t task = 0; task < task_count; ++task) fn(fn_object, task);
+        for (std::size_t task = 0; task < task_count; ++task) run_task(fn_object, fn, task);
         return;
     }
     Batch batch;

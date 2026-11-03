@@ -1,0 +1,11 @@
+# Reload-persistence smoke project (tools/web/persist_smoke.mjs): counts how
+# many times the page was started, through the Save API.
+name = "PersistSmoke"
+main = "Game"
+virtual_size = [320, 180]
+tick_rate = 60
+seed = 1
+render_tier = "compatible"
+
+[scene]
+transform_hierarchy = false

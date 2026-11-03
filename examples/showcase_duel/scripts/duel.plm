@@ -1,0 +1,255 @@
+// Cuervo Duel: two ships, one arena, over the network (docs/NETWORK.md) or on one screen.
+//
+//  * Networking: nothing here reads the network. Each player's input arrives as
+//    Input.held_by(player, action), so the same script plays offline, in lockstep or rollback and
+//    replays from its recording.
+//  * Sprites: every image is a frame of assets/duel.atlas (built from the PNGs in assets/art by
+//    tools/make_art.py), so the whole scene draws from one atlas page. The ships are
+//    AnimatedSprite2D nodes, the background a Sprite2D, the panels 9-slice.
+//  * Localization: the HUD is text from locale/strings.csv (English, Arabic, Japanese; shaped and
+//    mirrored for right-to-left). Each player cycles their OWN language with the `lang` action; the
+//    choice is simulation state (so a replay and a rollback agree on it) but only the locale of this
+//    machine's player is ever applied, and Locale itself stays out of the state hash.
+//  * Post-processing: bloom and vignette plus shaders/grade.glsl, set in project.toml.
+
+var COLORS = [Color.hex("7fe6ff"), Color.hex("ffb86b")]
+var LOCALES = ["en", "ar", "ja"]
+var ATLAS = "assets/duel.atlas"
+var WIN_HITS = 7
+// A globals-only digest of the match: the state hash covers script globals, so the two peers and
+// a replay prove they agree on positions, hits and phase through it.
+var checksum = 0
+
+// The match state. Statics are script globals, so the hash covers them.
+class W {
+    static var phase = 0 // 0 menu, 1 playing, 2 over
+    static var tick = 0
+    static var pos = [vec2(120.0, 180.0), vec2(520.0, 180.0)]
+    static var shots = List<vec2>()
+    static var dirs = List<float>()
+    static var sparks = List<vec2>()
+    static var spark_age = List<int>()
+    static var hits = [0, 0]
+    static var cooldown = [0, 0]
+    static var ready = [0, 0]
+    static var countdown = 0
+    static var lang = [0, 0]
+    static var moving = [0, 0]
+}
+
+// Draws the bullets and the hit sparks from the atlas.
+class ShotLayer extends Node2D {
+    fn draw(g: Canvas) {
+        for s in W.shots {
+            g.sprite(ATLAS, s, frame = "bullet")
+        }
+        var i = 0
+        while i < W.sparks.len() {
+            var life = 1.0 - (W.spark_age[i] as float) / 14.0
+            g.sprite(ATLAS, W.sparks[i], frame = "spark", scale = vec2(1.0 + (1.0 - life), 1.0 + (1.0 - life)),
+                tint = Color { r = 1.0, g = 1.0, b = 1.0, a = life })
+            i += 1
+        }
+    }
+}
+
+// The HUD: 9-slice panels and localized, shaped text. It reads the simulation and never writes it.
+class Hud extends Node2D {
+    fn me() -> int {
+        return clamp(Net.player(), 0, 1)
+    }
+
+    fn sync_locale() {
+        var want = LOCALES[W.lang[me()]]
+        if Locale.current() != want {
+            Locale.set_locale(want)
+        }
+    }
+
+    fn panel(g: Canvas, x: float, y: float, w: float, h: float) {
+        g.nine_patch(ATLAS, vec2(x, y), vec2(w, h), frame = "panel", margin_left = 8.0, margin_top = 8.0,
+            margin_right = 8.0, margin_bottom = 8.0)
+    }
+
+    fn hits_text(p: int) -> str {
+        return Locale.tr_plural(#hits, W.hits[p], [Locale.format_int(W.hits[p])])
+    }
+
+    fn player_name(p: int) -> str {
+        return Locale.tr_args(#player, [Locale.format_int(p + 1)])
+    }
+
+    fn draw(g: Canvas) {
+        sync_locale()
+        var white = Color.hex("ffffff")
+        var dim = Color.hex("a9bbd8")
+        // Right-to-left locales mirror the HUD: player 1's panel moves to the right edge.
+        var mirror = Locale.is_rtl()
+        for p in 0..2 {
+            var slot = mirror ? 1 - p : p
+            var x = 12.0 + (slot as float) * 454.0
+            panel(g, x, 10.0, 162.0, 52.0)
+            g.text(vec2(x + 81.0, 17.0), player_name(p), size = 14.0, color = COLORS[p], align = #center)
+            g.text(vec2(x + 81.0, 36.0), hits_text(p), size = 16.0, color = white, align = #center)
+        }
+        // The standing, centered between the panels.
+        var standing = Locale.tr(#tied)
+        if W.hits[0] > W.hits[1] {
+            standing = Locale.tr_args(#lead, [Locale.format_int(1)])
+        } else if W.hits[1] > W.hits[0] {
+            standing = Locale.tr_args(#lead, [Locale.format_int(2)])
+        }
+        g.text(vec2(320.0, 20.0), standing, size = 14.0, color = dim, align = #center)
+        var net = Net.connected() ? Locale.tr(#net_online) : Locale.tr(#net_offline)
+        g.text(vec2(320.0, 40.0), net + "  " + Locale.tr_args(#tick, [Locale.format_int(W.tick)]), size = 11.0,
+            color = dim, align = #center)
+
+        // The language chip, bottom right (bottom left when mirrored).
+        var lx = mirror ? 12.0 : 466.0
+        panel(g, lx, 304.0, 162.0, 44.0)
+        g.text(vec2(lx + 81.0, 310.0), Locale.tr(#language), size = 11.0, color = dim, align = #center)
+        g.text(vec2(lx + 81.0, 324.0), Locale.tr(#language_name), size = 16.0, color = white, align = #center)
+        g.text(vec2(320.0, 336.0), Locale.tr(#controls), size = 11.0, color = dim, align = #center)
+
+        if W.phase == 0 {
+            overlay(g, Locale.tr(#title), Locale.tr(#subtitle), Locale.tr(#press_fire))
+        } else if W.phase == 2 {
+            var champ = W.hits[0] > W.hits[1] ? 1 : 2
+            overlay(g, Locale.tr_args(#winner, [Locale.format_int(champ)]), "", Locale.tr(#rematch))
+        }
+    }
+
+    // The menu and the result card: a 9-slice panel, two ready buttons (also 9-slice) and text.
+    fn overlay(g: Canvas, title: str, sub: str, hint: str) {
+        panel(g, 120.0, 92.0, 400.0, 172.0)
+        g.text(vec2(320.0, 108.0), title, size = 30.0, color = Color.hex("ffffff"), align = #center)
+        g.text(vec2(320.0, 150.0), sub, size = 14.0, color = Color.hex("a9bbd8"), align = #center)
+        g.text(vec2(320.0, 176.0), hint, size = 14.0, color = Color.hex("ffffff"), align = #center, max_width = 370.0)
+        var mirror = Locale.is_rtl()
+        for p in 0..2 {
+            var slot = mirror ? 1 - p : p
+            var x = 150.0 + (slot as float) * 175.0
+            var lit = W.ready[p] == 1
+            g.nine_patch(ATLAS, vec2(x, 210.0), vec2(165.0, 40.0), frame = lit ? "button" : "panel",
+                margin_left = 8.0, margin_top = 8.0, margin_right = 8.0, margin_bottom = 8.0)
+            var label = player_name(p)
+            if lit {
+                label = label + "  " + Locale.tr(#ready)
+            }
+            g.text(vec2(x + 82.0, 221.0), label, size = 14.0, color = lit ? Color.hex("ffffff") : COLORS[p],
+                align = #center)
+        }
+    }
+}
+
+class Duel extends Node {
+    var ships = List<AnimatedSprite2D>()
+
+    fn ready() {
+        Locale.load("locale/strings.csv")
+        Locale.set_fallback("en")
+        var bg = Sprite2D()
+        bg.asset = ATLAS
+        bg.frame = "bg"
+        bg.centered = false
+        bg.filter = #linear
+        add_child(bg)
+        add_child(ShotLayer())
+        for p in 0..2 {
+            var ship = AnimatedSprite2D()
+            ship.asset = ATLAS
+            ship.frames = AnimatedSprite2D.sequence(p == 0 ? "ship_a" : "ship_b", 2)
+            ship.fps = 10.0
+            ship.flip_h = p == 1
+            ship.position = W.pos[p]
+            ships.push(ship)
+            add_child(ship)
+        }
+        add_child(Hud())
+    }
+
+    fn reset_match() {
+        W.pos = [vec2(120.0, 180.0), vec2(520.0, 180.0)]
+        W.hits = [0, 0]
+        W.shots.clear()
+        W.dirs.clear()
+        W.sparks.clear()
+        W.spark_age.clear()
+    }
+
+    fn update(dt: float) {
+        W.tick += 1
+        for p in 0..2 {
+            if Input.pressed_by(p, #lang) {
+                W.lang[p] = (W.lang[p] + 1) % 3
+            }
+            // The menu and the result card wait for both players to press Fire.
+            if W.phase != 1 && Input.pressed_by(p, #shoot) {
+                W.ready[p] = 1
+            }
+        }
+        // The first Fire starts a short countdown so the other player can join in; both ready starts at once.
+        if W.phase != 1 && (W.ready[0] == 1 || W.ready[1] == 1) {
+            W.countdown += 1
+            if W.countdown >= 45 || (W.ready[0] == 1 && W.ready[1] == 1) {
+                reset_match()
+                W.ready = [0, 0]
+                W.countdown = 0
+                W.phase = W.phase == 0 ? 1 : 0
+            }
+        }
+        for p in 0..2 {
+            var move = vec2(0.0, 0.0)
+            if Input.held_by(p, #left) { move = vec2(move.x - 1.0, move.y) }
+            if Input.held_by(p, #right) { move = vec2(move.x + 1.0, move.y) }
+            if Input.held_by(p, #up) { move = vec2(move.x, move.y - 1.0) }
+            if Input.held_by(p, #down) { move = vec2(move.x, move.y + 1.0) }
+            var next = W.pos[p] + move * (180.0 * dt)
+            W.pos[p] = vec2(clamp(next.x, 24.0, 616.0), clamp(next.y, 70.0, 296.0))
+            ships[p].position = W.pos[p]
+            // The flame flickers only while the ship moves.
+            W.moving[p] = move.length() > 0.0 ? 1 : 0
+            ships[p].playing = W.moving[p] == 1
+            if W.cooldown[p] > 0 { W.cooldown[p] -= 1 }
+            if W.phase == 1 && Input.held_by(p, #shoot) && W.cooldown[p] == 0 {
+                W.cooldown[p] = 12
+                W.shots.push(W.pos[p])
+                W.dirs.push(p == 0 ? 1.0 : -1.0)
+            }
+        }
+        var i = 0
+        while i < W.shots.len() {
+            W.shots[i] = vec2(W.shots[i].x + W.dirs[i] * 6.0, W.shots[i].y)
+            var target = W.dirs[i] > 0.0 ? 1 : 0
+            var gone = W.shots[i].x < 0.0 || W.shots[i].x > 640.0
+            if (W.shots[i] - W.pos[target]).length() < 18.0 {
+                W.hits[1 - target] += 1
+                W.sparks.push(W.pos[target])
+                W.spark_age.push(0)
+                W.pos[target] = vec2(W.pos[target].x, 80.0 + Random.range(0.0, 200.0))
+                gone = true
+                if W.hits[1 - target] >= WIN_HITS {
+                    W.phase = 2
+                }
+            }
+            if gone {
+                W.shots.remove(i)
+                W.dirs.remove(i)
+            } else {
+                i += 1
+            }
+        }
+        i = 0
+        while i < W.sparks.len() {
+            W.spark_age[i] += 1
+            if W.spark_age[i] >= 14 {
+                W.sparks.remove(i)
+                W.spark_age.remove(i)
+            } else {
+                i += 1
+            }
+        }
+        checksum = (checksum * 31 + (W.pos[0].x as int) + 7 * (W.pos[1].x as int) + 13 * (W.pos[1].y as int)
+            + 1000 * W.hits[0] + W.hits[1] + 17 * W.phase + 19 * W.lang[0] + 23 * W.lang[1]) % 1000003
+    }
+}

@@ -23,7 +23,7 @@
 #include "cuervo/core/log.hpp"
 #include "cuervo/platform/platform.hpp"
 #include "editor/app.hpp"
-#include "editor/theme.hpp"
+#include "editor/imgui_theme.hpp"
 #include "editor/panels.hpp"
 
 namespace cuervo::editor {
@@ -41,6 +41,7 @@ ImVec4 kind_color(AssetKind k) {
         case AssetKind::Sound: return theme::im(ui.warning);
         case AssetKind::Vector: return theme::im(ui.link);
         case AssetKind::Image: return theme::im(ui.info);
+        case AssetKind::Atlas: return theme::im(ui.link);
         case AssetKind::Replay: return theme::im(ui.warning);
         case AssetKind::Project: return theme::im(ui.danger);
         case AssetKind::Other: break;
@@ -178,6 +179,9 @@ private:
             case AssetKind::Scene: app.request_open_scene(e.path); break;
             case AssetKind::Replay: app.start_replay(e.path); break;
             case AssetKind::Script: app.open_in_external_editor(app.env().resolve(e.path)); break;
+            case AssetKind::Image:
+            case AssetKind::Atlas:
+            case AssetKind::Vector: app.show_sprite_asset(e.path); break;
             default: app.open_location(e.path, 0); break;
         }
     }

@@ -271,3 +271,50 @@ TEST_CASE("SdfBatcher append hands out writable instances after earlier ones") {
     CHECK(batch.instances()[0].half_size.x() == 3.0f);
     CHECK(batch.instances()[3].center.x() == 2.0f);
 }
+
+TEST_CASE("SdfBatcher blend runs: one draw per run, pipelines created on first use") {
+    RecordingDevice device;
+    SdfBatcher batch;
+    REQUIRE(batch.init(device, 16));
+    REQUIRE(device.pipelines.size() == 1); // Normal only
+    CHECK(batch.blend() == SdfBlend::Normal);
+
+    batch.circle({0, 0}, 1, {1, 1, 1, 1});
+    batch.circle({1, 0}, 1, {1, 1, 1, 1});
+    batch.set_blend(SdfBlend::Additive);
+    batch.circle({2, 0}, 1, {1, 1, 1, 1});
+    batch.set_blend(SdfBlend::Screen);
+    batch.circle({3, 0}, 1, {1, 1, 1, 1});
+    batch.circle({4, 0}, 1, {1, 1, 1, 1});
+    batch.set_blend(SdfBlend::Normal);
+    batch.circle({5, 0}, 1, {1, 1, 1, 1});
+    batch.flush(Affine2{}, 1.0f);
+
+    REQUIRE(device.draws.size() == 4);
+    CHECK(device.draws[0].first_instance == 0);
+    CHECK(device.draws[0].instance_count == 2);
+    CHECK(device.draws[1].first_instance == 2);
+    CHECK(device.draws[1].instance_count == 1);
+    CHECK(device.draws[2].first_instance == 3);
+    CHECK(device.draws[2].instance_count == 2);
+    CHECK(device.draws[3].first_instance == 5);
+    CHECK(device.draws[3].instance_count == 1);
+    REQUIRE(device.pipelines.size() == 3);
+    CHECK(device.pipelines[0].blend == rhi::BlendMode::Premultiplied);
+    CHECK(device.pipelines[1].blend == rhi::BlendMode::AdditivePremultiplied);
+    CHECK(device.pipelines[2].blend == rhi::BlendMode::Screen);
+    CHECK(device.draws[0].pipeline == device.draws[3].pipeline); // Normal is reused
+
+    // Runs set over an appended span, an empty run replaced, and clear() resets them.
+    batch.clear();
+    batch.set_blend(SdfBlend::Additive);
+    batch.set_blend(SdfBlend::Screen); // replaces the empty Additive run
+    const std::size_t base = batch.size();
+    batch.append(3);
+    batch.set_blend_from(base + 1, SdfBlend::Normal);
+    batch.set_blend_from(base + 1, SdfBlend::Additive); // same index: replaces
+    CHECK(batch.blend() == SdfBlend::Additive);
+    batch.clear();
+    CHECK(batch.blend() == SdfBlend::Normal);
+    batch.shutdown();
+}

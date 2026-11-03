@@ -26,14 +26,14 @@ def limit_text(lim):
     return f"{fmt_n(lim['particles'])} ({fmt_n(lo)} to {fmt_n(hi)})"
 
 
-def workload_table(rec):
+def workload_table(rec, key="workloads"):
     rows = ["| Build | Backend | Particles | FPS | frame p50 / p95 / p99 / max (ms) | sim ms/tick (mean / p95) | "
             "peak RSS (MB) | state hash |",
             "|---|---|---|---|---|---|---|---|"]
     for bt in sorted(rec["builds"]):
         b = rec["builds"][bt]
         for be in sorted(b["backends"]):
-            for wl, w in sorted(b["backends"][be].get("workloads", {}).items(), key=lambda kv: int(kv[0])):
+            for wl, w in sorted(b["backends"][be].get(key, {}).items(), key=lambda kv: int(kv[0])):
                 f, s = w["frame_ms"], w["sim_tick_ms"]
                 rows.append(f"| {bt} | {be} | {int(wl) // 1000}k | {w['fps']:.0f} | {fmt_ms(f['p50'])} / "
                             f"{fmt_ms(f['p95'])} / {fmt_ms(f['p99'])} / {fmt_ms(f['max'])} | "
@@ -46,7 +46,7 @@ def capacity_table(rec):
     rows = ["| Scene | Build | Backend | Particles at 60 fps (range of the runs) | Binds | Frame-time limit | "
             "CPU limit (sim tick p95) |",
             "|---|---|---|---|---|---|---|"]
-    for scene in ("dense", "sparse"):
+    for scene in ("dense", "sparse", "colliding"):
         for bt in sorted(rec["builds"]):
             b = rec["builds"][bt]
             for be in sorted(b["backends"]):
@@ -83,7 +83,8 @@ def export_table(rec):
 
 def main(argv):
     rec = json.load(open(argv[1], encoding="utf-8"))
-    for title, fn in (("Context", context_table), ("Workloads", workload_table), ("Capacity", capacity_table),
+    for title, fn in (("Context", context_table), ("Workloads", workload_table),
+                      ("Colliding workloads", lambda r: workload_table(r, "colliding_workloads")), ("Capacity", capacity_table),
                       ("Export sizes", export_table)):
         print(f"### {title}\n\n{fn(rec)}\n")
     return 0

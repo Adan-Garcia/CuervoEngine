@@ -121,7 +121,7 @@ stripped player (always Release), for a real release.
 
 ## Stripped players
 
-`tools/cuervo_tools/player.{hpp,cpp}` (DESIGN.md 4.11 "Clarified (Milestone 7.5)").
+`tools/cuervo_tools/player.{hpp,cpp}` (DESIGN.md 4.11).
 The pack's manifest records the features the game
 needs (`detect_features`, `[features]` in project.toml overrides it). Export
 builds a player with exactly those:
@@ -191,7 +191,7 @@ Limits:
   is verified in headless Chrome (`tools/web/smoke_test.mjs`): it must run
   the pack and match the full engine's state hash. No Chrome: the export
   fails unless `--no-verify`.
-- **Windows** (on a Windows host, milestone 10.5a): the same definitions, built with the
+- **Windows** (on a Windows host): the same definitions, built with the
   tools' own generator and compilers into `%LOCALAPPDATA%\cuervo\players` (the `player`
   target: GUI subsystem). MSVC builds need the developer prompt's environment (`INCLUDE`,
   `LIB`); without it the toolchain counts as missing. The verification run opens a real
@@ -220,8 +220,8 @@ runtime.
 Web (emscripten 6.0.12, Release `-O2`): the payload that changes is
 `index.wasm` (`index.js` is ~244 KB either way). The full web player is the
 `web-pack` preset's runtime (every subsystem a web build has; never Vulkan).
-Every web player carries both render backends, WebGPU and WebGL2 (milestone
-10.3); WebGPU (emdawnwebgpu and the backend) adds about 0.87 MB to `index.wasm`
+Every web player carries both render backends, WebGPU and WebGL2;
+WebGPU (emdawnwebgpu and the backend) adds about 0.87 MB to `index.wasm`
 and 48 KB to `index.js`. The players are verified on SwiftShader, where the
 page gets no WebGPU adapter and so runs WebGL2.
 
@@ -363,7 +363,7 @@ node tools/web/smoke_test.mjs --dir dist-web --args "--screenshot /tmp/w.ppm" --
 
 ### Windows
 
-Milestone 10.5a (docs/WINDOWS.md). `export --platform windows` ships `cuervo-player.exe`
+See docs/WINDOWS.md. `export --platform windows` ships `cuervo-player.exe`
 as `<game>.exe` next to `game.pak` (see "Players" above). It is the GUI-subsystem build of
 the runtime, so the game opens no console window, and its log still reaches a redirected
 stdout. `export_shmup` and `export_tutorial` pass with the MSVC and MinGW-w64 players. Both

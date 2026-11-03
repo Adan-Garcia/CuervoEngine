@@ -23,10 +23,19 @@ layout(location = 0) out vec2 v_uv;
 layout(location = 1) flat out vec4 v_color;
 layout(location = 2) flat out float v_distance_range;
 
+// Authored colors are sRGB; with linear color (Globals.row0.w = 1, 4.19) shading
+// and blending happen in linear space, so convert once per instance here.
+vec4 working_color(vec4 c) {
+    if (globals.row0.w > 0.5) {
+        c.rgb = mix(c.rgb / 12.92, pow((c.rgb + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c.rgb));
+    }
+    return c;
+}
+
 void main() {
     vec3 world = vec3(i_origin + a_corner.x * i_axis_x + a_corner.y * i_axis_y, 1.0);
     gl_Position = vec4(dot(globals.row0.xyz, world), dot(globals.row1.xyz, world), 0.0, 1.0);
     v_uv = mix(i_uv.xy, i_uv.zw, a_corner);
-    v_color = i_color;
+    v_color = working_color(i_color);
     v_distance_range = i_distance_range;
 }

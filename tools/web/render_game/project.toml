@@ -1,0 +1,22 @@
+# Rendering smoke project (tools/web/render_smoke.mjs, milestone 11 web smoke): sprites
+# (PNG and WebP), a 9-slice panel, the built-in bloom/vignette post passes and shaped
+# Arabic text. Build:
+#   rhi_parity font <NotoSansArabic-Regular.ttf> /tmp/web_arabic.efont
+#   cmake --preset web -B build/render-web -DCUERVO_WEB_GAME=$PWD/tools/web/render_game \
+#         -DCUERVO_WEB_FONT_SOURCE=/tmp/web_arabic.efont
+name = "RenderSmoke"
+main = "Game"
+virtual_size = [320, 180]
+tick_rate = 60
+seed = 7
+clear_color = "10131f"
+render_tier = "compatible"
+
+[render.post]
+bloom = true
+bloom_threshold = 0.6
+bloom_intensity = 0.6
+vignette = 0.4
+
+[scene]
+transform_hierarchy = false

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -13,14 +14,20 @@
 #include "cuervo/render/light_batcher.hpp"
 #include "cuervo/render/mesh_batcher.hpp"
 #include "cuervo/render/sdf_batcher.hpp"
+#include "cuervo/render/sprite_batcher.hpp"
+#include "cuervo/assets/vfs.hpp"
+#include "cuervo/render/sprite_library.hpp"
 #include "cuervo/render/text_renderer.hpp"
 #include "cuervo/rhi/rhi.hpp"
 #include "cuervo/script/game_session.hpp"
 #include "cuervo/script/vector_cache.hpp"
 #include "editor/actions.hpp"
 #include "editor/asset_library.hpp"
+#include "editor/command_script.hpp"
 #include "editor/console_log.hpp"
+#include "editor/editor_controller.hpp"
 #include "editor/editor_document.hpp"
+#include "editor/editor_options.hpp"
 #include "editor/license_view.hpp"
 #include "editor/imgui_rhi.hpp"
 #include "editor/input_map_doc.hpp"
@@ -28,6 +35,7 @@
 #include "editor/messages.hpp"
 #include "editor/panels.hpp"
 #include "editor/play_controller.hpp"
+#include "editor/scene_preview.hpp"
 #include "editor/project_env.hpp"
 #include "editor/projects.hpp"
 #include "editor/settings.hpp"
@@ -42,55 +50,6 @@ using ImGuiID = unsigned int;
 // editor/README.md for usage, panels, shortcuts and the command format.
 namespace cuervo::editor {
 
-enum class SplashMode { Auto, On, Off };
-
-// The scene view's transform tool (DESIGN.md 4.16 "Clarified (Milestone 8.3)"): Q, W, E, R, B.
-enum class Tool { Select, Move, Rotate, Scale, Paint };
-const char* tool_name(Tool tool);
-
-struct EditorOptions {
-    std::string project;          // --project <dir>; none: the welcome screen picks one
-    std::string scene;            // --scene <path>: open this scene (project-relative or absolute)
-    rhi::Backend backend = rhi::Backend::OpenGL;
-    bool allow_fallback = true;   // no --backend: Vulkan, else GL
-    bool gl_es = false;
-    bool vsync = true;
-    std::string script_commands;  // --script-commands <file>: apply, save, exit (headless)
-    std::string screenshot;       // --screenshot <file.ppm>: capture the whole window, exit
-    int screenshot_frame = 6;     // frames rendered before the capture (layout settles)
-    double quit_after = 0.0;      // seconds; 0 = until closed
-    std::string font_path;        // UI and scene text
-    // --view <x>,<y>,<zoom>: start the scene view there instead of framing
-    // the game screen (screenshots of a zoomed view).
-    std::optional<vec3> view;
-    int width = 1600;
-    int height = 900;
-    // --replay-verify <file>: play a replay back headless, compare every
-    // tick's state hash, exit 1 at the first mismatch (no window).
-    std::string replay_verify;
-    unsigned jobs = 0;            // --jobs: job system threads for play sessions
-    bool audio = true;            // --no-audio: play sessions use the null audio backend
-    // --tabs <Title,Title>: bring these panels' tabs to the front at start
-    // (screenshots of the 6B panels).
-    std::vector<std::string> tabs;
-    // --theme light|dark: the brand theme (DESIGN.md 4.16); default the OS's.
-    std::optional<brand::Theme> theme;
-    // --splash: show the splash until a click or key (screenshots of it);
-    // --no-splash: never. Default: shown at start, except for screenshots.
-    SplashMode splash = SplashMode::Auto;
-    // --screen welcome: show the welcome screen even when a project is given (for screenshots/tests).
-    std::string screen;
-    // --tool select|move|rotate|scale, --select </a,/b>, --palette [query]: start in that
-    // state (screenshots of the gizmos and the palette).
-    std::optional<Tool> tool;
-    std::vector<std::string> select_paths;
-    std::optional<std::string> palette;
-    // --layout <name>: start in that saved layout.
-    std::string layout;
-    std::optional<float> ui_scale;    // --ui-scale <float>: UI spacing/size scale factor
-    std::optional<float> font_scale;  // --font-scale <float>: Font size scale factor
-};
-
 int run_editor(const EditorOptions& options);
 
 // State shared by the panels (they get it in Panel::draw).
@@ -103,7 +62,8 @@ public:
 
     int run();
 
-    EditorDocument& doc() { return doc_; }
+    EditorController& controller() { return ctl_; }
+    EditorDocument& doc() { return ctl_.doc(); }
     // The animation timeline's scrub (milestone 9.8): while `on`, the scene
     // view shows `player`'s clip `clip` at `tick` (ProjectEnv::preview_animation).
     struct AnimPreview {
@@ -114,42 +74,48 @@ public:
     };
     AnimPreview& anim_preview() { return anim_preview_; }
     // Rebuilds the scene view from the document next frame (drops a pose).
-    void refresh_preview() { preview_revision_ = ~std::uint64_t{0}; }
-    ProjectEnv& env() { return env_; }
-    ConsoleLog& console() { return console_; }
+    void refresh_preview() {
+        preview_revision_ = ~std::uint64_t{0};
+        ctl_.invalidate_ready_preview();
+    }
+    bool ready_preview_on() const { return ctl_.ready_preview_on(); }
+    void toggle_ready_preview() { ctl_.toggle_ready_preview(); }
+    ProjectEnv& env() { return ctl_.env(); }
+    ConsoleLog& console() { return ctl_.console(); }
     ViewCamera& camera() { return camera_; }
-    AssetLibrary& assets() { return assets_; }
-    InputMapDoc& input_map() { return input_map_; }
-    PlayController& play() { return play_; }
+    AssetLibrary& assets() { return ctl_.assets(); }
+    InputMapDoc& input_map() { return ctl_.input_map(); }
+    PlayController& play() { return ctl_.play(); }
     PanelRegistry& panels() { return panels_; }
     DeviceState& devices() { return devices_; }
-    ActionRegistry& actions() { return actions_; }
-    MessageCenter& messages() { return messages_; }
+    ActionRegistry& actions() { return ctl_.actions(); }
+    MessageCenter& messages() { return ctl_.messages(); }
     LayoutStore& layouts() { return layouts_; }
 
     // ---- 8.3: tools, palette, messages, layouts, projects
-    Tool tool() const { return tool_; }
-    void set_tool(Tool tool) { tool_ = tool; }
-    int paint_tile_id() const { return paint_tile_id_; }
-    void set_paint_tile_id(int id) { paint_tile_id_ = id; }
+    Tool tool() const { return ctl_.tool(); }
+    void set_tool(Tool tool) { ctl_.set_tool(tool); }
+    int paint_tile_id() const { return ctl_.paint_tile_id(); }
+    void set_paint_tile_id(int id) { ctl_.set_paint_tile_id(id); }
     // Snap to the grid / 15 degrees / 0.1 (Ctrl while dragging inverts it).
-    bool snap() const { return snap_; }
-    void set_snap(bool snap) { snap_ = snap; }
-    bool collision_shapes() const { return collision_shapes_; }
-    void set_collision_shapes(bool enabled) { collision_shapes_ = enabled; }
-    bool preview_lighting() const { return preview_lighting_; }
+    bool snap() const { return ctl_.snap(); }
+    void set_snap(bool snap) { ctl_.set_snap(snap); }
+    bool collision_shapes() const { return ctl_.collision_shapes(); }
+    void set_collision_shapes(bool enabled) { ctl_.set_collision_shapes(enabled); }
+    bool preview_lighting() const { return ctl_.preview_lighting(); }
+    void set_preview_lighting(bool on) { ctl_.set_preview_lighting(on); }
     // Ctrl+Shift+P; `query` pre-fills the search.
     void open_palette(std::string query = {});
     // A banner or toast in the kit's formula (messages.hpp); the console keeps the raw log line.
-    void notify(UserMessage message);
-    void notify_ok(std::string text);
+    void notify(UserMessage message) { ctl_.notify(std::move(message)); }
+    void notify_ok(std::string text) { ctl_.notify_ok(std::move(text)); }
     // Reports a failed document operation: a message plus a log line.
-    void report_failure(const std::string& raw);
+    void report_failure(const std::string& raw) { ctl_.report_failure(raw); }
     // Leaves this project: the welcome screen (empty path) or another project opens next.
-    void request_switch_project(std::string path = {});
-    bool run_action(std::string_view id);
-    bool switch_requested() const { return switch_requested_; }
-    const std::string& switch_target() const { return switch_target_; }
+    void request_switch_project(std::string path = {}) { ctl_.request_switch_project(std::move(path)); }
+    bool run_action(std::string_view id) { return ctl_.run_action(id); }
+    bool switch_requested() const { return ctl_.switch_requested(); }
+    const std::string& switch_target() const { return ctl_.switch_target(); }
     // Applies a saved layout by name (docks and visible panels).
     void apply_layout(const std::string& name);
     void save_layout_as(const std::string& name);
@@ -176,7 +142,7 @@ public:
 
     // ---- files
     // Opens a scene (asks first when the open one has unsaved changes).
-    void request_open_scene(const std::string& path);
+    void request_open_scene(const std::string& path) { ctl_.request_open_scene(path); }
     // A file:line link (tier report, console): scenes open, other files are
     // shown in the asset browser and their location copied to the clipboard.
     void open_location(const std::string& file, std::uint32_t line);
@@ -185,7 +151,7 @@ public:
     void reveal_asset(std::string path) { reveal_asset_ = std::move(path); }
     // Recompiles the project's scripts (class registry and preview) after
     // they change on disk while not playing.
-    void reload_project_scripts();
+    void reload_project_scripts() { ctl_.reload_project_scripts(); }
 
     // Dynamic UI & Font scaling
     void zoom_in();
@@ -195,28 +161,38 @@ public:
     void set_font_scale(float scale);
     float ui_scale() const;
     float font_scale() const;
-    EditorSettings& settings() { return settings_; }
-    const EditorSettings& settings() const { return settings_; }
+    EditorSettings& settings() { return ctl_.settings(); }
+    const EditorSettings& settings() const { return ctl_.settings(); }
 
     // Opens a script, document, or directory in the default code editor of the device.
-    bool open_in_external_editor(const std::filesystem::path& path, int line = 0);
+    bool open_in_external_editor(const std::filesystem::path& path, int line = 0) { return ctl_.open_in_external_editor(path, line); }
     // Searches project scripts for `class <class_name>`. Returns { relative_file_path, line_number }.
-    std::pair<std::string, int> find_class_script(const std::string& class_name) const;
-    bool is_script_class(const std::string& class_name) const;
-    bool has_script_bound(NodeId id) const;
-    std::pair<std::string, int> node_script(NodeId id) const;
-    std::vector<std::pair<std::string, std::string>> project_script_classes() const;
-    std::vector<std::string> find_script_classes_in_file(const std::filesystem::path& file) const;
-    bool attach_script_file(NodeId id, const std::filesystem::path& file, std::string& error);
-    bool create_and_attach_script(NodeId id, const std::string& class_name, const std::filesystem::path& rel_path,
-                                  std::string& error);
-    bool detach_script(NodeId id);
-    void request_attach_script(NodeId id);
+    std::pair<std::string, int> find_class_script(const std::string& c) const { return ctl_.find_class_script(c); }
+    bool is_script_class(const std::string& c) const { return ctl_.is_script_class(c); }
+    bool has_script_bound(NodeId id) const { return ctl_.has_script_bound(id); }
+    std::pair<std::string, int> node_script(NodeId id) const { return ctl_.node_script(id); }
+    std::vector<std::pair<std::string, std::string>> project_script_classes() const { return ctl_.project_script_classes(); }
+    std::vector<std::string> find_script_classes_in_file(const std::filesystem::path& f) const { return ctl_.find_script_classes_in_file(f); }
+    bool attach_script_file(NodeId id, const std::filesystem::path& file, std::string& error) { return ctl_.attach_script_file(id, file, error); }
+    bool create_and_attach_script(NodeId id, const std::string& class_name, const std::filesystem::path& rel_path, std::string& error) {
+        return ctl_.create_and_attach_script(id, class_name, rel_path, error);
+    }
+    bool detach_script(NodeId id) { return ctl_.detach_script(id); }
+    void request_attach_script(NodeId id) { ctl_.request_attach_script(id); }
 
     // Logs a rejected edit (EditorDocument::error) to the console.
-    void report(bool ok);
+    void report(bool ok) { ctl_.report(ok); }
+    // ---- 11.7c: raster tooling. The Sprites panel shows this image or atlas next
+    // (the Assets panel sets it on double-click), and previews through the same
+    // SpriteLibrary the scene view draws with.
+    void show_sprite_asset(std::string path);
+    // OS files dropped on the window (SDL_EVENT_DROP_FILE ... DROP_COMPLETE): imports the
+    // supported ones (file_import.hpp), reports each, and shows the first image.
+    void import_dropped_files(const std::vector<std::filesystem::path>& files);
+    std::string take_sprite_request() { return std::exchange(sprite_request_, {}); }
+    render::SpriteRef sprite_preview(std::string_view asset, std::string_view frame);
     // Opens the class picker; the chosen class becomes a child of `parent`.
-    void request_add_child(NodeId parent);
+    void request_add_child(NodeId parent) { ctl_.request_add_child(parent); }
     // Frames the virtual screen in the scene view.
     void frame_scene() { frame_request_ = true; }
     bool take_frame_request() { return std::exchange(frame_request_, false); }
@@ -235,6 +211,7 @@ private:
     bool open_window(std::string& error);
     void open_initial_scene();
     int run_script();
+    void run_ui_steps();
     int run_replay_verify();
     void poll_assets();
     void update_play(double seconds);
@@ -251,17 +228,17 @@ private:
     void add_app_actions();
     void restore_user_state();
     void save_user_state();
-    void save_current_scene();
+    void save_current_scene() { ctl_.save_current_scene(); }
+    void apply_prompt();
     void handle_shortcuts();
     void update_title();
     void render_splash(ivec2 size, double now);
     void shutdown();
 
+    // The UI-free session (editor_controller.hpp): document, project, play, actions, messages.
+    EditorController ctl_;
     EditorOptions options_;
-    ConsoleLog console_;
     std::optional<render::FontAtlas> font_atlas_;
-    ProjectEnv env_;
-    EditorDocument doc_;
     Window window_;
     std::unique_ptr<rhi::Device> device_;
     render::SdfBatcher shapes_;
@@ -270,9 +247,24 @@ private:
     // Sprites (Canvas.vector) in the scene view and the game view.
     render::MeshBatcher meshes_;
     script::VectorCache vectors_{meshes_};
+    // Raster sprites (Sprite2D family) in the scene view and the game view.
+    render::SpriteBatcher sprite_batcher_;
+    render::SpriteLibrary sprite_library_;
     render::FontHandle font_;
     ImGuiRenderer imgui_renderer_;
     bool imgui_ready_ = false;
+    bool viewports_on_ = false;       // ImGui multi-viewport (undocked panels in their own OS windows)
+    // Window steps from a command script (undock, save-layout, expect-viewports), run one every few
+    // frames once the window has settled; a failed expectation ends the run with an error.
+    std::vector<UiStep> ui_steps_;
+    std::size_t ui_step_next_ = 0;
+    std::uint64_t ui_step_wait_ = 0;  // frames_ value before which no step runs
+    bool ui_failed_ = false;
+    std::map<std::string, std::pair<float, float>> undock_requests_; // panel title -> screen position, applied by draw_docks
+    std::string sprite_request_;
+    std::vector<std::filesystem::path> dropped_;
+    std::shared_ptr<assets::Vfs> sprite_vfs_;
+    std::filesystem::path sprite_vfs_dir_;
     PanelRegistry panels_;
     ViewCamera camera_;
     bool frame_request_ = true;
@@ -289,43 +281,27 @@ private:
     double splash_start_ = 0.0;
 
     // 6B: assets, input map, play-in-editor.
-    AssetLibrary assets_;
-    InputMapDoc input_map_;
-    PlayController play_;
+    // 11.7a: the scene view draws a ready()-run, never-ticked session instead of the edit-time preview.
     DeviceState devices_;
     bool game_input_ = false;
     rhi::Rect game_rect_{};
     vec2 last_pointer_{0.0f, 0.0f};
+    double clock_ = 0.0;
     double last_time_ = 0.0;
     double last_poll_ = 0.0;
     bool panic_seen_ = false;
     std::string reveal_asset_;
-    std::string pending_open_;
 
-    // 8.3 state.
-    Tool tool_ = Tool::Move;
-    int paint_tile_id_ = 0;
-    bool snap_ = false;
-    bool collision_shapes_ = true;
-    // The scene view shows the scene's 2D lights (milestone 9.8); off draws it unlit.
-    bool preview_lighting_ = true;
-    ActionRegistry actions_;
     std::size_t actions_classes_ = 0; // the class count the "Add Node" actions were built for
-    MessageCenter messages_;
     LayoutStore layouts_;
     Layout layout_;                   // the window's docks and panels right now
     RecentProjects recents_;
-    EditorSettings settings_;
     bool palette_open_ = false;
     bool palette_request_ = false;
     std::string palette_query_;
     int palette_index_ = 0;
-    bool switch_requested_ = false;
-    std::string switch_target_;
     std::string layout_name_input_;
-    double clock_ = 0.0;
     LicenseView license_view_;
-    bool discard_switch_ = false;     // the discard dialog was opened by a project switch
     // Docking (ImGui docking branch): a layout to apply at the next draw_docks.
     std::string pending_dock_;        // ImGui ini text to load
     bool rebuild_dock_ = false;       // rebuild the default arrangement from the fractions
@@ -345,7 +321,6 @@ private:
     std::string new_script_class_;
     std::string new_script_path_;
     std::string attach_error_;
-    mutable std::map<std::string, std::pair<std::string, int>> class_scripts_cache_;
 };
 
 } // namespace cuervo::editor

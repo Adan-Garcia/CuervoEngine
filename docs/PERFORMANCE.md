@@ -33,7 +33,7 @@ each by default, and keeps the median of the runs:
 - the live particle count (one SDF shape per particle);
 - peak resident memory of the process (POSIX `wait4`; skipped on Windows);
 - the **frame-time cliff ratio**: the slowest one-second window's mean frame time over the
-  median window's, worst of the runs (the runtime's `bench windows |` line, milestone 10.4). A
+  median window's, worst of the runs (the runtime's `bench windows |` line). A
   steady run stays near 1; a stretch of slow seconds that the percentiles average away shows
   up here;
 - the **state hash** at tick 600 of a scripted capture run, once with the default job count
@@ -76,7 +76,7 @@ but reports timings as information.
 
 ### Web
 
-Milestone 10.4: `--web <web runtime dir>` runs the same workloads in headless Chrome on the real
+Web: `--web <web runtime dir>` runs the same workloads in headless Chrome on the real
 GPU (`tools/web/smoke_test.mjs --gpu`), on WebGPU or on the WebGL2 fallback (`--no-webgpu`), and
 stores them under `builds.web`. `--build-dir` then only provides `cuervo-tools`, which packs each
 project next to a copy of the page. It needs the emsdk's Node (or `CUERVO_NODE`) and Chrome.
@@ -102,7 +102,7 @@ What differs from a native run:
 - the web clock is `performance.now()`: SDL's counter advanced in whole milliseconds in the
   browser, so every web frame used to measure 16 or 17 ms.
 
-## Reading a baseline file## Reading a baseline file
+## Reading a baseline file
 
 ```json
 {
@@ -168,7 +168,7 @@ smoke test).
 | Export sizes (player, pack) | +5% | sizes are exact; growth is a decision |
 | Capacity, CPU limit | -15% | strict: it is machine-comparable |
 | Capacity, frame-time limit | -25% | GPU bound, so loose |
-| Frame-time cliff ratio | at most 1.5 (absolute, the new record only) | a steady run has no slow stretch (milestone 10.4) |
+| Frame-time cliff ratio | at most 1.5 (absolute, the new record only) | a steady run has no slow stretch |
 
 Timings under 0.05 ms are reported as information only: a percentage of a few microseconds is
 noise. Timings, memory and capacity are only enforced on the same machine id.
@@ -234,7 +234,7 @@ by 20% at 50k, which is what the strict 15% check is for), and the second, at a 
 
 ### Web (WebGPU and WebGL2)
 
-Milestone 10.4, `builds.web` of the same file: the `web-pack-threads` runtime (emscripten
+The `builds.web` section of the same file: the `web-pack-threads` runtime (emscripten
 6.0.12, 8 job threads) in headless Google Chrome 156 on the RTX 3060 Ti, 1054x593, 4x MSAA.
 
 | Backend | Particles | FPS | frame p50 / p95 / p99 / max (ms) | sim ms/tick (mean / p95) | cliff ratio | state hash |
@@ -314,6 +314,41 @@ because they were already limited by the GPU, but they now also hold with the GL
 Debug builds: Vulkan dense 230 000 to 290 000 and sparse 190 000 to 240 000, GL dense 280 000
 to 270 000 and sparse 280 000 to 290 000 (inside the spread). Vulkan is now ahead of GL at the
 capacity limit; before it was behind.
+
+### Colliding bullets (draw-only counts above do not apply)
+
+The dense and sparse figures above count particles that are only simulated and drawn. A bullet-hell
+game also tests every bullet against hitboxes each tick, which adds the collider build (a counting
+sort into the spatial hash) and the pair queries, so colliding counts are published and gated
+separately. `examples/bench_collide` fires the same kind of rings from random points over the whole
+screen (size-2 bullets, 20 to 120 px/s); every bullet is a collidable particle on layer 1, checked
+each tick against 96 circular enemy hitboxes (radius 18, about 10% of the screen) and passes through
+them, so the live count holds at the target and the hit lists stay busy. `tools/bench.py capacity
+--scenes colliding` searches it like the other scenes and `record` stores 10k/50k/100k runs under
+`colliding_workloads`, in `docs/perf/baseline-colliding-5800x3d-rtx3060ti-linux.json` (release,
+same machine and method as above, load average 1 to 2 while measuring; the Vulkan top probes ran
+while the load rose to about 4, which did not move the result, since the frame limit has the same
+range as the run before it).
+
+| Scene | Build | Backend | Colliding bullets at 60 fps (range of the runs) | Binds | Frame-time limit | CPU limit (sim tick p95) |
+|---|---|---|---|---|---|---|
+| colliding | release | gl | **400 000 (400 000 to 420 000)** | frame | 400 000 (400 000 to 420 000) | 480 000 (480 000 to 500 000) |
+| colliding | release | vulkan | **400 000 (400 000 to 420 000)** | frame | 400 000 (400 000 to 420 000) | 520 000 (480 000 to 540 000) |
+
+| Backend | Bullets | sim ms/tick (mean / p95) | frame p95 (ms) | state hash |
+|---|---|---|---|---|
+| gl | 10k | 0.44 / 0.46 | 0.13 | `6ce4eca58725ed59` |
+| gl | 50k | 1.62 / 1.72 | 0.32 | `1787c1f673dc0bd5` |
+| gl | 100k | 2.95 / 3.17 | 0.71 | `4d8c692dbb61427d` |
+| vulkan | 100k | 2.86 / 3.09 | 0.48 | `4d8c692dbb61427d` |
+
+Colliding capacity is about a quarter of the draw-only capacity (400 000 against 1 500 000 to
+1 900 000): the tick costs roughly 30 ns per bullet against about 5 ns for a draw-only particle. The
+simulation tick alone would hold 60 fps to 480 000 to 520 000 bullets; the frame binds slightly
+earlier. The state hash is identical across `--jobs 1/4/8`, `--simd off` and the two backends. One
+million colliding bullets (the stretch goal) is not reached: the tick would be about 30 ms, bound by
+the memory traffic of the counting sort in the collider build, which is already parallel. No
+collision code was changed for these figures.
 
 ### Export sizes
 
