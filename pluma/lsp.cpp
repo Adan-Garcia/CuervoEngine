@@ -3857,7 +3857,7 @@ std::vector<std::string> Server::handle_message(std::string_view json_payload) {
             {"capabilities", std::move(caps)},
             {"serverInfo", json::Value::object({
                                {"name", json::Value::string("pluma-lsp")},
-                               {"version", json::Value::string("0.3.0")},
+                               {"version", json::Value::string("0.3.1")},
                            })},
         });
         return {json::make_response(id, std::move(result))};

@@ -315,9 +315,14 @@ int run_rml_ui(const EditorOptions& o, bool continuous) {
     const auto face = [](const char* path, Rml::Style::FontWeight w = Rml::Style::FontWeight::Auto) {
         if (!Rml::LoadFontFace(path, false, w)) LOG_WARN("RmlUi: font '{}' failed to load", path);
     };
-    face(CUERVO_FONT_UI);
-    face(CUERVO_FONT_UI_BOLD, Rml::Style::FontWeight::Bold);
-    face(CUERVO_FONT_MONO);
+    // Packaged builds ship the fonts in <package>/assets/fonts; the compiled paths only exist in the build
+    // tree (find_asset tries the package layout first, so a CI build path never shadows it).
+    const auto font_path = [](std::string_view name, const char* fallback) {
+        return platform::utf8(platform::find_asset(std::string("fonts/") + std::string(name), fallback));
+    };
+    face(font_path("Figtree-Regular.ttf", CUERVO_FONT_UI).c_str());
+    face(font_path("Figtree-SemiBold.ttf", CUERVO_FONT_UI_BOLD).c_str(), Rml::Style::FontWeight::Bold);
+    face(font_path("JetBrainsMono-Regular.ttf", CUERVO_FONT_MONO).c_str());
 
     int w = 0, h = 0;
     SDL_GetWindowSizeInPixels(window.native(), &w, &h);
@@ -325,7 +330,8 @@ int run_rml_ui(const EditorOptions& o, bool continuous) {
     ctx->SetDensityIndependentPixelRatio(scale);
 
     // Generated tokens next to the (unedited) static files; {{TOKENS}} in the RML names them.
-    const fs::path src = fs::path(CUERVO_RML_DIR);
+    // The documents ship in <package>/assets/editor/rml (release workflow); CUERVO_RML_DIR is the source tree.
+    const fs::path src = platform::find_asset("editor/rml", CUERVO_RML_DIR);
     // One directory per run, so editors started together (or the tests in parallel) never share a tokens file.
     const fs::path tmp = fs::temp_directory_path() / std::format("cuervo_rml_{:x}", static_cast<unsigned long long>(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::error_code tmp_ec;

@@ -51,6 +51,11 @@ jobs:
           mkdir -p package/templates/linux
           cp build/release/runtime/cuervo package/templates/linux/
           cp -r assets package/
+          # The editor's UI documents (the editor finds them under assets/editor/rml; its compiled-in
+          # fallback is the CI source tree, which does not exist on a user's machine).
+          mkdir -p package/assets/editor/rml/script
+          cp editor/rml/*.rml editor/rml/*.rcss package/assets/editor/rml/
+          cp editor/rml/script/script.rcss package/assets/editor/rml/script/
           mkdir -p package/assets/fonts
           cp build/release/_deps/outfit-src/fonts/ttf/Outfit-Medium.ttf package/assets/fonts/ 2>/dev/null || true
           cp build/release/_deps/figtree-src/fonts/ttf/Figtree-*.ttf package/assets/fonts/ 2>/dev/null || true
@@ -151,6 +156,10 @@ jobs:
               Copy-Item "$env:SystemRoot\System32\$dll" -Destination package\templates\windows\
           }
           Copy-Item -Recurse assets -Destination package\
+          # The editor's UI documents (found under assets\editor\rml; see the Linux step).
+          New-Item -ItemType Directory -Force -Path package\assets\editor\rml\script | Out-Null
+          Copy-Item editor\rml\*.rml, editor\rml\*.rcss -Destination package\assets\editor\rml\
+          Copy-Item editor\rml\script\script.rcss -Destination package\assets\editor\rml\script\
           if (!(Test-Path package\assets\fonts)) { New-Item -ItemType Directory -Force -Path package\assets\fonts }
           Copy-Item build\msvc-release\_deps\outfit-src\fonts\ttf\Outfit-Medium.ttf -Destination package\assets\fonts\ -ErrorAction SilentlyContinue
           Copy-Item build\msvc-release\_deps\figtree-src\fonts\ttf\Figtree-*.ttf -Destination package\assets\fonts\ -ErrorAction SilentlyContinue
